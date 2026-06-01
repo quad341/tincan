@@ -154,7 +154,8 @@ class MessageBubble(QWidget):
             )
         elif btype == BubbleType.BODY_UNAVAILABLE:
             self.setAccessibleName(
-                f"Inbound: content unavailable — from {self._data.sender} at {self._data.timestamp}"
+                f"Inbound: content unavailable — from {self._data.sender}"
+                f" at {self._data.timestamp}"
             )
         elif btype == BubbleType.GROUP_UNKNOWN_SENDER:
             self.setAccessibleName(

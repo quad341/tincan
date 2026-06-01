@@ -119,7 +119,8 @@ class ConversationItem(QFrame):
     def set_selected(self, selected: bool) -> None:
         if selected:
             self.setStyleSheet(
-                f"background-color: {self._SELECTED_BG}; border: 1px solid {self._SELECTED_BORDER};"
+                f"background-color: {self._SELECTED_BG};"
+                f" border: 1px solid {self._SELECTED_BORDER};"
             )
         else:
             self.setStyleSheet("")
@@ -171,7 +172,8 @@ class MessageBubble(QFrame):
         bubble_layout.setContentsMargins(12, 8, 12, 8)
         bubble_layout.setSpacing(4)
 
-        body_text = "⚠ Message content unavailable — MAP did not return body" if unavailable else body
+        _UNAVAIL = "⚠ Message content unavailable — MAP did not return body"
+        body_text = _UNAVAIL if unavailable else body
         body_label = QLabel(body_text)
         body_label.setWordWrap(True)
         body_label.setStyleSheet(f"color: {fg};")

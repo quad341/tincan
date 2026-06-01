@@ -7,9 +7,9 @@ import os
 import subprocess
 import sys
 import time
+
 import dbus
 import dbus.mainloop.glib
-from gi.repository import GLib
 
 DEVICE_ADDR = os.environ["DEVICE_ADDR"]
 TEST_DURATION_S = 60

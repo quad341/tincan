@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from typing import Callable, Optional
+from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QKeyEvent

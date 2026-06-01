@@ -1,8 +1,8 @@
 """Conversation list sidebar: ConversationItem, ConversationListWidget."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from dataclasses import dataclass
+from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAccessible, QFont, QKeyEvent

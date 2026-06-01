@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+
 import dbus
 import dbus.mainloop.glib
 from gi.repository import GLib
@@ -60,7 +61,7 @@ except dbus.exceptions.DBusException as e:
 
 # 3. Subscribe to notification signal
 def on_notification_received(uid, app_id, title, message, subtitle=""):
-    print(f"\n--- ANCS Notification ---")
+    print("\n--- ANCS Notification ---")
     print(f"  UID:      {uid}")
     print(f"  AppID:    {app_id}")
     print(f"  Title:    {title}")

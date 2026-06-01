@@ -1,21 +1,19 @@
-"""Capability degradation banners: State A (disconnected), B (Show Notifications off), C (ANCS limited)."""
+"""Capability degradation banners: State A (disconnected), B (Show Notifications off), C (ANCS)."""
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from tincan_gui.capability_banner import CapabilityBanner
-
 
 # ---------------------------------------------------------------------------
 # State A: Disconnected
@@ -24,7 +22,10 @@ from tincan_gui.capability_banner import CapabilityBanner
 class StateABanner(CapabilityBanner):
     """Full-width disconnected banner (h=56, red border). Design: tincan-s42 §2 State A."""
 
-    MSG = "⊗ Connection lost — Bluetooth out of range · Showing cached conversations · reconnecting…"
+    MSG = (
+        "⊗ Connection lost — Bluetooth out of range"
+        " · Showing cached conversations · reconnecting…"
+    )
 
     def __init__(self, last_seen: str = "", parent: Optional[QWidget] = None) -> None:
         msg = self.MSG if not last_seen else (
@@ -48,7 +49,10 @@ class StateBBanner(QWidget):
     show_me_how_clicked = Signal()
 
     MSG_TITLE = "⚠ Messaging unavailable"
-    MSG_BODY = "Enable 'Show Notifications' on iPhone: Settings → Bluetooth → [device] → Show Notifications"
+    MSG_BODY = (
+        "Enable 'Show Notifications' on iPhone:"
+        " Settings → Bluetooth → [device] → Show Notifications"
+    )
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -99,7 +103,11 @@ class StateСBanner(QWidget):
 
     refresh_clicked = Signal()
 
-    MSG = "ℹ Real-time message delivery unavailable (ANCS not connected) · New messages appear after manual refresh · Send and conversation list still work."
+    MSG = (
+        "ℹ Real-time message delivery unavailable (ANCS not connected)"
+        " · New messages appear after manual refresh"
+        " · Send and conversation list still work."
+    )
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)

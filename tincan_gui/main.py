@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import sys
-from typing import Optional
-
 import warnings
+from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QShortcut

@@ -2,7 +2,7 @@
 """M0.1 — MAP inbox list and body fetch. Answers OQ-1, OQ-2."""
 import os
 import re
-import time
+
 import dbus
 import dbus.mainloop.glib
 from gi.repository import GLib
@@ -87,7 +87,12 @@ transfer_obj.connect_to_signal(
 )
 
 # 8. Run MainLoop — blocks until transfer completes or errors
-GLib.timeout_add_seconds(30, lambda: (print("TIMEOUT waiting for transfer"), loop.quit(), False)[2])
+def _on_timeout():
+    print("TIMEOUT waiting for transfer")
+    loop.quit()
+    return False
+
+GLib.timeout_add_seconds(30, _on_timeout)
 loop.run()
 
 
@@ -128,7 +133,7 @@ def parse_bmessage(path):
 filename = result.get("filename")
 if filename:
     msg = parse_bmessage(filename)
-    print(f"\n--- Fetched Message ---")
+    print("\n--- Fetched Message ---")
     print(f"  TYPE:   {msg['type']}")
     print(f"  FOLDER: {msg['folder']}")
     print(f"  SENDER: {msg['sender']}")

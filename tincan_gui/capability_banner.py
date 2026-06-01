@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtGui import QAccessible
-from PySide6.QtWidgets import QAccessibleWidget, QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAccessibleWidget, QLabel, QVBoxLayout, QWidget
 
 
 class CapabilityBanner(QWidget):
