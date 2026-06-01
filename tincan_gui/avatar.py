@@ -57,22 +57,17 @@ def _make_photo_pixmap(data: bytes, size: int) -> QPixmap:
         side, side,
     )
     px = px.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    # Mask to circle
-    mask = QPixmap(size, size)
-    mask.fill(Qt.transparent)
-    p = QPainter(mask)
+    # Clip to circle via DestinationIn: draw photo, then intersect with ellipse alpha
+    result = QPixmap(size, size)
+    result.fill(Qt.transparent)
+    p = QPainter(result)
     p.setRenderHint(QPainter.Antialiasing)
-    p.setBrush(Qt.white)
+    p.drawPixmap(0, 0, px)
+    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+    p.setBrush(Qt.black)
     p.setPen(Qt.NoPen)
     p.drawEllipse(0, 0, size, size)
     p.end()
-    result = QPixmap(size, size)
-    result.fill(Qt.transparent)
-    p2 = QPainter(result)
-    p2.setRenderHint(QPainter.Antialiasing)
-    p2.setClipRegion(mask.createMaskFromColor(Qt.black))
-    p2.drawPixmap(0, 0, px)
-    p2.end()
     return result
 
 

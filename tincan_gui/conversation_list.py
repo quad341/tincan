@@ -21,6 +21,16 @@ from PySide6.QtWidgets import (
 from tincan_gui.avatar import AvatarWidget
 
 
+class _SearchLineEdit(QLineEdit):
+    """QLineEdit that clears itself on Escape."""
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.clear()
+        else:
+            super().keyPressEvent(event)
+
+
 @dataclass
 class ConversationData:
     id: str
@@ -220,8 +230,8 @@ class ConversationListWidget(QWidget):
 
         layout.addWidget(header)
 
-        # Search / filter input
-        self._search = QLineEdit()
+        # Search / filter input (clears on Escape via _SearchLineEdit subclass)
+        self._search = _SearchLineEdit()
         self._search.setFixedHeight(32)
         self._search.setPlaceholderText("Filter conversations…")
         self._search.setAccessibleName("Filter conversations")
@@ -230,15 +240,6 @@ class ConversationListWidget(QWidget):
             " padding: 0 12px; background: #f9fafb; }"
         )
         self._search.textChanged.connect(self._on_filter_changed)
-
-        # Clear filter on Escape
-        def _search_key_press(event: QKeyEvent) -> None:
-            if event.key() in (Qt.Key.Key_Escape, Qt.Key_Escape):
-                self._search.clear()
-            else:
-                QLineEdit.keyPressEvent(self._search, event)
-
-        self._search.keyPressEvent = _search_key_press
         layout.addWidget(self._search)
 
         # No-results empty state (shown when filter has no matches)
