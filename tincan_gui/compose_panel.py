@@ -38,7 +38,9 @@ class _MessageInput(QPlainTextEdit):
     send_requested = Signal()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key_Return and not (event.modifiers() & Qt.ShiftModifier):
+        is_return = event.key() in (Qt.Key.Key_Return, Qt.Key_Return)
+        is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        if is_return and not is_shift:
             self.send_requested.emit()
         else:
             super().keyPressEvent(event)
@@ -128,6 +130,11 @@ class ComposePanel(QWidget):
             self.send_requested.emit(text)
             self._input.clear()
 
+    @property
+    def send_button(self):
+        """Expose send button for accessibility tests."""
+        return self._send_btn
+
     def set_compose_enabled(self, enabled: bool, reason: str = "") -> None:
         self._enabled = enabled
         self._disable_reason = reason
@@ -143,9 +150,9 @@ class ComposePanel(QWidget):
             )
             self._input.setToolTip("")
             self._send_btn.setToolTip("")
+            self._send_btn.setAccessibleName("Send SMS message")
         else:
-            disabled_style = "opacity: 0.4;"
-            self._input.setStyleSheet(disabled_style)
+            self._input.setStyleSheet("opacity: 0.4;")
             self._send_btn.setStyleSheet(
                 "QPushButton { background-color: #1d4ed8; color: #ffffff; "
                 "border-radius: 6px; font-size: 14px; opacity: 0.4; }"
@@ -153,3 +160,6 @@ class ComposePanel(QWidget):
             tooltip = f"Sending unavailable — {reason}" if reason else "Sending unavailable"
             self._input.setToolTip(tooltip)
             self._send_btn.setToolTip(tooltip)
+            self._send_btn.setAccessibleName(
+                f"Send unavailable — {reason}" if reason else "Send unavailable"
+            )

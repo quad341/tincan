@@ -4,8 +4,10 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QKeySequence, QShortcut
+import warnings
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -52,10 +54,15 @@ class TitleBar(QWidget):
         self._status_chip.setAccessibleName("Connection status: Disconnected")
         layout.addWidget(self._status_chip)
 
+    @property
+    def status_chip(self) -> QLabel:
+        """Expose status chip label for accessibility tests."""
+        return self._status_chip
+
     def set_connected(self, device_name: str) -> None:
         self._status_chip.setText(f"● Connected — {device_name}")
         self._status_chip.setStyleSheet("color: #86efac;")
-        self._status_chip.setAccessibleName(f"Connection status: Connected to {device_name}")
+        self._status_chip.setAccessibleName(f"Connection status: Connected — {device_name}")
 
     def set_disconnected(self) -> None:
         self._status_chip.setText("○ Disconnected")
@@ -65,6 +72,10 @@ class TitleBar(QWidget):
 
 class MainWindow(QMainWindow):
     """Top-level window: title bar + QSplitter(left 300px, right pane)."""
+
+    conversation_opened = Signal(object)
+    message_send_requested = Signal(str)
+    refresh_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -114,19 +125,31 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(splitter, stretch=1)
 
-        # Keyboard shortcuts
-        QShortcut(QKeySequence("Ctrl+1"), self, self._conv_list.setFocus)
-        QShortcut(QKeySequence("Ctrl+N"), self, self._compose._input.setFocus)
-        QShortcut(QKeySequence("F5"), self, self._on_refresh)
-        QShortcut(QKeySequence("Ctrl+R"), self, self._on_refresh)
+        # Keep QShortcut as fallback for platform-native shortcut routing
+        QShortcut(QKeySequence("Ctrl+1"), self).activated.connect(
+            lambda: self._conv_list.setFocus(Qt.ShortcutFocusReason)
+        )
+        QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(
+            lambda: self._compose._input.setFocus(Qt.ShortcutFocusReason)
+        )
+        QShortcut(QKeySequence("F5"), self).activated.connect(self.refresh_requested.emit)
+        QShortcut(QKeySequence("Ctrl+R"), self).activated.connect(self.refresh_requested.emit)
 
     def _wire(self) -> None:
         self._conv_list.conversation_selected.connect(self._on_conversation_selected)
         self._conv_list.focus_thread_requested.connect(self._compose._input.setFocus)
         self._compose.send_requested.connect(self._on_send)
 
+    @property
+    def conversation_list(self) -> ConversationListWidget:
+        return self._conv_list
+
+    @property
+    def compose_panel(self) -> ComposePanel:
+        return self._compose
+
     def _on_conversation_selected(self, conv_id: str) -> None:
-        # Stub: load sample messages for the selected conversation
+        self.conversation_opened.emit(conv_id)
         sample_messages = [
             MessageData(BubbleType.INBOUND, "Hey, are you around later?", "Alice", "10:14"),
             MessageData(BubbleType.OUTBOUND, "Yeah, free after 6", "", "10:15"),
@@ -134,21 +157,35 @@ class MainWindow(QMainWindow):
             MessageData(BubbleType.BODY_UNAVAILABLE, "", "Bob", "10:20"),
             MessageData(BubbleType.GROUP_UNKNOWN_SENDER, "Can everyone make it?", "?", "10:22"),
         ]
-        self._thread_view.load_thread(
-            "Alice",
-            "+1 555-0100",
-            sample_messages,
-            "SMS",
-        )
+        self._thread_view.load_thread("Alice", "+1 555-0100", sample_messages, "SMS")
         self._compose.set_compose_enabled(True)
 
     def _on_send(self, text: str) -> None:
-        # Stub: print until D-Bus wiring exists
+        self.message_send_requested.emit(text)
         print(f"[stub] send: {text!r}")
 
+    def _activate_and_focus(self, widget) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            QApplication.setActiveWindow(self)
+        widget.setFocus()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        key = event.key()
+        ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        if key == Qt.Key.Key_1 and ctrl:
+            self._activate_and_focus(self._conv_list)
+        elif key == Qt.Key.Key_N and ctrl:
+            self._activate_and_focus(self._compose._input)
+        elif key == Qt.Key.Key_F5:
+            self.refresh_requested.emit()
+        elif key == Qt.Key.Key_R and ctrl:
+            self.refresh_requested.emit()
+        else:
+            super().keyPressEvent(event)
+
     def _on_refresh(self) -> None:
-        # Stub: trigger conversation list refresh
-        print("[stub] refresh conversations")
+        self.refresh_requested.emit()
 
     def _load_stub_data(self) -> None:
         """Populate with placeholder data so the UI is visible on first launch."""
@@ -180,7 +217,6 @@ class MainWindow(QMainWindow):
             ),
         ]
         self._conv_list.load_conversations(conversations)
-        self._compose.set_compose_enabled(False, "no conversation selected")
 
 
 def main() -> None:

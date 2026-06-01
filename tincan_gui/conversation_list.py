@@ -5,8 +5,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QKeyEvent
+from PySide6.QtGui import QAccessible, QFont, QKeyEvent
 from PySide6.QtWidgets import (
+    QAccessibleWidget,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -70,12 +71,12 @@ class ConversationItem(QWidget):
         self._name_label.setFont(name_font)
         top_row.addWidget(self._name_label, stretch=1)
 
-        ts_label = QLabel(self._data.timestamp)
+        self._ts_label = QLabel(self._data.timestamp)
         ts_font = QFont()
         ts_font.setPointSize(11)
-        ts_label.setFont(ts_font)
-        ts_label.setStyleSheet("color: #6b7280;")
-        top_row.addWidget(ts_label)
+        self._ts_label.setFont(ts_font)
+        self._ts_label.setStyleSheet("color: #6b7280;")
+        top_row.addWidget(self._ts_label)
 
         text_col.addLayout(top_row)
 
@@ -144,6 +145,14 @@ class ConversationItem(QWidget):
         else:
             super().keyPressEvent(event)
 
+    def timestamp_label_color(self) -> str:
+        """Return the hex color applied to the timestamp label (used by a11y tests)."""
+        style = self._ts_label.styleSheet()
+        for part in style.split(";"):
+            if "color" in part:
+                return part.split(":")[1].strip()
+        return "#6b7280"
+
     @property
     def conversation_id(self) -> str:
         return self._data.id
@@ -157,6 +166,7 @@ class ConversationListWidget(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setFocusPolicy(Qt.StrongFocus)
         self._items: list[ConversationItem] = []
         self._selected_index: int = -1
         self._badge_dismissed = False
@@ -199,11 +209,11 @@ class ConversationListWidget(QWidget):
 
         layout.addWidget(header)
 
-        # Scrollable list area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
+        # Scrollable list area (stored as instance var to prevent Python GC of the wrapper)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setFrameShape(QFrame.NoFrame)
 
         self._list_container = QWidget()
         self._list_layout = QVBoxLayout(self._list_container)
@@ -211,8 +221,8 @@ class ConversationListWidget(QWidget):
         self._list_layout.setSpacing(0)
         self._list_layout.addStretch()
 
-        scroll.setWidget(self._list_container)
-        layout.addWidget(scroll, stretch=1)
+        self._scroll.setWidget(self._list_container)
+        layout.addWidget(self._scroll, stretch=1)
 
         # Footer
         footer = QLabel("↑ recent window only · not full history")
@@ -278,3 +288,24 @@ class ConversationListWidget(QWidget):
             self.focus_thread_requested.emit()
         else:
             super().keyPressEvent(event)
+
+    def select_index(self, index: int) -> None:
+        """Public API for tests: select conversation at index."""
+        self._select_index(index)
+
+    def current_index(self) -> int:
+        """Public API for tests: return the currently selected index."""
+        return self._selected_index
+
+
+# ---------------------------------------------------------------------------
+# Accessible role factory — ConversationItem → ListItem
+# ---------------------------------------------------------------------------
+
+def _conversation_list_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
+    if isinstance(obj, ConversationItem):
+        return QAccessibleWidget(obj, QAccessible.Role.ListItem)
+    return None
+
+
+QAccessible.installFactory(_conversation_list_factory)

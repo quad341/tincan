@@ -6,8 +6,9 @@ from enum import Enum, auto
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QAccessible, QFont
 from PySide6.QtWidgets import (
+    QAccessibleWidget,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -123,7 +124,8 @@ class MessageBubble(QWidget):
         meta_font = QFont()
         meta_font.setPointSize(10)
         meta.setFont(meta_font)
-        meta.setStyleSheet("color: #6b7280;")
+        self._meta_color = "#6b7280"
+        meta.setStyleSheet(f"color: {self._meta_color};")
         meta.setAlignment(meta_align)
         bubble_layout.addWidget(meta)
 
@@ -139,24 +141,42 @@ class MessageBubble(QWidget):
         if style["align"] == Qt.AlignLeft:
             outer.addStretch()
 
+    def metadata_label_color(self) -> str:
+        """Return the hex color applied to the metadata label (used by a11y tests)."""
+        return self._meta_color
+
     def _update_accessible(self) -> None:
         btype = self._data.bubble_type
-        if btype == BubbleType.INBOUND:
-            direction = "Inbound"
-            body = self._data.body
-        elif btype == BubbleType.OUTBOUND:
-            direction = "Outbound"
-            body = self._data.body
+        if btype == BubbleType.OUTBOUND:
+            # Outbound has no "from" — announce direction + body + time only
+            self.setAccessibleName(
+                f"Outbound: {self._data.body} — sent at {self._data.timestamp}"
+            )
         elif btype == BubbleType.BODY_UNAVAILABLE:
-            direction = "Inbound"
-            body = "content unavailable"
-        else:
-            direction = "Inbound"
-            body = self._data.body
+            self.setAccessibleName(
+                f"Inbound: content unavailable — from {self._data.sender} at {self._data.timestamp}"
+            )
+        elif btype == BubbleType.GROUP_UNKNOWN_SENDER:
+            self.setAccessibleName(
+                f"Inbound: {self._data.body} — from {self._data.sender} at {self._data.timestamp}"
+            )
+        else:  # INBOUND
+            self.setAccessibleName(
+                f"Inbound: {self._data.body} — from {self._data.sender} at {self._data.timestamp}"
+            )
 
-        self.setAccessibleName(
-            f"{direction}: {body} — from {self._data.sender} at {self._data.timestamp}"
-        )
+
+# ---------------------------------------------------------------------------
+# Accessible role factory — MessageBubble → StaticText
+# ---------------------------------------------------------------------------
+
+def _thread_view_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
+    if isinstance(obj, MessageBubble):
+        return QAccessibleWidget(obj, QAccessible.Role.StaticText)
+    return None
+
+
+QAccessible.installFactory(_thread_view_factory)
 
 
 class ThreadHeader(QWidget):
@@ -241,11 +261,12 @@ class ThreadView(QWidget):
     ) -> None:
         self._header.update_contact(name, phone, message_type)
 
-        # Clear existing bubbles (keep empty label and stretches)
+        # Clear existing bubbles; never deleteLater the empty label (keep Python ref valid)
         while self._messages_layout.count():
             item = self._messages_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w and w is not self._empty_label:
+                w.deleteLater()
 
         if not messages:
             self._messages_layout.addStretch()
@@ -258,11 +279,9 @@ class ThreadView(QWidget):
             bubble = MessageBubble(msg)
             self._messages_layout.addWidget(bubble)
 
-        # Scroll to latest
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, lambda: self._scroll.verticalScrollBar().setValue(
-            self._scroll.verticalScrollBar().maximum()
-        ))
+        # Scroll to latest (synchronous — avoids dangling timer after widget cleanup)
+        sb = self._scroll.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def show_empty(self) -> None:
         while self._messages_layout.count():
