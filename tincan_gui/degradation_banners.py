@@ -4,8 +4,9 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QAccessible, QFont
 from PySide6.QtWidgets import (
+    QAccessibleWidget,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (
 from tincan_gui.capability_banner import CapabilityBanner
 
 # ---------------------------------------------------------------------------
-# State A: Disconnected
+# State A: Disconnected — inherits CapabilityBanner → AlertMessage role via factory
 # ---------------------------------------------------------------------------
 
 class StateABanner(CapabilityBanner):
@@ -98,7 +99,7 @@ class StateBBanner(QWidget):
 # State C: ANCS unavailable
 # ---------------------------------------------------------------------------
 
-class StateСBanner(QWidget):
+class StateCBanner(QWidget):
     """Thin ANCS-unavailable banner (h=32, lime). Design: tincan-s42 §2 State C."""
 
     refresh_clicked = Signal()
@@ -136,3 +137,17 @@ class StateСBanner(QWidget):
         )
         refresh_btn.clicked.connect(self.refresh_clicked)
         layout.addWidget(refresh_btn)
+
+
+# ---------------------------------------------------------------------------
+# Accessible role factory — StateBBanner + StateCBanner → AlertMessage
+# (StateABanner inherits CapabilityBanner and is already covered by its factory)
+# ---------------------------------------------------------------------------
+
+def _degradation_banner_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
+    if isinstance(obj, (StateBBanner, StateCBanner)):
+        return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)
+    return None
+
+
+QAccessible.installFactory(_degradation_banner_factory)

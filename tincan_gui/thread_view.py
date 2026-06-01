@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAccessible, QFont
 from PySide6.QtWidgets import (
     QAccessibleWidget,
@@ -280,9 +280,17 @@ class ThreadView(QWidget):
             bubble = MessageBubble(msg)
             self._messages_layout.addWidget(bubble)
 
-        # Scroll to latest (synchronous — avoids dangling timer after widget cleanup)
-        sb = self._scroll.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        # Scroll to latest after Qt recomputes layout geometry
+        scroll_ref = self._scroll
+
+        def _scroll_to_bottom() -> None:
+            try:
+                sb = scroll_ref.verticalScrollBar()
+                sb.setValue(sb.maximum())
+            except RuntimeError:
+                pass  # widget deleted before deferred call ran
+
+        QTimer.singleShot(0, _scroll_to_bottom)
 
     def show_empty(self) -> None:
         while self._messages_layout.count():
