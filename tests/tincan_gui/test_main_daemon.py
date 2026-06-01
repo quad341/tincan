@@ -15,11 +15,8 @@ Coverage:
 """
 from __future__ import annotations
 
-import pytest
-
 from tincan_gui.main import MainWindow
-from tincan_gui.thread_view import BubbleType, MessageData, MessageBubble, ThreadView
-
+from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData, ThreadView
 
 # ---------------------------------------------------------------------------
 # Helpers

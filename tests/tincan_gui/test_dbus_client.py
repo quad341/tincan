@@ -11,10 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from tincan_gui.dbus_client import TincandClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -207,10 +204,10 @@ class TestTincandClientConstruction:
             mock_bus.isConnected.return_value = False
             mock_qdb.sessionBus.return_value = mock_bus
 
-            client = TincandClient()
+            TincandClient()
         # No exception → test passes
 
     def test_constructs_with_session_bus_available(self):
         # Construction in the normal test environment (D-Bus present, tincand absent)
-        client = TincandClient()
+        TincandClient()
         # Bus is connected; subscribe called; no crash

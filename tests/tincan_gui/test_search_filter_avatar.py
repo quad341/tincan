@@ -38,7 +38,6 @@ from __future__ import annotations
 import struct
 import zlib
 
-import pytest
 from PySide6.QtCore import Qt
 
 from tincan_gui.avatar import AvatarWidget, _make_photo_pixmap
@@ -47,7 +46,6 @@ from tincan_gui.conversation_list import (
     ConversationListWidget,
     _SearchLineEdit,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,7 +56,8 @@ def _make_1x1_png() -> bytes:
 
     def chunk(tag: bytes, data: bytes) -> bytes:
         body = tag + data
-        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        crc = struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        return struct.pack(">I", len(data)) + body + crc
 
     sig = b"\x89PNG\r\n\x1a\n"
     ihdr_data = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)  # 1×1, 8-bit, RGB

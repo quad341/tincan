@@ -48,7 +48,6 @@ from tincan_gui.main import MainWindow, TitleBar
 from tincan_gui.capability_banner import CapabilityBanner   ← new module
 """
 
-import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAccessible
 
@@ -57,11 +56,9 @@ from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import (
     ConversationData,
     ConversationItem,
-    ConversationListWidget,
 )
 from tincan_gui.main import MainWindow, TitleBar
 from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData
-
 
 # ---------------------------------------------------------------------------
 # §4.1 Metadata color applied on widget instances
