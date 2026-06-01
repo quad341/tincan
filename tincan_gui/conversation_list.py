@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAccessible, QFont, QKeyEvent
 from PySide6.QtWidgets import (
     QAccessibleWidget,
@@ -40,6 +40,7 @@ class ConversationData:
     timestamp: str
     unread: bool = False
     participant_count: int = 1
+    unread_count: int = 0  # tincan-bxs: from daemon Conversation dict
 
 
 class ConversationItem(QWidget):
@@ -97,50 +98,98 @@ class ConversationItem(QWidget):
 
         text_col.addLayout(top_row)
 
-        # Preview row
-        preview = self._data.preview
-        if len(preview) > 36:
-            preview = preview[:36] + "…"
-        self._preview_label = QLabel(preview)
+        # Preview row (tincan-33k)
+        self._preview_label = QLabel()
         prev_font = QFont()
         prev_font.setPointSize(12)
         self._preview_label.setFont(prev_font)
-        self._preview_label.setStyleSheet("color: #6b7280;")
         text_col.addWidget(self._preview_label)
 
         outer.addLayout(text_col, stretch=1)
 
-        # Unread dot (right side)
+        # Unread indicator (right side): dot + optional badge (tincan-yq1)
         self._dot = QLabel()
         self._dot.setFixedSize(10, 10)
         self._dot.setStyleSheet(
             f"background-color: {self._UNREAD_DOT_COLOR}; border-radius: 5px;"
         )
-        self._dot.setVisible(self._data.unread)
         outer.addWidget(self._dot, alignment=Qt.AlignVCenter)
 
+        self._badge_label = QLabel()
+        badge_font = QFont()
+        badge_font.setPointSize(10)
+        badge_font.setBold(True)
+        self._badge_label.setFont(badge_font)
+        self._badge_label.setStyleSheet(
+            f"color: #ffffff; background-color: {self._UNREAD_DOT_COLOR};"
+            " border-radius: 8px; padding: 0 5px;"
+        )
+        outer.addWidget(self._badge_label, alignment=Qt.AlignVCenter)
+
         self._apply_unread_style()
+        self._apply_preview()
 
     def _apply_unread_style(self) -> None:
-        if self._data.unread:
-            f = self._name_label.font()
-            f.setBold(True)
-            self._name_label.setFont(f)
+        count = self._data.unread_count
+        is_unread = count > 0 or self._data.unread
+        f = self._name_label.font()
+        f.setBold(is_unread)
+        self._name_label.setFont(f)
+        self._dot.setVisible(is_unread)
+        if count >= 10:
+            self._badge_label.setText("9+")
+            self._badge_label.setVisible(True)
         else:
-            f = self._name_label.font()
-            f.setBold(False)
-            self._name_label.setFont(f)
+            self._badge_label.setVisible(False)
+
+    def _apply_preview(self) -> None:
+        raw = self._data.preview
+        if raw:
+            direction = getattr(self._data, "preview_direction", "")
+            if direction == "outbound":
+                body = raw[:30] + "…" if len(raw) > 30 else raw
+                display = f"You: {body}"
+            else:
+                display = raw[:36] + "…" if len(raw) > 36 else raw
+            self._preview_label.setText(display)
+            self._preview_label.setStyleSheet("color: #6b7280;")
+            f = self._preview_label.font()
+            f.setItalic(False)
+            self._preview_label.setFont(f)
+            self._preview_label.setAccessibleName(raw)
+        else:
+            self._preview_label.setText("—")
+            self._preview_label.setStyleSheet("color: #9ca3af;")
+            f = self._preview_label.font()
+            f.setItalic(True)
+            self._preview_label.setFont(f)
+            self._preview_label.setAccessibleName("No preview available")
 
     def _update_accessible(self) -> None:
-        self.setAccessibleName(
+        full_preview = self._data.preview or ""
+        base = (
             f"Conversation with {self._data.name}, "
-            f"last message {self._data.preview[:36]}, "
+            f"last message: {full_preview}, "
             f"{self._data.timestamp}"
         )
-        if self._data.unread:
+        count = self._data.unread_count
+        if count > 0:
+            badge = "9+" if count >= 10 else str(count)
+            self.setAccessibleName(f"{base}, Unread: {badge}")
+        else:
+            self.setAccessibleName(base)
+        if self._data.unread or count > 0:
             self.setAccessibleDescription("Unread")
         else:
             self.setAccessibleDescription("")
+
+    def update_data(self, data: ConversationData) -> None:
+        """Update this item in-place from new ConversationData (tincan-yq1)."""
+        self._data = data
+        self._ts_label.setText(data.timestamp)
+        self._apply_unread_style()
+        self._apply_preview()
+        self._update_accessible()
 
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
@@ -191,6 +240,11 @@ class ConversationListWidget(QWidget):
         self._items: list[ConversationItem] = []
         self._selected_index: int = -1
         self._badge_dismissed = False
+        self._pending_updates: dict[str, ConversationData] = {}
+        self._update_timer = QTimer(self)
+        self._update_timer.setSingleShot(True)
+        self._update_timer.setInterval(200)
+        self._update_timer.timeout.connect(self._flush_updates)
         self._build()
 
     def _build(self) -> None:
@@ -359,6 +413,21 @@ class ConversationListWidget(QWidget):
             self.focus_thread_requested.emit()
         else:
             super().keyPressEvent(event)
+
+    def update_item(self, conv_id: str, data: ConversationData) -> None:
+        """Queue an in-place update for a single item; 200ms debounce (tincan-yq1)."""
+        self._pending_updates[conv_id] = data
+        if not self._update_timer.isActive():
+            self._update_timer.start()
+
+    def _flush_updates(self) -> None:
+        updates = self._pending_updates.copy()
+        self._pending_updates.clear()
+        for conv_id, data in updates.items():
+            for item in self._items:
+                if item.conversation_id == conv_id:
+                    item.update_data(data)
+                    break
 
     def select_index(self, index: int) -> None:
         """Public API for tests: select conversation at index."""
