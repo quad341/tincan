@@ -187,10 +187,16 @@ class MainWindow(QMainWindow):
             self._title_bar.set_disconnected()
 
     def _apply_capabilities(self, caps: dict) -> None:
-        # tincan-56i GetStatus capabilities keys: 'messages', 'contacts'.
-        # 'ancs' is not yet in the spec — StateCBanner is driven by CapabilityChanged only.
-        messages_ok = bool(caps.get("messages", True))
+        # tincan-40c guarantees all three keys always present; default False (not
+        # capable) when a key is absent so degradation banners show conservatively.
+        messages_ok = bool(caps.get("messages", False))
         self._banner_b.setVisible(not messages_ok)
+        if messages_ok:
+            self._compose.set_compose_enabled(True)
+        else:
+            self._compose.set_compose_enabled(False, "messaging unavailable")
+        ancs_ok = bool(caps.get("ancs", False))
+        self._banner_c.setVisible(not ancs_ok)
 
     @property
     def conversation_list(self) -> ConversationListWidget:
@@ -223,9 +229,13 @@ class MainWindow(QMainWindow):
         self._title_bar.set_connected(device_address)
         self._banner_a.hide()
         status = self._dbus_client.get_status()
-        caps = (status.get("capabilities") or {}) if status else {}
+        if status:
+            caps = status.get("capabilities") or {}
+        else:
+            # Daemon just connected but GetStatus() is transiently unavailable;
+            # assume all capabilities OK rather than showing degradation banners.
+            caps = {"messages": True, "contacts": True, "ancs": True}
         self._apply_capabilities(caps)
-        self._compose.set_compose_enabled(True)
         self._tray.set_connected(True)
 
     def _on_daemon_disconnected(self) -> None:
@@ -237,13 +247,20 @@ class MainWindow(QMainWindow):
         self._tray.set_connected(False)
 
     def _on_capability_changed(self, feature: str, available: bool) -> None:
-        if feature == "messages":
-            self._banner_b.setVisible(not available)
-            self._compose.set_compose_enabled(
-                available, "" if available else "messaging unavailable"
-            )
-        elif feature == "ancs":
-            self._banner_c.setVisible(not available)
+        """Handle a CapabilityChanged signal by re-fetching full status.
+
+        Re-fetching GetStatus() avoids stale views when multiple capability
+        changes arrive in rapid succession.  When the daemon is unreachable
+        (e.g., in tests), synthesize a safe fallback dict from defaults-True
+        then override with the reported feature value.
+        """
+        status = self._dbus_client.get_status()
+        if status:
+            caps = status.get("capabilities") or {}
+        else:
+            caps = {"messages": True, "contacts": True, "ancs": True}
+            caps[feature] = available
+        self._apply_capabilities(caps)
 
     def _on_message_received(self, message: dict) -> None:
         direction = str(message.get("direction", "inbound"))
@@ -265,23 +282,20 @@ class MainWindow(QMainWindow):
         self._thread_view.append_message(MessageData(bubble_type, body, sender, timestamp))
 
     def _on_conversation_updated(self, conversation: dict) -> None:
-        convs = self._dbus_client.list_conversations()
-        if not convs:
+        conv_id = str(conversation.get("id", ""))
+        if not conv_id:
             return
-        # tincan-56i §2.2 Conversation dict keys: id, display_name, participants,
-        # last_message_at. No preview or unread_count in the current spec.
-        items = [
-            ConversationData(
-                id=str(c.get("id", "")),
-                name=str(c.get("display_name", c.get("id", ""))),
-                phone=str(c.get("id", "")),
-                preview="",          # no preview field in tincan-56i §2.2
-                timestamp=str(c.get("last_message_at", ""))[:5],
-                unread=False,        # no unread_count field in tincan-56i §2.2
-            )
-            for c in convs
-        ]
-        self._conv_list.load_conversations(items)
+        unread_count = int(conversation.get("unread_count", 0))
+        data = ConversationData(
+            id=conv_id,
+            name=str(conversation.get("display_name", conv_id)),
+            phone=conv_id,
+            preview=str(conversation.get("last_message_preview", "")),
+            timestamp=str(conversation.get("last_message_at", ""))[:5],
+            unread=unread_count > 0,
+            unread_count=unread_count,
+        )
+        self._conv_list.update_item(conv_id, data)
 
     def _on_show_notifications_help(self) -> None:
         from PySide6.QtWidgets import QMessageBox
