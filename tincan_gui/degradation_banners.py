@@ -109,6 +109,12 @@ class StateCBanner(QWidget):
         " · New messages appear after manual refresh"
         " · Send and conversation list still work."
     )
+    # tincan-5en: accessible name uses plain-text form per spec §5
+    ACCESSIBLE_NAME = (
+        "Real-time message delivery unavailable. ANCS not connected. "
+        "New messages appear after manual refresh. "
+        "Send and conversation list still work."
+    )
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -116,7 +122,7 @@ class StateCBanner(QWidget):
         self.setStyleSheet(
             "background-color: #f7fee7; border: 1px solid #84cc16;"
         )
-        self.setAccessibleName(self.MSG)
+        self.setAccessibleName(self.ACCESSIBLE_NAME)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 8, 0)
@@ -145,8 +151,12 @@ class StateCBanner(QWidget):
 # ---------------------------------------------------------------------------
 
 def _degradation_banner_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
-    if isinstance(obj, (StateBBanner, StateCBanner)):
+    if isinstance(obj, StateBBanner):
+        # State B = urgent: MAP link dropped, messaging broken
         return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)
+    if isinstance(obj, StateCBanner):
+        # State C = informational: ANCS missing, send still works (tincan-5en)
+        return QAccessibleWidget(obj, QAccessible.Role.StaticText)
     return None
 
 

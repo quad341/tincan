@@ -64,13 +64,13 @@ class TitleBar(QWidget):
     def set_connected(self, device_name: str) -> None:
         self._status_chip.setText(f"● Connected — {device_name}")
         self._status_chip.setStyleSheet("color: #86efac;")
-        self._status_chip.setAccessibleName(f"Connection status: Connected — {device_name}")
+        self._status_chip.setAccessibleName("Connection status: Connected")
 
     def set_connected_limited(self, device_name: str) -> None:
         self._status_chip.setText(f"● Connected (limited) — {device_name}")
         self._status_chip.setStyleSheet("color: #fbbf24;")
         self._status_chip.setAccessibleName(
-            f"Connection status: Connected (limited) — {device_name}"
+            "Connection status: Connected, limited — ANCS unavailable"
         )
 
     def set_disconnected(self) -> None:
