@@ -178,7 +178,13 @@ class ConversationItem(QWidget):
             self.setAccessibleName(f"{base}, Unread: {badge}")
         else:
             self.setAccessibleName(base)
-        if self._data.unread or count > 0:
+        # tincan-298: use "Unread: N" format for unread_count; fall back to plain
+        # "Unread" for legacy data using the unread bool flag (unread_count==0).
+        if count >= 10:
+            self.setAccessibleDescription("Unread: 9+")
+        elif count > 0:
+            self.setAccessibleDescription(f"Unread: {count}")
+        elif self._data.unread:
             self.setAccessibleDescription("Unread")
         else:
             self.setAccessibleDescription("")

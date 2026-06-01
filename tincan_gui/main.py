@@ -66,6 +66,13 @@ class TitleBar(QWidget):
         self._status_chip.setStyleSheet("color: #86efac;")
         self._status_chip.setAccessibleName(f"Connection status: Connected — {device_name}")
 
+    def set_connected_limited(self, device_name: str) -> None:
+        self._status_chip.setText(f"● Connected (limited) — {device_name}")
+        self._status_chip.setStyleSheet("color: #fbbf24;")
+        self._status_chip.setAccessibleName(
+            f"Connection status: Connected (limited) — {device_name}"
+        )
+
     def set_disconnected(self) -> None:
         self._status_chip.setText("○ Disconnected")
         self._status_chip.setStyleSheet("color: #fca5a5;")
@@ -84,7 +91,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("tincan")
         self.resize(1024, 700)
         self.setMinimumSize(600, 400)
-        self._current_phone: str = ""   # phone for the open conversation
+        self._current_phone: str = ""     # phone for the open conversation
+        self._connected_device: str = ""  # address of the connected BT device
         self._build()
         self._wire()
         self._load_stub_data()
@@ -196,7 +204,20 @@ class MainWindow(QMainWindow):
         else:
             self._compose.set_compose_enabled(False, "messaging unavailable")
         ancs_ok = bool(caps.get("ancs", False))
+        self._update_state_c_banner(ancs_ok)
+
+    def _update_state_c_banner(self, ancs_ok: bool) -> None:
+        """Show/hide State C banner; update chip to amber when ANCS limited (tincan-om9).
+
+        Co-exists with State B — messages gate takes priority for compose state.
+        Chip color only changes when the device is actually connected.
+        """
         self._banner_c.setVisible(not ancs_ok)
+        if self._connected_device:
+            if ancs_ok:
+                self._title_bar.set_connected(self._connected_device)
+            else:
+                self._title_bar.set_connected_limited(self._connected_device)
 
     @property
     def conversation_list(self) -> ConversationListWidget:
@@ -226,6 +247,7 @@ class MainWindow(QMainWindow):
         self._tray.reset_unread()
 
     def _on_daemon_connected(self, device_address: str) -> None:
+        self._connected_device = str(device_address)
         self._title_bar.set_connected(device_address)
         self._banner_a.hide()
         status = self._dbus_client.get_status()
@@ -239,6 +261,7 @@ class MainWindow(QMainWindow):
         self._tray.set_connected(True)
 
     def _on_daemon_disconnected(self) -> None:
+        self._connected_device = ""
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
