@@ -3,58 +3,64 @@ Accessibility specification tests for tincan-gui (WCAG 2.1 AA).
 Design spec: tincan-s42 §4.
 Bead: tincan-9ho.
 
-Written BEFORE implementation (TDD). Tests will fail until tincan_gui.widgets
-is implemented AND PySide6 is installed. The builder must make all tests pass.
+Written BEFORE the accessibility pass (TDD). Tests will fail until the builder
+completes the accessibility additions. The color contrast math tests (no PySide6)
+live in test_contrast.py — 8 tests there pass today.
 
-Color contrast math tests (no PySide6) live in test_contrast.py.
+=== WHAT THE BUILDER MUST DO TO MAKE THESE PASS ===
 
-Widget API contract implied by these tests
-------------------------------------------
-ConversationItem(name, preview, timestamp, unread):
-    .accessibleName() -> str
-    .accessibleDescription() -> str
-    .timestamp_label_color() -> str  # lowercase hex, e.g. "#6b7280"
+1. Register QAccessible factories:
+   ConversationItem  → QAccessible.Role.ListItem
+   MessageBubble     → QAccessible.Role.StaticText
+   CapabilityBanner  → QAccessible.Role.Alert
+   (QLabel/QPushButton get StaticText/Button automatically — no factory needed)
 
-MessageBubble(direction, body, sender, timestamp):
-    direction: "inbound" | "outbound"
-    body: str | None  # None means MAP returned no body
-    .accessibleName() -> str
-    .metadata_label_color() -> str
+2. Create tincan_gui/capability_banner.py with:
+   class CapabilityBanner(QWidget):
+       def __init__(self, message: str) -> None: ...
+       # Must set accessibleName = message, accessible role = Alert
 
-SendButton():
-    .accessibleName() -> str  # "Send SMS message" (enabled), "Send unavailable — <reason>" (disabled)
-    .set_disabled_reason(reason: str)
+3. Fix MessageBubble._update_accessible() for OUTBOUND:
+   Current: "Outbound: <body> — from <sender> at <time>"  (wrong — no "from")
+   Correct: "Outbound: <body> — sent at <time>"
 
-StatusChip(connected, device_name):
-    .accessibleName() -> str  # "Connection status: Connected — <name>" or "Connection status: Disconnected"
+4. Update ComposePanel.set_compose_enabled() to update send button accessible name:
+   When disabled: "Send unavailable — <reason>" (or similar)
+   When enabled:  "Send SMS message"
+   Add: ComposePanel.send_button property → exposes _send_btn
 
-CapabilityBanner(message):
-    .accessibleName() -> str  # == message
+5. MainWindow — add public API for testability:
+   conversation_opened = Signal(str)       # emitted when a conversation is selected
+   message_send_requested = Signal(str)    # emitted on send
+   refresh_requested = Signal()            # emitted on F5 / Ctrl+R
+   @property conversation_list → ConversationListWidget
+   @property compose_panel → ComposePanel
 
-MainWindow():
-    .conversation_list  -> ConversationList
-    .compose_panel      -> ComposePanel (with .text_input: QPlainTextEdit)
-    .load_conversations(list[dict])
-    .conversation_opened  (Signal)
-    .message_send_requested  (Signal[str])
-    .refresh_requested  (Signal)
+6. ConversationListWidget — add public methods:
+   def select_index(self, i: int) -> None  (wraps _select_index)
+   def current_index(self) -> int           (returns _selected_index)
 
-ConversationList:
-    .select_index(i: int)
-    .current_index() -> int
+=== MODULE IMPORTS ===
+from tincan_gui.conversation_list import ConversationData, ConversationItem, ConversationListWidget
+from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData
+from tincan_gui.compose_panel import ComposePanel
+from tincan_gui.main import MainWindow, TitleBar
+from tincan_gui.capability_banner import CapabilityBanner   ← new module
 """
 
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAccessible
-from tincan_gui.widgets import (
-    CapabilityBanner,
+
+from tincan_gui.capability_banner import CapabilityBanner
+from tincan_gui.compose_panel import ComposePanel
+from tincan_gui.conversation_list import (
+    ConversationData,
     ConversationItem,
-    MainWindow,
-    MessageBubble,
-    SendButton,
-    StatusChip,
+    ConversationListWidget,
 )
+from tincan_gui.main import MainWindow, TitleBar
+from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData
 
 
 # ---------------------------------------------------------------------------
@@ -62,37 +68,45 @@ from tincan_gui.widgets import (
 # ---------------------------------------------------------------------------
 
 class TestMetadataColorOnWidgets:
-    """Verify the timestamp/metadata color fix is applied in actual widget instances."""
+    """
+    Verify the timestamp/metadata color fix (#9ca3af → #6b7280) is applied
+    in actual widget instances.
+
+    Builder note: expose timestamp_label_color() on ConversationItem and
+    metadata_label_color() on MessageBubble; these are test accessors that
+    return the hex color string currently applied to the label stylesheet.
+    """
 
     def test_conversation_item_timestamp_color_is_6b7280(self, qtbot):
-        item = ConversationItem(
-            name="Alice", preview="See you tomorrow", timestamp="10:32", unread=False
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="See you tomorrow", timestamp="10:32", unread=False,
         )
+        item = ConversationItem(data)
         qtbot.addWidget(item)
         color = item.timestamp_label_color()
         assert color.lower() == "#6b7280", (
-            f"Expected #6b7280 for AA compliance, got {color!r}. "
-            "tincan-9ho fix: replace #9ca3af with #6b7280 on all white backgrounds."
+            f"Expected #6b7280 for AA compliance, got {color!r}"
         )
 
-    def test_conversation_item_timestamp_color_is_not_failing_9ca3af(self, qtbot):
-        item = ConversationItem(
-            name="Alice", preview="See you", timestamp="10:32", unread=False
+    def test_conversation_item_timestamp_color_is_not_9ca3af(self, qtbot):
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="See you", timestamp="10:32", unread=False,
         )
+        item = ConversationItem(data)
         qtbot.addWidget(item)
         assert item.timestamp_label_color().lower() != "#9ca3af"
 
     def test_message_bubble_metadata_color_is_6b7280(self, qtbot):
-        bubble = MessageBubble(
-            direction="inbound", body="Hi", sender="Alice", timestamp="10:32"
-        )
+        data = MessageData(BubbleType.INBOUND, "Hi", "Alice", "10:32")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert bubble.metadata_label_color().lower() == "#6b7280"
 
     def test_message_bubble_metadata_color_is_not_9ca3af(self, qtbot):
-        bubble = MessageBubble(
-            direction="inbound", body="Hi", sender="Alice", timestamp="10:32"
-        )
+        data = MessageData(BubbleType.INBOUND, "Hi", "Alice", "10:32")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert bubble.metadata_label_color().lower() != "#9ca3af"
 
@@ -105,48 +119,58 @@ class TestAccessibleRoles:
     """Verify QAccessible roles per tincan-s42 §4.4 table."""
 
     def test_conversation_item_role_is_list_item(self, qtbot):
-        item = ConversationItem(
-            name="Alice", preview="Hi", timestamp="10:32", unread=False
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="Hi", timestamp="10:32", unread=False,
         )
+        item = ConversationItem(data)
         qtbot.addWidget(item)
         iface = QAccessible.queryAccessibleInterface(item)
         assert iface is not None
         assert iface.role() == QAccessible.Role.ListItem
 
     def test_inbound_message_bubble_role_is_static_text(self, qtbot):
-        bubble = MessageBubble(
-            direction="inbound", body="Hello", sender="Alice", timestamp="10:32"
-        )
+        data = MessageData(BubbleType.INBOUND, "Hello", "Alice", "10:32")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         iface = QAccessible.queryAccessibleInterface(bubble)
         assert iface is not None
         assert iface.role() == QAccessible.Role.StaticText
 
     def test_outbound_message_bubble_role_is_static_text(self, qtbot):
-        bubble = MessageBubble(
-            direction="outbound", body="Hello back", sender=None, timestamp="10:33"
-        )
+        data = MessageData(BubbleType.OUTBOUND, "Hello back", "", "10:33")
+        bubble = MessageBubble(data)
+        qtbot.addWidget(bubble)
+        iface = QAccessible.queryAccessibleInterface(bubble)
+        assert iface is not None
+        assert iface.role() == QAccessible.Role.StaticText
+
+    def test_body_unavailable_bubble_role_is_static_text(self, qtbot):
+        data = MessageData(BubbleType.BODY_UNAVAILABLE, "", "Mom", "09:00")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         iface = QAccessible.queryAccessibleInterface(bubble)
         assert iface is not None
         assert iface.role() == QAccessible.Role.StaticText
 
     def test_send_button_role_is_button(self, qtbot):
-        btn = SendButton()
-        qtbot.addWidget(btn)
-        iface = QAccessible.queryAccessibleInterface(btn)
+        # QPushButton gets Button role automatically — verify it's preserved.
+        panel = ComposePanel()
+        qtbot.addWidget(panel)
+        iface = QAccessible.queryAccessibleInterface(panel.send_button)
         assert iface is not None
         assert iface.role() == QAccessible.Role.Button
 
     def test_status_chip_role_is_static_text(self, qtbot):
-        chip = StatusChip(connected=True, device_name="iPhone 15 Pro")
-        qtbot.addWidget(chip)
-        iface = QAccessible.queryAccessibleInterface(chip)
+        # QLabel gets StaticText role automatically — verify it's preserved.
+        bar = TitleBar()
+        qtbot.addWidget(bar)
+        iface = QAccessible.queryAccessibleInterface(bar.status_chip)
         assert iface is not None
         assert iface.role() == QAccessible.Role.StaticText
 
     def test_capability_banner_role_is_alert(self, qtbot):
-        # Alert role causes AT to announce the banner immediately — no focus required.
+        # Alert role causes AT to announce immediately on visibility change.
         banner = CapabilityBanner(message="⊗ Connection lost")
         qtbot.addWidget(banner)
         iface = QAccessible.queryAccessibleInterface(banner)
@@ -161,158 +185,169 @@ class TestAccessibleRoles:
 class TestAccessibleNames:
     """Verify accessible name patterns per tincan-s42 §4.4."""
 
+    # --- ConversationItem ---
+
     def test_conversation_item_name_includes_contact_name(self, qtbot):
-        item = ConversationItem(
-            name="Alice", preview="See you tomorrow", timestamp="10:32", unread=False
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="See you tomorrow", timestamp="10:32", unread=False,
         )
+        item = ConversationItem(data)
         qtbot.addWidget(item)
         assert "Alice" in item.accessibleName()
 
     def test_conversation_item_name_includes_preview(self, qtbot):
-        item = ConversationItem(
-            name="Alice", preview="See you tomorrow", timestamp="10:32", unread=False
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="See you tomorrow", timestamp="10:32", unread=False,
         )
+        item = ConversationItem(data)
         qtbot.addWidget(item)
         assert "See you tomorrow" in item.accessibleName()
 
     def test_conversation_item_name_includes_timestamp(self, qtbot):
-        item = ConversationItem(
-            name="Alice", preview="See you tomorrow", timestamp="10:32", unread=False
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="See you tomorrow", timestamp="10:32", unread=False,
         )
+        item = ConversationItem(data)
         qtbot.addWidget(item)
         assert "10:32" in item.accessibleName()
 
-    def test_conversation_item_name_includes_unread_marker_when_unread(self, qtbot):
-        item = ConversationItem(
-            name="Bob", preview="Are you coming?", timestamp="09:15", unread=True
-        )
-        qtbot.addWidget(item)
-        assert "Unread" in item.accessibleName()
-
-    def test_conversation_item_name_excludes_unread_marker_when_read(self, qtbot):
-        item = ConversationItem(
-            name="Carol", preview="See you", timestamp="08:00", unread=False
-        )
-        qtbot.addWidget(item)
-        assert "Unread" not in item.accessibleName()
-
     def test_conversation_item_accessible_description_is_unread_when_unread(self, qtbot):
-        # Spec §4.4: unread state expressed via setAccessibleDescription("Unread")
-        item = ConversationItem(
-            name="Dave", preview="Hey!", timestamp="11:00", unread=True
+        data = ConversationData(
+            id="c2", name="Bob", phone="+1 555-0101",
+            preview="Hey!", timestamp="09:15", unread=True,
         )
+        item = ConversationItem(data)
         qtbot.addWidget(item)
         assert item.accessibleDescription() == "Unread"
 
-    def test_conversation_item_accessible_description_empty_when_read(self, qtbot):
-        item = ConversationItem(
-            name="Eve", preview="Later", timestamp="14:00", unread=False
+    def test_conversation_item_accessible_description_is_empty_when_read(self, qtbot):
+        data = ConversationData(
+            id="c3", name="Carol", phone="+1 555-0102",
+            preview="Later", timestamp="08:00", unread=False,
         )
+        item = ConversationItem(data)
         qtbot.addWidget(item)
         assert item.accessibleDescription() == ""
 
+    # --- MessageBubble ---
+
     def test_inbound_bubble_name_starts_with_inbound(self, qtbot):
-        bubble = MessageBubble(
-            direction="inbound", body="Hi there", sender="Alice", timestamp="10:32"
-        )
+        data = MessageData(BubbleType.INBOUND, "Hi there", "Alice", "10:32")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert bubble.accessibleName().startswith("Inbound")
 
     def test_inbound_bubble_name_contains_body(self, qtbot):
-        bubble = MessageBubble(
-            direction="inbound", body="Hi there", sender="Alice", timestamp="10:32"
-        )
+        data = MessageData(BubbleType.INBOUND, "Hi there", "Alice", "10:32")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert "Hi there" in bubble.accessibleName()
 
     def test_inbound_bubble_name_contains_sender(self, qtbot):
-        bubble = MessageBubble(
-            direction="inbound", body="Hi there", sender="Alice", timestamp="10:32"
-        )
+        data = MessageData(BubbleType.INBOUND, "Hi there", "Alice", "10:32")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert "Alice" in bubble.accessibleName()
 
     def test_inbound_bubble_name_contains_timestamp(self, qtbot):
-        bubble = MessageBubble(
-            direction="inbound", body="Hi there", sender="Alice", timestamp="10:32"
-        )
+        data = MessageData(BubbleType.INBOUND, "Hi there", "Alice", "10:32")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert "10:32" in bubble.accessibleName()
 
     def test_outbound_bubble_name_starts_with_outbound(self, qtbot):
-        bubble = MessageBubble(
-            direction="outbound", body="Hello back", sender=None, timestamp="10:33"
-        )
+        data = MessageData(BubbleType.OUTBOUND, "Hello back", "", "10:33")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert bubble.accessibleName().startswith("Outbound")
 
     def test_outbound_bubble_name_contains_body(self, qtbot):
-        bubble = MessageBubble(
-            direction="outbound", body="Hello back", sender=None, timestamp="10:33"
-        )
+        data = MessageData(BubbleType.OUTBOUND, "Hello back", "", "10:33")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert "Hello back" in bubble.accessibleName()
 
     def test_outbound_bubble_name_contains_timestamp(self, qtbot):
-        bubble = MessageBubble(
-            direction="outbound", body="Hello back", sender=None, timestamp="10:33"
-        )
+        data = MessageData(BubbleType.OUTBOUND, "Hello back", "", "10:33")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert "10:33" in bubble.accessibleName()
 
-    def test_content_unavailable_bubble_name_says_content_unavailable(self, qtbot):
-        # body=None means MAP returned no body (iOS Show Previews off or fetch failure)
-        bubble = MessageBubble(
-            direction="inbound", body=None, sender="Mom", timestamp="09:00"
-        )
+    def test_outbound_bubble_name_does_not_say_from(self, qtbot):
+        # Outbound has no sender — accessible name must not include "from"
+        data = MessageData(BubbleType.OUTBOUND, "Hello back", "", "10:33")
+        bubble = MessageBubble(data)
+        qtbot.addWidget(bubble)
+        assert " from " not in bubble.accessibleName()
+
+    def test_body_unavailable_bubble_name_says_content_unavailable(self, qtbot):
+        data = MessageData(BubbleType.BODY_UNAVAILABLE, "", "Mom", "09:00")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         name = bubble.accessibleName()
         assert "content unavailable" in name.lower()
-        assert "Mom" in name
 
-    def test_content_unavailable_bubble_name_contains_sender_and_time(self, qtbot):
-        bubble = MessageBubble(
-            direction="inbound", body=None, sender="Mom", timestamp="09:00"
-        )
+    def test_body_unavailable_bubble_name_contains_sender(self, qtbot):
+        data = MessageData(BubbleType.BODY_UNAVAILABLE, "", "Mom", "09:00")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
-        name = bubble.accessibleName()
-        assert "Mom" in name
-        assert "09:00" in name
+        assert "Mom" in bubble.accessibleName()
+
+    def test_body_unavailable_bubble_name_contains_timestamp(self, qtbot):
+        data = MessageData(BubbleType.BODY_UNAVAILABLE, "", "Mom", "09:00")
+        bubble = MessageBubble(data)
+        qtbot.addWidget(bubble)
+        assert "09:00" in bubble.accessibleName()
+
+    # --- ComposePanel / Send button ---
 
     def test_send_button_accessible_name_when_enabled(self, qtbot):
-        btn = SendButton()
-        qtbot.addWidget(btn)
-        assert btn.accessibleName() == "Send SMS message"
-
-    def test_send_button_accessible_name_when_disabled_contains_reason(self, qtbot):
-        btn = SendButton()
-        btn.setEnabled(False)
-        btn.set_disabled_reason("not connected")
-        qtbot.addWidget(btn)
-        name = btn.accessibleName()
-        assert "not connected" in name
+        panel = ComposePanel()
+        qtbot.addWidget(panel)
+        assert panel.send_button.accessibleName() == "Send SMS message"
 
     def test_send_button_accessible_name_when_disabled_indicates_unavailable(self, qtbot):
-        btn = SendButton()
-        btn.setEnabled(False)
-        btn.set_disabled_reason("not connected")
-        qtbot.addWidget(btn)
-        name = btn.accessibleName()
+        panel = ComposePanel()
+        panel.set_compose_enabled(False, "not connected")
+        qtbot.addWidget(panel)
+        name = panel.send_button.accessibleName()
         assert "unavailable" in name.lower() or "Send" in name
 
+    def test_send_button_accessible_name_when_disabled_contains_reason(self, qtbot):
+        panel = ComposePanel()
+        panel.set_compose_enabled(False, "not connected")
+        qtbot.addWidget(panel)
+        assert "not connected" in panel.send_button.accessibleName()
+
+    def test_send_button_accessible_name_restored_when_reenabled(self, qtbot):
+        panel = ComposePanel()
+        panel.set_compose_enabled(False, "not connected")
+        panel.set_compose_enabled(True)
+        qtbot.addWidget(panel)
+        assert panel.send_button.accessibleName() == "Send SMS message"
+
+    # --- TitleBar / StatusChip ---
+
     def test_status_chip_accessible_name_when_connected(self, qtbot):
-        chip = StatusChip(connected=True, device_name="iPhone 15 Pro")
-        qtbot.addWidget(chip)
-        name = chip.accessibleName()
+        bar = TitleBar()
+        bar.set_connected("iPhone 15 Pro")
+        qtbot.addWidget(bar)
+        name = bar.status_chip.accessibleName()
         assert "Connection status" in name
         assert "Connected" in name
 
     def test_status_chip_accessible_name_when_disconnected(self, qtbot):
-        chip = StatusChip(connected=False, device_name=None)
-        qtbot.addWidget(chip)
-        name = chip.accessibleName()
+        bar = TitleBar()
+        bar.set_disconnected()
+        qtbot.addWidget(bar)
+        name = bar.status_chip.accessibleName()
         assert "Connection status" in name
         assert "Disconnected" in name
+
+    # --- CapabilityBanner ---
 
     def test_capability_banner_accessible_name_equals_full_message(self, qtbot):
         msg = "⊗ Connection lost — Bluetooth out of range · reconnecting…"
@@ -338,56 +373,43 @@ class TestKeyboardNavigation:
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        # Start focus in compose
-        window.compose_panel.text_input.setFocus()
+        window.compose_panel._input.setFocus()
         qtbot.keyClick(window, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
-        assert window.conversation_list.hasFocus() or window.conversation_list.isAncestorOf(
-            window.focusWidget()
+        assert (
+            window.conversation_list.hasFocus()
+            or window.conversation_list.isAncestorOf(window.focusWidget())
         )
 
-    def test_ctrl_n_focuses_compose_text_input(self, qtbot):
+    def test_ctrl_n_focuses_compose_input(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
         window.conversation_list.setFocus()
         qtbot.keyClick(window, Qt.Key.Key_N, Qt.KeyboardModifier.ControlModifier)
-        assert window.compose_panel.text_input.hasFocus()
+        assert window.compose_panel._input.hasFocus()
 
-    def test_arrow_down_advances_conversation_selection(self, qtbot):
+    def test_arrow_down_advances_selection_in_conversation_list(self, qtbot):
         window = MainWindow()
-        window.load_conversations([
-            {"name": "Alice", "preview": "Hi", "timestamp": "10:00", "unread": False},
-            {"name": "Bob", "preview": "Hey", "timestamp": "09:00", "unread": False},
-        ])
         qtbot.addWidget(window)
         window.show()
-        window.conversation_list.setFocus()
+        # MainWindow._load_stub_data loads 3 conversations; select first
         window.conversation_list.select_index(0)
-        initial = window.conversation_list.current_index()
+        assert window.conversation_list.current_index() == 0
         qtbot.keyClick(window.conversation_list, Qt.Key.Key_Down)
-        assert window.conversation_list.current_index() == initial + 1
+        assert window.conversation_list.current_index() == 1
 
-    def test_arrow_up_retreats_conversation_selection(self, qtbot):
+    def test_arrow_up_retreats_selection_in_conversation_list(self, qtbot):
         window = MainWindow()
-        window.load_conversations([
-            {"name": "Alice", "preview": "Hi", "timestamp": "10:00", "unread": False},
-            {"name": "Bob", "preview": "Hey", "timestamp": "09:00", "unread": False},
-        ])
         qtbot.addWidget(window)
         window.show()
-        window.conversation_list.setFocus()
         window.conversation_list.select_index(1)
         qtbot.keyClick(window.conversation_list, Qt.Key.Key_Up)
         assert window.conversation_list.current_index() == 0
 
-    def test_enter_opens_selected_conversation(self, qtbot):
+    def test_enter_on_conversation_list_emits_conversation_opened(self, qtbot):
         window = MainWindow()
-        window.load_conversations([
-            {"name": "Alice", "preview": "Hi", "timestamp": "10:00", "unread": False},
-        ])
         qtbot.addWidget(window)
         window.show()
-        window.conversation_list.setFocus()
         window.conversation_list.select_index(0)
 
         opened = []
@@ -395,14 +417,10 @@ class TestKeyboardNavigation:
         qtbot.keyClick(window.conversation_list, Qt.Key.Key_Return)
         assert len(opened) == 1
 
-    def test_space_opens_selected_conversation(self, qtbot):
+    def test_space_on_conversation_list_emits_conversation_opened(self, qtbot):
         window = MainWindow()
-        window.load_conversations([
-            {"name": "Alice", "preview": "Hi", "timestamp": "10:00", "unread": False},
-        ])
         qtbot.addWidget(window)
         window.show()
-        window.conversation_list.setFocus()
         window.conversation_list.select_index(0)
 
         opened = []
@@ -410,41 +428,39 @@ class TestKeyboardNavigation:
         qtbot.keyClick(window.conversation_list, Qt.Key.Key_Space)
         assert len(opened) == 1
 
-    def test_return_in_compose_emits_send_signal(self, qtbot):
+    def test_return_in_compose_emits_message_send_requested(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        window.compose_panel.text_input.setFocus()
-        window.compose_panel.text_input.setPlainText("Hello world")
+        window.compose_panel._input.setFocus()
+        window.compose_panel._input.setPlainText("Hello world")
 
-        sent_texts = []
-        window.message_send_requested.connect(lambda t: sent_texts.append(t))
+        sent = []
+        window.message_send_requested.connect(lambda t: sent.append(t))
         qtbot.keyClick(
-            window.compose_panel.text_input, Qt.Key.Key_Return
+            window.compose_panel._input, Qt.Key.Key_Return
         )
-        assert len(sent_texts) == 1
-        assert sent_texts[0] == "Hello world"
+        assert len(sent) == 1
+        assert sent[0] == "Hello world"
 
-    def test_shift_return_inserts_newline_without_sending(self, qtbot):
+    def test_shift_return_inserts_newline_and_does_not_send(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        window.compose_panel.text_input.setFocus()
-        window.compose_panel.text_input.setPlainText("Line 1")
+        window.compose_panel._input.setFocus()
+        window.compose_panel._input.setPlainText("Line 1")
 
-        sent_texts = []
-        window.message_send_requested.connect(lambda t: sent_texts.append(t))
+        sent = []
+        window.message_send_requested.connect(lambda t: sent.append(t))
         qtbot.keyClick(
-            window.compose_panel.text_input,
+            window.compose_panel._input,
             Qt.Key.Key_Return,
             Qt.KeyboardModifier.ShiftModifier,
         )
-        # Must NOT send
-        assert len(sent_texts) == 0
-        # Must contain a newline
-        assert "\n" in window.compose_panel.text_input.toPlainText()
+        assert len(sent) == 0
+        assert "\n" in window.compose_panel._input.toPlainText()
 
-    def test_f5_triggers_refresh_signal(self, qtbot):
+    def test_f5_emits_refresh_requested(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
@@ -454,7 +470,7 @@ class TestKeyboardNavigation:
         qtbot.keyClick(window, Qt.Key.Key_F5)
         assert len(refreshed) == 1
 
-    def test_ctrl_r_triggers_refresh_signal(self, qtbot):
+    def test_ctrl_r_emits_refresh_requested(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
@@ -466,51 +482,36 @@ class TestKeyboardNavigation:
 
 
 # ---------------------------------------------------------------------------
-# §4.4 Screen reader announcements
+# §4.4 Screen reader announcements (holistic)
 # ---------------------------------------------------------------------------
 
 class TestScreenReaderAnnouncements:
-    """Verify announcement content satisfies spec §4.4 — one cohesive announcement."""
+    """Verify that each bubble's accessible name contains all required elements."""
 
-    def test_inbound_bubble_announces_all_four_elements_in_one_name(self, qtbot):
-        # Spec §4.4: "direction + body + sender + time in one announcement"
-        bubble = MessageBubble(
-            direction="inbound",
-            body="Meeting at 3pm",
-            sender="Alice",
-            timestamp="10:32",
-        )
+    def test_inbound_bubble_announces_direction_body_sender_time(self, qtbot):
+        # spec §4.6: "direction + body + sender + time in one announcement"
+        data = MessageData(BubbleType.INBOUND, "Meeting at 3pm", "Alice", "10:32")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         name = bubble.accessibleName()
-        assert "Inbound" in name       # direction
-        assert "Meeting at 3pm" in name  # body
-        assert "Alice" in name         # sender
-        assert "10:32" in name         # time
+        assert "Inbound" in name
+        assert "Meeting at 3pm" in name
+        assert "Alice" in name
+        assert "10:32" in name
 
     def test_outbound_bubble_announces_direction_body_time(self, qtbot):
-        # Outbound has no "sender" — announces direction + body + time
-        bubble = MessageBubble(
-            direction="outbound",
-            body="On my way",
-            sender=None,
-            timestamp="10:45",
-        )
+        data = MessageData(BubbleType.OUTBOUND, "On my way", "", "10:45")
+        bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         name = bubble.accessibleName()
         assert "Outbound" in name
         assert "On my way" in name
         assert "10:45" in name
 
-    def test_capability_banner_alert_role_enables_immediate_announcement(self, qtbot):
-        # The Alert role is the AT mechanism that triggers announcement without focus.
-        banner = CapabilityBanner(message="⊗ Connection lost — Bluetooth out of range")
+    def test_capability_banner_alert_role_is_the_immediate_announcement_mechanism(self, qtbot):
+        # Alert role causes AT (ORCA, JAWS, NVDA) to announce without requiring focus.
+        banner = CapabilityBanner(message="⊗ Connection lost")
         qtbot.addWidget(banner)
         iface = QAccessible.queryAccessibleInterface(banner)
         assert iface is not None
         assert iface.role() == QAccessible.Role.Alert
-
-    def test_capability_banner_accessible_name_is_full_text(self, qtbot):
-        msg = "⚠ Messaging unavailable — Enable 'Show Notifications' on iPhone"
-        banner = CapabilityBanner(message=msg)
-        qtbot.addWidget(banner)
-        assert banner.accessibleName() == msg
