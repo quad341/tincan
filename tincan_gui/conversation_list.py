@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -209,6 +210,37 @@ class ConversationListWidget(QWidget):
 
         layout.addWidget(header)
 
+        # Search / filter input
+        self._search = QLineEdit()
+        self._search.setFixedHeight(32)
+        self._search.setPlaceholderText("Filter conversations…")
+        self._search.setAccessibleName("Filter conversations")
+        self._search.setStyleSheet(
+            "QLineEdit { border: none; border-bottom: 1px solid #e5e7eb;"
+            " padding: 0 12px; background: #f9fafb; }"
+        )
+        self._search.textChanged.connect(self._on_filter_changed)
+
+        # Clear filter on Escape
+        def _search_key_press(event: QKeyEvent) -> None:
+            if event.key() in (Qt.Key.Key_Escape, Qt.Key_Escape):
+                self._search.clear()
+            else:
+                QLineEdit.keyPressEvent(self._search, event)
+
+        self._search.keyPressEvent = _search_key_press
+        layout.addWidget(self._search)
+
+        # No-results empty state (shown when filter has no matches)
+        self._no_results = QLabel("No results")
+        nr_font = QFont()
+        nr_font.setPointSize(12)
+        self._no_results.setFont(nr_font)
+        self._no_results.setStyleSheet("color: #9ca3af; padding: 12px;")
+        self._no_results.setAlignment(Qt.AlignCenter)
+        self._no_results.setVisible(False)
+        layout.addWidget(self._no_results)
+
         # Scrollable list area (stored as instance var to prevent Python GC of the wrapper)
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -242,12 +274,12 @@ class ConversationListWidget(QWidget):
         self._dismiss_btn.setVisible(False)
 
     def load_conversations(self, conversations: list[ConversationData]) -> None:
-        # Remove old items
         while self._list_layout.count() > 1:
             item = self._list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._items.clear()
+        self._item_data_list: list[ConversationData] = []
         self._selected_index = -1
 
         for data in conversations:
@@ -255,6 +287,29 @@ class ConversationListWidget(QWidget):
             widget.activated.connect(self._on_item_activated)
             self._list_layout.insertWidget(self._list_layout.count() - 1, widget)
             self._items.append(widget)
+            self._item_data_list.append(data)
+
+        self._on_filter_changed(self._search.text())
+
+    def _on_filter_changed(self, text: str) -> None:
+        query = text.strip().lower()
+        visible_count = 0
+        for i, (widget, data) in enumerate(
+            zip(self._items, getattr(self, "_item_data_list", []))
+        ):
+            match = (
+                not query
+                or query in data.name.lower()
+                or query in data.preview.lower()
+            )
+            widget.setVisible(match)
+            if match:
+                visible_count += 1
+        self._no_results.setVisible(visible_count == 0 and bool(query))
+
+    def clear_filter(self) -> None:
+        """Clear search input and show all rows."""
+        self._search.clear()
 
     def _on_item_activated(self, conv_id: str) -> None:
         for i, item in enumerate(self._items):
