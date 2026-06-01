@@ -5,7 +5,7 @@ import sys
 import warnings
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +23,7 @@ from tincan_gui.conversation_list import ConversationData, ConversationListWidge
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import StateABanner, StateBBanner, StateCBanner
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
+from tincan_gui.tray import TrayIcon
 
 
 class TitleBar(QWidget):
@@ -88,6 +89,7 @@ class MainWindow(QMainWindow):
         self._wire()
         self._load_stub_data()
         self._dbus_client = TincandClient(self)
+        self._tray = TrayIcon(self)
         self._wire_dbus()
         self._sync_daemon_state()
 
@@ -167,6 +169,8 @@ class MainWindow(QMainWindow):
         c.capability_changed.connect(self._on_capability_changed)
         c.message_received.connect(self._on_message_received)
         c.conversation_updated.connect(self._on_conversation_updated)
+        # Tray: badge on incoming message, reset on focus / conversation open
+        c.message_received.connect(lambda _: self._tray.increment_unread())
 
     def _sync_daemon_state(self) -> None:
         """Query tincand at startup and sync UI to current daemon state."""
@@ -213,6 +217,7 @@ class MainWindow(QMainWindow):
         ]
         self._thread_view.load_thread("Alice", "+1 555-0100", sample_messages, "SMS")
         self._compose.set_compose_enabled(True)
+        self._tray.reset_unread()
 
     def _on_daemon_connected(self, device_address: str) -> None:
         self._title_bar.set_connected(device_address)
@@ -221,6 +226,7 @@ class MainWindow(QMainWindow):
         caps = (status.get("capabilities") or {}) if status else {}
         self._apply_capabilities(caps)
         self._compose.set_compose_enabled(True)
+        self._tray.set_connected(True)
 
     def _on_daemon_disconnected(self) -> None:
         self._title_bar.set_disconnected()
@@ -228,6 +234,7 @@ class MainWindow(QMainWindow):
         self._banner_b.hide()
         self._banner_c.hide()
         self._compose.set_compose_enabled(False, "not connected")
+        self._tray.set_connected(False)
 
     def _on_capability_changed(self, feature: str, available: bool) -> None:
         if feature == "messages":
@@ -309,6 +316,15 @@ class MainWindow(QMainWindow):
             self.refresh_requested.emit()
         else:
             super().keyPressEvent(event)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if (
+            event.type() == QEvent.Type.ActivationChange
+            and self.isActiveWindow()
+            and hasattr(self, "_tray")
+        ):
+            self._tray.reset_unread()
 
     def _on_refresh(self) -> None:
         self.refresh_requested.emit()
