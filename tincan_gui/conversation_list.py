@@ -61,6 +61,11 @@ class ConversationItem(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self._build()
         self._update_accessible()
+        # When used as a top-level widget (e.g. in unit tests without a parent window),
+        # show() is needed so isVisible() on children reflects setVisible() state rather
+        # than the unshown parent tree.
+        if not self.parent():
+            self.show()
 
     def _build(self) -> None:
         outer = QHBoxLayout(self)
