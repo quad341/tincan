@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tincan_gui.avatar import AvatarWidget
+
 
 @dataclass
 class ConversationData:
@@ -53,6 +55,10 @@ class ConversationItem(QWidget):
         outer = QHBoxLayout(self)
         outer.setContentsMargins(12, 0, 12, 0)
         outer.setSpacing(8)
+
+        # Avatar (40×40 circle — initials until PBAP photo set)
+        self._avatar = AvatarWidget(self._data.name)
+        outer.addWidget(self._avatar, alignment=Qt.AlignVCenter)
 
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
@@ -145,6 +151,10 @@ class ConversationItem(QWidget):
             self.activated.emit(self._data.id)
         else:
             super().keyPressEvent(event)
+
+    def set_photo(self, data: bytes) -> None:
+        """Set PBAP contact photo (raw bytes). Called asynchronously when photo arrives."""
+        self._avatar.set_photo(data)
 
     def timestamp_label_color(self) -> str:
         """Return the hex color applied to the timestamp label (used by a11y tests)."""
