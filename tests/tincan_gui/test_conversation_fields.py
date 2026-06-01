@@ -17,7 +17,6 @@ import pytest
 
 from tincan_gui.conversation_list import ConversationData, ConversationItem
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -38,7 +37,7 @@ def _make_data(**overrides) -> ConversationData:
 
 def _make_service():
     """TincanService with mocked D-Bus bus."""
-    from tincand.dbus_service import Conversation, TincanService
+    from tincand.dbus_service import TincanService
 
     with patch("dbus.service.BusName", return_value=MagicMock()), \
          patch.object(dbus.service.Object, "__init__", return_value=None):

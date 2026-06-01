@@ -14,10 +14,7 @@ Coverage:
 """
 from __future__ import annotations
 
-import pytest
-
 from tincan_gui.conversation_list import ConversationData, ConversationItem, ConversationListWidget
-
 
 # ---------------------------------------------------------------------------
 # Helpers

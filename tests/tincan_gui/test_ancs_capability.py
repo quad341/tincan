@@ -19,11 +19,9 @@ from unittest.mock import MagicMock, patch
 
 import dbus
 import dbus.service
-import pytest
 
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
-
 
 # ---------------------------------------------------------------------------
 # Helpers — daemon
