@@ -292,6 +292,31 @@ class ThreadView(QWidget):
 
         QTimer.singleShot(0, _scroll_to_bottom)
 
+    def append_message(self, msg: MessageData) -> None:
+        """Append a single bubble to the live thread and scroll to bottom."""
+        if self._messages_layout.indexOf(self._empty_label) >= 0:
+            # Remove the "no messages" placeholder (keep ref — never deleteLater it)
+            while self._messages_layout.count():
+                item = self._messages_layout.takeAt(0)
+                w = item.widget()
+                if w and w is not self._empty_label:
+                    w.deleteLater()
+            self._messages_layout.addStretch()
+
+        bubble = MessageBubble(msg)
+        self._messages_layout.addWidget(bubble)
+
+        scroll_ref = self._scroll
+
+        def _scroll_to_bottom() -> None:
+            try:
+                sb = scroll_ref.verticalScrollBar()
+                sb.setValue(sb.maximum())
+            except RuntimeError:
+                pass
+
+        QTimer.singleShot(0, _scroll_to_bottom)
+
     def show_empty(self) -> None:
         while self._messages_layout.count():
             item = self._messages_layout.takeAt(0)

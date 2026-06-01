@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
+from tincan_gui.dbus_client import TincandClient
+from tincan_gui.degradation_banners import StateABanner, StateBBanner, StateCBanner
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 
 
@@ -81,9 +83,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("tincan")
         self.resize(1024, 700)
         self.setMinimumSize(600, 400)
+        self._current_phone: str = ""   # phone for the open conversation
         self._build()
         self._wire()
         self._load_stub_data()
+        self._dbus_client = TincandClient(self)
+        self._wire_dbus()
+        self._sync_daemon_state()
 
     def _build(self) -> None:
         central = QWidget()
@@ -96,6 +102,21 @@ class MainWindow(QMainWindow):
         # Title bar
         self._title_bar = TitleBar()
         root_layout.addWidget(self._title_bar)
+
+        # Degradation banners (hidden until daemon signals arrive)
+        self._banner_a = StateABanner()
+        self._banner_a.hide()
+        root_layout.addWidget(self._banner_a)
+
+        self._banner_b = StateBBanner()
+        self._banner_b.hide()
+        self._banner_b.show_me_how_clicked.connect(self._on_show_notifications_help)
+        root_layout.addWidget(self._banner_b)
+
+        self._banner_c = StateCBanner()
+        self._banner_c.hide()
+        self._banner_c.refresh_clicked.connect(self.refresh_requested.emit)
+        root_layout.addWidget(self._banner_c)
 
         # Splitter: left sidebar + right content
         splitter = QSplitter(Qt.Horizontal)
@@ -139,6 +160,34 @@ class MainWindow(QMainWindow):
         self._conv_list.focus_thread_requested.connect(self._compose._input.setFocus)
         self._compose.send_requested.connect(self._on_send)
 
+    def _wire_dbus(self) -> None:
+        c = self._dbus_client
+        c.connected.connect(self._on_daemon_connected)
+        c.disconnected.connect(self._on_daemon_disconnected)
+        c.capability_changed.connect(self._on_capability_changed)
+        c.message_received.connect(self._on_message_received)
+        c.conversation_updated.connect(self._on_conversation_updated)
+
+    def _sync_daemon_state(self) -> None:
+        """Query tincand at startup and sync UI to current daemon state."""
+        status = self._dbus_client.get_status()
+        if not status:
+            return  # daemon not running — UI stays in default disconnected state
+        if status.get("connected"):
+            addr = str(status.get("device_address") or "")
+            self._title_bar.set_connected(addr)
+            self._banner_a.hide()
+            caps = status.get("capabilities") or {}
+            self._apply_capabilities(caps)
+        else:
+            self._title_bar.set_disconnected()
+
+    def _apply_capabilities(self, caps: dict) -> None:
+        messages_ok = bool(caps.get("messages", True))
+        self._banner_b.setVisible(not messages_ok)
+        ancs_ok = bool(caps.get("ancs", True))
+        self._banner_c.setVisible(not ancs_ok)
+
     @property
     def conversation_list(self) -> ConversationListWidget:
         return self._conv_list
@@ -149,6 +198,12 @@ class MainWindow(QMainWindow):
 
     def _on_conversation_selected(self, conv_id: str) -> None:
         self.conversation_opened.emit(conv_id)
+        self._current_phone = conv_id  # conv_id is the normalized phone / address key
+        status = self._dbus_client.get_status()
+        if status and status.get("connected"):
+            # Daemon running — load real thread (not yet implemented: requires GetMessages)
+            # Fall through to stub load so the UI is not blank
+            pass
         sample_messages = [
             MessageData(BubbleType.INBOUND, "Hey, are you around later?", "Alice", "10:14"),
             MessageData(BubbleType.OUTBOUND, "Yeah, free after 6", "", "10:15"),
@@ -159,9 +214,81 @@ class MainWindow(QMainWindow):
         self._thread_view.load_thread("Alice", "+1 555-0100", sample_messages, "SMS")
         self._compose.set_compose_enabled(True)
 
+    def _on_daemon_connected(self, device_address: str) -> None:
+        self._title_bar.set_connected(device_address)
+        self._banner_a.hide()
+        status = self._dbus_client.get_status()
+        caps = (status.get("capabilities") or {}) if status else {}
+        self._apply_capabilities(caps)
+        self._compose.set_compose_enabled(True)
+
+    def _on_daemon_disconnected(self) -> None:
+        self._title_bar.set_disconnected()
+        self._banner_a.show()
+        self._banner_b.hide()
+        self._banner_c.hide()
+        self._compose.set_compose_enabled(False, "not connected")
+
+    def _on_capability_changed(self, feature: str, available: bool) -> None:
+        if feature == "messages":
+            self._banner_b.setVisible(not available)
+            self._compose.set_compose_enabled(
+                available, "" if available else "messaging unavailable"
+            )
+        elif feature == "ancs":
+            self._banner_c.setVisible(not available)
+
+    def _on_message_received(self, message: dict) -> None:
+        direction = str(message.get("direction", "inbound"))
+        body = str(message.get("body", ""))
+        sender = str(message.get("sender", ""))
+        timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM from ISO string
+
+        if not body:
+            bubble_type = BubbleType.BODY_UNAVAILABLE
+        elif direction == "inbound":
+            bubble_type = BubbleType.INBOUND
+        else:
+            bubble_type = BubbleType.OUTBOUND
+
+        group_hint = bool(message.get("group_hint", False))
+        if group_hint and bubble_type == BubbleType.INBOUND:
+            bubble_type = BubbleType.GROUP_UNKNOWN_SENDER
+
+        self._thread_view.append_message(MessageData(bubble_type, body, sender, timestamp))
+
+    def _on_conversation_updated(self, conversation: dict) -> None:
+        convs = self._dbus_client.list_conversations()
+        if not convs:
+            return
+        items = [
+            ConversationData(
+                id=str(c.get("id", "")),
+                name=str(c.get("display_name", c.get("id", ""))),
+                phone=str(c.get("id", "")),
+                preview=str(c.get("last_message_preview", "")),
+                timestamp=str(c.get("last_message_at", ""))[:5],
+                unread=bool(c.get("unread_count", 0)),
+            )
+            for c in convs
+        ]
+        self._conv_list.load_conversations(items)
+
+    def _on_show_notifications_help(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self,
+            "Enable Show Notifications",
+            "On your iPhone:\n"
+            "  Settings → Bluetooth → [your Mac/PC] → Show Notifications\n\n"
+            "Toggle it on, then wait a few seconds for tincan to reconnect.",
+        )
+
     def _on_send(self, text: str) -> None:
         self.message_send_requested.emit(text)
-        print(f"[stub] send: {text!r}")
+        message_id = self._dbus_client.send_message(self._current_phone, text)
+        if not message_id:
+            print(f"[stub] send (no daemon): {text!r}")
 
     def _activate_and_focus(self, widget) -> None:
         with warnings.catch_warnings():
