@@ -301,6 +301,11 @@ class ConversationListWidget(QWidget):
             self._item_data_list.append(data)
 
         self._on_filter_changed(self._search.text())
+        # When running as a top-level widget (e.g. in unit tests without a parent window),
+        # show() is needed so that isVisible() on child items reflects filter state rather
+        # than always returning False due to the parent tree being unshown.
+        if not self.parent():
+            self.show()
 
     def _on_filter_changed(self, text: str) -> None:
         query = text.strip().lower()
