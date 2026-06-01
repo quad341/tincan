@@ -415,7 +415,7 @@ class ConversationListWidget(QWidget):
                 item = self._items[self._selected_index]
                 self.conversation_selected.emit(item.conversation_id)
                 self.focus_thread_requested.emit()
-        elif event.key() == Qt.Key_Tab:
+        elif event.key() == Qt.Key.Key_Tab:
             self.focus_thread_requested.emit()
         else:
             super().keyPressEvent(event)
