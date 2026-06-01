@@ -78,6 +78,9 @@ class TincanService(dbus.service.Object):
                 "Session already active",
                 name="im.tincan.Error.AlreadyConnected",
             )
+        # TODO(review F3): raise im.tincan.Error.DeviceNotFound when device_address
+        # is not in the BlueZ paired-devices list.  Requires BlueZ adapter wiring
+        # (tincand/bluetooth/pairing.py) — deferred to M1.1.
         self._connected = True
         self._device_address = str(device_address)
         # tincan-bxs: reset unread_count for all conversations on connect.
@@ -128,12 +131,19 @@ class TincanService(dbus.service.Object):
     def CapabilityChanged(self, feature: str, available: bool) -> None:  # noqa: N802
         pass
 
+    _KNOWN_CAPABILITIES = frozenset({"messages", "contacts", "ancs"})
+
     def set_capability(self, feature: str, available: bool) -> None:
         """Update a capability and emit CapabilityChanged.
 
         Called by Bluetooth adapters (e.g. AncsAdapter.set_capability('ancs', True)
         when the ANCS GATT subscription is established or dropped).
+        Unknown feature names are logged and rejected to avoid silently polluting
+        the capabilities dict (review F2).
         """
+        if feature not in self._KNOWN_CAPABILITIES:
+            _log.warning("set_capability: unknown feature %r — ignored", feature)
+            return
         self._capabilities[feature] = bool(available)
         _log.debug("Capability %s → %s", feature, available)
         self.CapabilityChanged(str(feature), bool(available))
@@ -234,6 +244,9 @@ class TincanService(dbus.service.Object):
                 conv.unread_count += 1
             updated_conv = conv.to_dbus()
         else:
+            # Unknown conv_id: emit MessageReceived but skip ConversationUpdated.
+            # MAP adapters must call upsert_conversation() before delivering messages
+            # so the daemon always has a Conversation object to update (review F4).
             updated_conv = None
 
         msg_dbus = dbus.Dictionary(
