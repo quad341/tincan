@@ -1,0 +1,275 @@
+"""Thread view: ThreadHeader, MessageBubble (4 types), ThreadView."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import Optional
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
+
+class BubbleType(Enum):
+    INBOUND = auto()
+    OUTBOUND = auto()
+    BODY_UNAVAILABLE = auto()
+    GROUP_UNKNOWN_SENDER = auto()
+
+
+@dataclass
+class MessageData:
+    bubble_type: BubbleType
+    body: str
+    sender: str
+    timestamp: str
+
+
+class MessageBubble(QWidget):
+    """Single message bubble — 4 visual types per design spec."""
+
+    _STYLES = {
+        BubbleType.INBOUND: {
+            "bg": "#f3f4f6",
+            "fg": "#111827",
+            "align": Qt.AlignLeft,
+            "margin_left": 20,
+            "margin_right": 80,
+        },
+        BubbleType.OUTBOUND: {
+            "bg": "#1d4ed8",
+            "fg": "#ffffff",
+            "align": Qt.AlignRight,
+            "margin_left": 80,
+            "margin_right": 20,
+        },
+        BubbleType.BODY_UNAVAILABLE: {
+            "bg": "#fef9c3",
+            "fg": "#92400e",
+            "align": Qt.AlignLeft,
+            "margin_left": 20,
+            "margin_right": 80,
+        },
+        BubbleType.GROUP_UNKNOWN_SENDER: {
+            "bg": "#f3f4f6",
+            "fg": "#111827",
+            "align": Qt.AlignLeft,
+            "margin_left": 20,
+            "margin_right": 80,
+        },
+    }
+
+    def __init__(self, data: MessageData, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._data = data
+        self._build()
+        self._update_accessible()
+
+    def _build(self) -> None:
+        style = self._STYLES[self._data.bubble_type]
+
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 4, 0, 4)
+
+        if style["align"] == Qt.AlignRight:
+            outer.addStretch()
+
+        bubble = QWidget()
+        bubble_layout = QVBoxLayout(bubble)
+        bubble_layout.setContentsMargins(12, 8, 12, 8)
+        bubble_layout.setSpacing(4)
+
+        # Group unknown sender warning sub-label
+        if self._data.bubble_type == BubbleType.GROUP_UNKNOWN_SENDER:
+            warn = QLabel("⚠ sender unknown (group text attribution)")
+            warn_font = QFont()
+            warn_font.setPointSize(11)
+            warn.setFont(warn_font)
+            warn.setStyleSheet("color: #92400e;")
+            warn.setWordWrap(True)
+            bubble_layout.addWidget(warn)
+
+        # Body unavailable uses a fixed message
+        if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
+            body_text = "⚠ Message content unavailable — MAP did not return body"
+        else:
+            body_text = self._data.body
+
+        body_label = QLabel(body_text)
+        body_font = QFont()
+        body_font.setPointSize(13)
+        body_label.setFont(body_font)
+        body_label.setWordWrap(True)
+        body_label.setStyleSheet(f"color: {style['fg']};")
+        bubble_layout.addWidget(body_label)
+
+        # Meta label (sender · time or time · Sent ✓)
+        if self._data.bubble_type == BubbleType.OUTBOUND:
+            meta_text = f"{self._data.timestamp} · Sent ✓"
+            meta_align = Qt.AlignRight
+        else:
+            meta_text = f"{self._data.sender} · {self._data.timestamp}"
+            meta_align = Qt.AlignLeft
+
+        meta = QLabel(meta_text)
+        meta_font = QFont()
+        meta_font.setPointSize(10)
+        meta.setFont(meta_font)
+        meta.setStyleSheet("color: #6b7280;")
+        meta.setAlignment(meta_align)
+        bubble_layout.addWidget(meta)
+
+        bubble.setStyleSheet(
+            f"background-color: {style['bg']}; border-radius: 12px;"
+        )
+
+        ml = style["margin_left"]
+        mr = style["margin_right"]
+        outer.setContentsMargins(ml, 0, mr, 0)
+        outer.addWidget(bubble)
+
+        if style["align"] == Qt.AlignLeft:
+            outer.addStretch()
+
+    def _update_accessible(self) -> None:
+        btype = self._data.bubble_type
+        if btype == BubbleType.INBOUND:
+            direction = "Inbound"
+            body = self._data.body
+        elif btype == BubbleType.OUTBOUND:
+            direction = "Outbound"
+            body = self._data.body
+        elif btype == BubbleType.BODY_UNAVAILABLE:
+            direction = "Inbound"
+            body = "content unavailable"
+        else:
+            direction = "Inbound"
+            body = self._data.body
+
+        self.setAccessibleName(
+            f"{direction}: {body} — from {self._data.sender} at {self._data.timestamp}"
+        )
+
+
+class ThreadHeader(QWidget):
+    """Thread header bar (h=56): contact name + phone + type badge."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(56)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setStyleSheet("background: #ffffff; border-bottom: 1px solid #e5e7eb;")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(2)
+
+        self._name_label = QLabel("")
+        name_font = QFont()
+        name_font.setPointSize(18)
+        self._name_label.setFont(name_font)
+        self._name_label.setStyleSheet("color: #111827;")
+        layout.addWidget(self._name_label)
+
+        self._phone_label = QLabel("")
+        phone_font = QFont()
+        phone_font.setPointSize(12)
+        self._phone_label.setFont(phone_font)
+        self._phone_label.setStyleSheet("color: #6b7280;")
+        layout.addWidget(self._phone_label)
+
+    def update_contact(self, name: str, phone: str, message_type: str = "SMS") -> None:
+        self._name_label.setText(name)
+        self._phone_label.setText(f"{phone}  ·  {message_type}")
+
+
+class ThreadView(QWidget):
+    """Right pane (minus compose): thread header + scrollable message bubbles."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._build()
+
+    def _build(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._header = ThreadHeader()
+        layout.addWidget(self._header)
+
+        # Scrollable message area
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+
+        self._messages_container = QWidget()
+        self._messages_layout = QVBoxLayout(self._messages_container)
+        self._messages_layout.setContentsMargins(8, 8, 8, 8)
+        self._messages_layout.setSpacing(4)
+
+        # Empty state label
+        self._empty_label = QLabel("Select a conversation to read messages")
+        empty_font = QFont()
+        empty_font.setPointSize(14)
+        self._empty_label.setFont(empty_font)
+        self._empty_label.setStyleSheet("color: #9ca3af;")
+        self._empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_label.setAccessibleName("No conversation selected")
+        self._messages_layout.addStretch()
+        self._messages_layout.addWidget(self._empty_label, alignment=Qt.AlignCenter)
+        self._messages_layout.addStretch()
+
+        self._scroll.setWidget(self._messages_container)
+        self.setAccessibleName("No conversation selected")
+        layout.addWidget(self._scroll, stretch=1)
+
+    def load_thread(
+        self,
+        name: str,
+        phone: str,
+        messages: list[MessageData],
+        message_type: str = "SMS",
+    ) -> None:
+        self._header.update_contact(name, phone, message_type)
+
+        # Clear existing bubbles (keep empty label and stretches)
+        while self._messages_layout.count():
+            item = self._messages_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not messages:
+            self._messages_layout.addStretch()
+            self._messages_layout.addWidget(self._empty_label, alignment=Qt.AlignCenter)
+            self._messages_layout.addStretch()
+            return
+
+        self._messages_layout.addStretch()
+        for msg in messages:
+            bubble = MessageBubble(msg)
+            self._messages_layout.addWidget(bubble)
+
+        # Scroll to latest
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self._scroll.verticalScrollBar().setValue(
+            self._scroll.verticalScrollBar().maximum()
+        ))
+
+    def show_empty(self) -> None:
+        while self._messages_layout.count():
+            item = self._messages_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._messages_layout.addStretch()
+        self._messages_layout.addWidget(self._empty_label, alignment=Qt.AlignCenter)
+        self._messages_layout.addStretch()
+        self._header.update_contact("", "", "")
