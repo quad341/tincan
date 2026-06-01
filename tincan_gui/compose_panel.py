@@ -38,7 +38,7 @@ class _MessageInput(QPlainTextEdit):
     send_requested = Signal()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        is_return = event.key() in (Qt.Key.Key_Return, Qt.Key_Return)
+        is_return = event.key() == Qt.Key.Key_Return
         is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         if is_return and not is_shift:
             self.send_requested.emit()

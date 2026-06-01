@@ -187,10 +187,10 @@ class MainWindow(QMainWindow):
             self._title_bar.set_disconnected()
 
     def _apply_capabilities(self, caps: dict) -> None:
+        # tincan-56i GetStatus capabilities keys: 'messages', 'contacts'.
+        # 'ancs' is not yet in the spec — StateCBanner is driven by CapabilityChanged only.
         messages_ok = bool(caps.get("messages", True))
         self._banner_b.setVisible(not messages_ok)
-        ancs_ok = bool(caps.get("ancs", True))
-        self._banner_c.setVisible(not ancs_ok)
 
     @property
     def conversation_list(self) -> ConversationListWidget:
@@ -268,14 +268,16 @@ class MainWindow(QMainWindow):
         convs = self._dbus_client.list_conversations()
         if not convs:
             return
+        # tincan-56i §2.2 Conversation dict keys: id, display_name, participants,
+        # last_message_at. No preview or unread_count in the current spec.
         items = [
             ConversationData(
                 id=str(c.get("id", "")),
                 name=str(c.get("display_name", c.get("id", ""))),
                 phone=str(c.get("id", "")),
-                preview=str(c.get("last_message_preview", "")),
+                preview="",          # no preview field in tincan-56i §2.2
                 timestamp=str(c.get("last_message_at", ""))[:5],
-                unread=bool(c.get("unread_count", 0)),
+                unread=False,        # no unread_count field in tincan-56i §2.2
             )
             for c in convs
         ]

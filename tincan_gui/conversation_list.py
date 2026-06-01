@@ -157,7 +157,7 @@ class ConversationItem(QWidget):
         super().mousePressEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in (Qt.Key_Return, Qt.Key_Space):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Space):
             self.activated.emit(self._data.id)
         else:
             super().keyPressEvent(event)
@@ -339,13 +339,13 @@ class ConversationListWidget(QWidget):
             self._items[index].setFocus()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key_Down:
+        if event.key() == Qt.Key.Key_Down:
             next_idx = min(self._selected_index + 1, len(self._items) - 1)
             self._select_index(next_idx)
-        elif event.key() == Qt.Key_Up:
+        elif event.key() == Qt.Key.Key_Up:
             prev_idx = max(self._selected_index - 1, 0)
             self._select_index(prev_idx)
-        elif event.key() in (Qt.Key_Return, Qt.Key_Space):
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Space):
             if 0 <= self._selected_index < len(self._items):
                 item = self._items[self._selected_index]
                 self.conversation_selected.emit(item.conversation_id)
