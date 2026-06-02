@@ -11,7 +11,7 @@ from gi.repository import GLib
 
 _log = logging.getLogger(__name__)
 
-_BACKENDS = {"mock", "bluez-map"}
+_BACKENDS = {"mock", "bluez-map", "ancs"}
 
 
 def _parse_args() -> argparse.Namespace:
@@ -56,6 +56,9 @@ def _select_backend(name: str) -> object:
     if name == "bluez-map":
         from tincand.backends.bluez_map import MapBackend
         return MapBackend()
+    if name == "ancs":
+        from tincand.backends.ancs import AncsBackend
+        return AncsBackend()
     sys.exit(f"Unknown backend: {name!r}. Must be one of: {', '.join(sorted(_BACKENDS))}")
 
 
