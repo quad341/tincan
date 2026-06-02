@@ -1,5 +1,5 @@
 """Tests: ANCSBackend — corrected GATT consumer model.
-Bead: tincan-2ee
+Beads: tincan-2ee (§1-§13), tincan-d3ew (§14-§21)
 
 Coverage:
   §1  BackendInterface compliance — list_conversations, register_service
@@ -15,6 +15,14 @@ Coverage:
   §11 GATT consumer contract — SolicitUUIDs adv, no local GattApplication registered
   §12 LE bond flow — Bonded=True skips Pair(); Bonded=False calls Pair(); failure path
   §13 ANCS service not found — set_capability(False), graceful exit, no crash
+  §14 _check_notifying_after_subscribe — Notifying=True → ACTIVE; False → HEALING
+  §15 _health_check — Notifying=True → SOURCE_CONTINUE; False → HEALING + SOURCE_REMOVE
+  §16 _enter_healing — clears capability, cancels health check, resets counter, arms heal timer
+  §17 _attempt_le_rearm — increments counter; enters FALLBACK on 3rd attempt
+  §18 _enter_fallback — sets ancs_needs_repair; safe without service
+  §19 stop() timer cleanup — GLib.source_remove called for armed timers; IDs cleared to None
+  §20 disconnect() timer cleanup — same pattern as stop()
+  §21 double-subscribe guard — second _on_device_connected while subscribed is a no-op
 
 No hardware or real D-Bus — all D-Bus objects mocked.
 Run with: QT_QPA_PLATFORM=offscreen python -m pytest tests/tincand/test_ancs_backend.py -v
@@ -876,3 +884,386 @@ class TestAncsServiceNotFound:
             backend._on_device_connected(_DEV_PATH)  # _DEV_PATH ≠ other_dev
 
         mock_service.set_capability.assert_called_with("ancs", False)
+
+
+# ---------------------------------------------------------------------------
+# §14 _check_notifying_after_subscribe — 500 ms post-subscribe Notifying poll
+# ---------------------------------------------------------------------------
+
+class TestCheckNotifyingAfterSubscribe:
+    """500 ms post-subscribe poll: both Notifying=True → ACTIVE; either False → HEALING."""
+
+    def test_both_notifying_true_arms_30s_health_check_timer(self, subscribed):
+        backend, *_ = subscribed
+        with (
+            patch("tincand.backends.ancs.GLib.timeout_add", return_value=42) as mock_add,
+            patch.object(backend, "_verify_notifying", return_value=True),
+        ):
+            backend._check_notifying_after_subscribe()
+        mock_add.assert_called_once_with(30_000, backend._health_check)
+
+    def test_both_notifying_true_stores_health_check_id(self, subscribed):
+        backend, *_ = subscribed
+        with (
+            patch("tincand.backends.ancs.GLib.timeout_add", return_value=42),
+            patch.object(backend, "_verify_notifying", return_value=True),
+        ):
+            backend._check_notifying_after_subscribe()
+        assert backend._health_check_id == 42
+
+    def test_both_notifying_true_returns_source_remove(self, subscribed):
+        from gi.repository import GLib as _G
+        backend, *_ = subscribed
+        with (
+            patch("tincand.backends.ancs.GLib.timeout_add"),
+            patch.object(backend, "_verify_notifying", return_value=True),
+        ):
+            result = backend._check_notifying_after_subscribe()
+        assert result == _G.SOURCE_REMOVE
+
+    def test_notif_src_notifying_false_calls_enter_healing(self, subscribed):
+        backend, *_ = subscribed
+        notifying = {backend._notif_src_path: False, backend._data_src_path: True}
+        with (
+            patch("tincand.backends.ancs.GLib.timeout_add"),
+            patch.object(backend, "_verify_notifying", side_effect=lambda p: notifying[p]),
+            patch.object(backend, "_enter_healing") as mock_heal,
+        ):
+            backend._check_notifying_after_subscribe()
+        mock_heal.assert_called_once()
+
+    def test_data_src_notifying_false_calls_enter_healing(self, subscribed):
+        backend, *_ = subscribed
+        notifying = {backend._notif_src_path: True, backend._data_src_path: False}
+        with (
+            patch("tincand.backends.ancs.GLib.timeout_add"),
+            patch.object(backend, "_verify_notifying", side_effect=lambda p: notifying[p]),
+            patch.object(backend, "_enter_healing") as mock_heal,
+        ):
+            backend._check_notifying_after_subscribe()
+        mock_heal.assert_called_once()
+
+    def test_healing_path_returns_source_remove(self, subscribed):
+        from gi.repository import GLib as _G
+        backend, *_ = subscribed
+        with (
+            patch.object(backend, "_verify_notifying", return_value=False),
+            patch.object(backend, "_enter_healing"),
+        ):
+            result = backend._check_notifying_after_subscribe()
+        assert result == _G.SOURCE_REMOVE
+
+    def test_bus_none_returns_source_remove_immediately(self, ctx):
+        from gi.repository import GLib as _G
+        backend, *_ = ctx
+        assert backend._bus is None
+        result = backend._check_notifying_after_subscribe()
+        assert result == _G.SOURCE_REMOVE
+
+
+# ---------------------------------------------------------------------------
+# §15 _health_check — 30 s ACTIVE health poll
+# ---------------------------------------------------------------------------
+
+class TestHealthCheck:
+    """_health_check: Notifying=True → SOURCE_CONTINUE; False → HEALING + SOURCE_REMOVE."""
+
+    def test_both_notifying_true_returns_source_continue(self, subscribed):
+        from gi.repository import GLib as _G
+        backend, *_ = subscribed
+        with patch.object(backend, "_verify_notifying", return_value=True):
+            result = backend._health_check()
+        assert result == _G.SOURCE_CONTINUE
+
+    def test_both_notifying_true_does_not_enter_healing(self, subscribed):
+        backend, *_ = subscribed
+        with (
+            patch.object(backend, "_verify_notifying", return_value=True),
+            patch.object(backend, "_enter_healing") as mock_heal,
+        ):
+            backend._health_check()
+        mock_heal.assert_not_called()
+
+    def test_notifying_false_calls_enter_healing(self, subscribed):
+        backend, *_ = subscribed
+        with (
+            patch.object(backend, "_verify_notifying", return_value=False),
+            patch.object(backend, "_enter_healing") as mock_heal,
+        ):
+            backend._health_check()
+        mock_heal.assert_called_once()
+
+    def test_notifying_false_returns_source_remove(self, subscribed):
+        from gi.repository import GLib as _G
+        backend, *_ = subscribed
+        with (
+            patch.object(backend, "_verify_notifying", return_value=False),
+            patch.object(backend, "_enter_healing"),
+        ):
+            result = backend._health_check()
+        assert result == _G.SOURCE_REMOVE
+
+    def test_notifying_false_clears_health_check_id(self, subscribed):
+        backend, *_ = subscribed
+        backend._health_check_id = 99
+        with (
+            patch.object(backend, "_verify_notifying", return_value=False),
+            patch.object(backend, "_enter_healing"),
+        ):
+            backend._health_check()
+        assert backend._health_check_id is None
+
+    def test_bus_none_clears_health_check_id_returns_source_remove(self, ctx):
+        from gi.repository import GLib as _G
+        backend, *_ = ctx
+        backend._health_check_id = 77
+        result = backend._health_check()
+        assert backend._health_check_id is None
+        assert result == _G.SOURCE_REMOVE
+
+    def test_notif_src_path_none_clears_id_returns_source_remove(self, subscribed):
+        from gi.repository import GLib as _G
+        backend, *_ = subscribed
+        backend._notif_src_path = None
+        backend._health_check_id = 55
+        result = backend._health_check()
+        assert backend._health_check_id is None
+        assert result == _G.SOURCE_REMOVE
+
+
+# ---------------------------------------------------------------------------
+# §16 _enter_healing — HEALING state entry
+# ---------------------------------------------------------------------------
+
+class TestEnterHealing:
+    """_enter_healing: clears capability, cancels health check, resets counter, arms timer."""
+
+    def test_sets_capability_ancs_false(self, subscribed):
+        backend, _, _, mock_service = subscribed
+        mock_service.reset_mock()
+        with patch("tincand.backends.ancs.GLib.timeout_add"):
+            backend._enter_healing()
+        mock_service.set_capability.assert_called_with("ancs", False)
+
+    def test_cancels_health_check_timer_when_set(self, subscribed):
+        backend, *_ = subscribed
+        backend._health_check_id = 99
+        with (
+            patch("tincand.backends.ancs.GLib.source_remove") as mock_remove,
+            patch("tincand.backends.ancs.GLib.timeout_add"),
+        ):
+            backend._enter_healing()
+        mock_remove.assert_called_with(99)
+
+    def test_health_check_id_none_after_enter_healing(self, subscribed):
+        backend, *_ = subscribed
+        backend._health_check_id = 99
+        with (
+            patch("tincand.backends.ancs.GLib.source_remove"),
+            patch("tincand.backends.ancs.GLib.timeout_add"),
+        ):
+            backend._enter_healing()
+        assert backend._health_check_id is None
+
+    def test_no_source_remove_when_health_check_id_is_none(self, subscribed):
+        backend, *_ = subscribed
+        backend._health_check_id = None
+        with (
+            patch("tincand.backends.ancs.GLib.source_remove") as mock_remove,
+            patch("tincand.backends.ancs.GLib.timeout_add"),
+        ):
+            backend._enter_healing()
+        mock_remove.assert_not_called()
+
+    def test_resets_heal_attempts_to_zero(self, subscribed):
+        backend, *_ = subscribed
+        backend._heal_attempts = 2
+        with patch("tincand.backends.ancs.GLib.timeout_add"):
+            backend._enter_healing()
+        assert backend._heal_attempts == 0
+
+    def test_arms_5s_heal_timer(self, subscribed):
+        backend, *_ = subscribed
+        with patch("tincand.backends.ancs.GLib.timeout_add") as mock_add:
+            backend._enter_healing()
+        mock_add.assert_called_once_with(5_000, backend._attempt_le_rearm)
+
+    def test_stores_heal_timer_id(self, subscribed):
+        backend, *_ = subscribed
+        with patch("tincand.backends.ancs.GLib.timeout_add", return_value=55):
+            backend._enter_healing()
+        assert backend._heal_timer_id == 55
+
+
+# ---------------------------------------------------------------------------
+# §17 _attempt_le_rearm — HEALING body, max 3 attempts
+# ---------------------------------------------------------------------------
+
+class TestAttemptLeRearm:
+    """_attempt_le_rearm: increments counter; enters FALLBACK on 3rd attempt."""
+
+    @pytest.fixture
+    def healing_backend(self, ctx):
+        backend, _, _, mock_service = ctx
+        backend._heal_attempts = 0
+        return backend, mock_service
+
+    def test_increments_heal_attempts(self, healing_backend):
+        backend, _ = healing_backend
+        backend._attempt_le_rearm()
+        assert backend._heal_attempts == 1
+
+    def test_first_attempt_returns_source_continue(self, healing_backend):
+        from gi.repository import GLib as _G
+        backend, _ = healing_backend
+        result = backend._attempt_le_rearm()
+        assert result == _G.SOURCE_CONTINUE
+
+    def test_second_attempt_returns_source_continue(self, healing_backend):
+        from gi.repository import GLib as _G
+        backend, _ = healing_backend
+        backend._heal_attempts = 1
+        result = backend._attempt_le_rearm()
+        assert result == _G.SOURCE_CONTINUE
+
+    def test_third_attempt_calls_enter_fallback(self, healing_backend):
+        backend, _ = healing_backend
+        backend._heal_attempts = 2
+        with patch.object(backend, "_enter_fallback") as mock_fallback:
+            backend._attempt_le_rearm()
+        mock_fallback.assert_called_once()
+
+    def test_third_attempt_returns_source_remove(self, healing_backend):
+        from gi.repository import GLib as _G
+        backend, _ = healing_backend
+        backend._heal_attempts = 2
+        with patch.object(backend, "_enter_fallback"):
+            result = backend._attempt_le_rearm()
+        assert result == _G.SOURCE_REMOVE
+
+    def test_third_attempt_clears_heal_timer_id(self, healing_backend):
+        backend, _ = healing_backend
+        backend._heal_attempts = 2
+        backend._heal_timer_id = 55
+        with patch.object(backend, "_enter_fallback"):
+            backend._attempt_le_rearm()
+        assert backend._heal_timer_id is None
+
+
+# ---------------------------------------------------------------------------
+# §18 _enter_fallback — FALLBACK state
+# ---------------------------------------------------------------------------
+
+class TestEnterFallback:
+    """_enter_fallback sets ancs_needs_repair=True; no crash without service."""
+
+    def test_sets_capability_ancs_needs_repair_true(self, subscribed):
+        backend, _, _, mock_service = subscribed
+        mock_service.reset_mock()
+        backend._enter_fallback()
+        mock_service.set_capability.assert_called_with("ancs_needs_repair", True)
+
+    def test_no_crash_when_service_is_none(self, ctx):
+        backend, *_ = ctx
+        backend._service = None
+        backend._enter_fallback()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# §19 stop() clears both timer IDs
+# ---------------------------------------------------------------------------
+
+class TestStopClearsTimers:
+    """stop() calls GLib.source_remove for armed timers; both IDs are None after."""
+
+    def test_stop_calls_source_remove_for_health_check_id(self, started):
+        backend, *_ = started
+        backend._health_check_id = 77
+        with patch("tincand.backends.ancs.GLib.source_remove") as mock_remove:
+            backend.stop()
+        mock_remove.assert_any_call(77)
+
+    def test_stop_clears_health_check_id_to_none(self, started):
+        backend, *_ = started
+        backend._health_check_id = 77
+        with patch("tincand.backends.ancs.GLib.source_remove"):
+            backend.stop()
+        assert backend._health_check_id is None
+
+    def test_stop_calls_source_remove_for_heal_timer_id(self, started):
+        backend, *_ = started
+        backend._heal_timer_id = 88
+        with patch("tincand.backends.ancs.GLib.source_remove") as mock_remove:
+            backend.stop()
+        mock_remove.assert_any_call(88)
+
+    def test_stop_clears_heal_timer_id_to_none(self, started):
+        backend, *_ = started
+        backend._heal_timer_id = 88
+        with patch("tincand.backends.ancs.GLib.source_remove"):
+            backend.stop()
+        assert backend._heal_timer_id is None
+
+    def test_stop_skips_source_remove_when_timers_are_none(self, started):
+        backend, *_ = started
+        assert backend._health_check_id is None
+        assert backend._heal_timer_id is None
+        with patch("tincand.backends.ancs.GLib.source_remove") as mock_remove:
+            backend.stop()
+        mock_remove.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §20 _on_device_disconnected() clears both timer IDs
+# ---------------------------------------------------------------------------
+
+class TestDisconnectClearsTimers:
+    """_on_device_disconnected cancels and clears both health check and heal timers."""
+
+    def test_disconnect_calls_source_remove_for_health_check_id(self, subscribed):
+        backend, *_ = subscribed
+        backend._health_check_id = 33
+        with patch("tincand.backends.ancs.GLib.source_remove") as mock_remove:
+            backend._on_device_disconnected()
+        mock_remove.assert_any_call(33)
+
+    def test_disconnect_clears_health_check_id_to_none(self, subscribed):
+        backend, *_ = subscribed
+        backend._health_check_id = 33
+        with patch("tincand.backends.ancs.GLib.source_remove"):
+            backend._on_device_disconnected()
+        assert backend._health_check_id is None
+
+    def test_disconnect_calls_source_remove_for_heal_timer_id(self, subscribed):
+        backend, *_ = subscribed
+        backend._heal_timer_id = 44
+        with patch("tincand.backends.ancs.GLib.source_remove") as mock_remove:
+            backend._on_device_disconnected()
+        mock_remove.assert_any_call(44)
+
+    def test_disconnect_clears_heal_timer_id_to_none(self, subscribed):
+        backend, *_ = subscribed
+        backend._heal_timer_id = 44
+        with patch("tincand.backends.ancs.GLib.source_remove"):
+            backend._on_device_disconnected()
+        assert backend._heal_timer_id is None
+
+
+# ---------------------------------------------------------------------------
+# §21 Double-subscribe guard
+# ---------------------------------------------------------------------------
+
+class TestDoubleSubscribeGuard:
+    """Second _on_device_connected while _notif_src_path is set is a no-op."""
+
+    def test_second_connected_does_not_call_set_capability_again(self, subscribed):
+        backend, _, _, mock_service = subscribed
+        mock_service.reset_mock()
+        backend._on_device_connected(_DEV_PATH)
+        mock_service.set_capability.assert_not_called()
+
+    def test_second_connected_does_not_call_get_object_again(self, subscribed):
+        backend, mock_bus, *_ = subscribed
+        initial_count = mock_bus.get_object.call_count
+        backend._on_device_connected(_DEV_PATH)
+        assert mock_bus.get_object.call_count == initial_count
