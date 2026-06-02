@@ -113,7 +113,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(600, 400)
         self._current_phone: str = ""     # phone for the open conversation
         self._connected_device: str = ""  # address of the connected BT device
-        self._notifier = DesktopNotifier()
+        self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
         self._load_stub_data()
@@ -344,9 +344,19 @@ class MainWindow(QMainWindow):
         )
         self._conv_list.update_item(conv_id, data)
 
+    def _on_notification_clicked(self, conversation_id: str) -> None:
+        """Raise window and select conversation when user clicks a notification."""
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if conversation_id:
+            self._conv_list.select_conversation(conversation_id)
+
     def _open_settings(self) -> None:
         from tincan_gui.settings_dialog import SettingsDialog
         dlg = SettingsDialog(self)
+        if hasattr(self, "_tray"):
+            dlg.notifications_toggled.connect(self._tray.sync_notifications_action)
         dlg.exec()
 
     def _on_show_notifications_help(self) -> None:

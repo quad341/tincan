@@ -4,8 +4,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QSystemTrayIcon
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+
+from tincan_gui._settings import app_settings
 
 if TYPE_CHECKING:
     from tincan_gui.main import MainWindow
@@ -71,6 +73,7 @@ class TrayIcon(QSystemTrayIcon):
         self._connected = False
         self._unread = 0
         self._update()
+        self._build_menu()
         self.activated.connect(self._on_activated)
         if self.isSystemTrayAvailable():
             self.show()
@@ -95,9 +98,53 @@ class TrayIcon(QSystemTrayIcon):
             self._unread = 0
             self._update()
 
+    def sync_notifications_action(self, enabled: bool) -> None:
+        """Sync tray notifications toggle when the Settings dialog changes it."""
+        self._notif_action.setChecked(enabled)
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _build_menu(self) -> None:
+        menu = QMenu()
+        menu.aboutToShow.connect(self._on_menu_about_to_show)
+
+        self._notif_action = QAction("Desktop notifications", menu)
+        self._notif_action.setCheckable(True)
+        self._notif_action.triggered.connect(self._on_notifications_toggled)
+        menu.addAction(self._notif_action)
+
+        menu.addSeparator()
+
+        open_action = QAction("Open tincan", menu)
+        open_action.triggered.connect(self._raise_window)
+        menu.addAction(open_action)
+
+        settings_action = QAction("Settings...", menu)
+        settings_action.triggered.connect(self._window._open_settings)
+        menu.addAction(settings_action)
+
+        menu.addSeparator()
+
+        quit_action = QAction("Quit", menu)
+        quit_action.triggered.connect(QApplication.quit)
+        menu.addAction(quit_action)
+
+        self.setContextMenu(menu)
+
+    def _on_menu_about_to_show(self) -> None:
+        enabled = app_settings().value("notifications/desktop_enabled", True, type=bool)
+        self._notif_action.setChecked(enabled)
+
+    def _on_notifications_toggled(self, checked: bool) -> None:
+        app_settings().setValue("notifications/desktop_enabled", checked)
+
+    def _raise_window(self) -> None:
+        self._window.show()
+        self._window.raise_()
+        self._window.activateWindow()
+        self.reset_unread()
 
     def _update(self) -> None:
         self.setIcon(_make_icon(self._connected, self._unread))
@@ -111,7 +158,4 @@ class TrayIcon(QSystemTrayIcon):
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:  # left-click
-            self._window.show()
-            self._window.raise_()
-            self._window.activateWindow()
-            self.reset_unread()
+            self._raise_window()

@@ -2,11 +2,13 @@
 
 Sends freedesktop.org Notify() calls via dbus-python. Dedup guard
 tracks (body, timestamp) per conversation to suppress replay/reconnect
-duplicates before the Notify() call.
+duplicates before the Notify() call. ActionInvoked listener raises
+the main window and selects the conversation on click.
 """
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 _log = logging.getLogger(__name__)
 
@@ -26,10 +28,43 @@ class DesktopNotifier:
 
     The dedup guard (per conversation) lives here in the receive path — the
     Notify() call itself is always fire-and-forget with no dedup logic.
+
+    on_action_invoked: optional Callable(conversation_id) called when the user
+    clicks a notification (ActionInvoked with action_id='default').
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_action_invoked: Callable[[str], None] | None = None) -> None:
         self._seen: dict[str, set[tuple[str, str]]] = {}
+        self._notif_to_conv: dict[int, str] = {}
+        self._on_action_invoked = on_action_invoked
+        self._action_sub = None
+        self._bus = None
+
+    def _ensure_bus(self) -> object | None:
+        if self._bus is not None:
+            return self._bus
+        try:
+            import dbus
+            import dbus.mainloop.glib
+            dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+            self._bus = dbus.SessionBus()
+            if self._on_action_invoked:
+                self._bus.add_signal_receiver(
+                    self._on_action_invoked_signal,
+                    signal_name="ActionInvoked",
+                    dbus_interface=_NOTIF_IFACE,
+                    bus_name=_NOTIF_SERVICE,
+                    path=_NOTIF_PATH,
+                )
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("Could not subscribe to ActionInvoked: %s", exc)
+        return self._bus
+
+    def _on_action_invoked_signal(self, notif_id: int, action_id: str) -> None:
+        if action_id == "default" and self._on_action_invoked:
+            conv_id = self._notif_to_conv.get(int(notif_id), "")
+            if conv_id:
+                self._on_action_invoked(conv_id)
 
     def dispatch(self, message: dict) -> None:
         """Send a desktop notification if the message warrants one."""
@@ -71,19 +106,28 @@ class DesktopNotifier:
         body_text = str(message.get("body", "")).strip()
         body = _truncate(body_text, 100) if body_text else "New message"
 
+        conv_id = str(
+            message.get("conversation_id") or message.get("from") or ""
+        )
+
         try:
-            bus = dbus.SessionBus()
+            bus = self._ensure_bus()
+            if bus is None:
+                import dbus
+                bus = dbus.SessionBus()
             proxy = bus.get_object(_NOTIF_SERVICE, _NOTIF_PATH)
             iface = dbus.Interface(proxy, _NOTIF_IFACE)
-            iface.Notify(
+            notif_id = iface.Notify(
                 "tincan",
                 dbus.UInt32(0),
                 "tincan",
                 summary,
                 body,
-                dbus.Array([], signature="s"),
+                dbus.Array(["default", "Open"], signature="s"),
                 dbus.Dictionary({}, signature="sv"),
                 dbus.Int32(0),
             )
+            if conv_id:
+                self._notif_to_conv[int(notif_id)] = conv_id
         except dbus.DBusException as exc:
             _log.warning("Desktop notification failed: %s", exc)

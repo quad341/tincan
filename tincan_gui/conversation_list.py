@@ -392,6 +392,10 @@ class ConversationListWidget(QWidget):
         """Clear search input and show all rows."""
         self._search.clear()
 
+    def select_conversation(self, conv_id: str) -> None:
+        """Programmatically select and open a conversation by ID."""
+        self._on_item_activated(conv_id)
+
     def _on_item_activated(self, conv_id: str) -> None:
         for i, item in enumerate(self._items):
             if item.conversation_id == conv_id:
