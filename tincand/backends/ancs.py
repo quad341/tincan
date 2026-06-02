@@ -299,27 +299,33 @@ class ANCSBackend(BackendInterface):
         if self._bus is None:
             return
 
-        if self._device_addr:
-            # Filter: only handle the configured target device
-            device_addr_from_path = str(device_path).split("/")[-1].replace("_", ":").upper()
-            if device_addr_from_path != self._device_addr.upper():
-                _log.debug(
-                    "ANCSBackend: ignoring connection from %s (expecting %s)",
-                    device_addr_from_path, self._device_addr,
-                )
-                return
-
-        # Initiate LE bond (triggers iOS notification access prompt if not bonded)
+        # Get device properties via Device1 interface
         try:
             device_iface = dbus.Interface(
                 self._bus.get_object("org.bluez", device_path),
                 _DEVICE_IFACE,
             )
-            props = dbus.Interface(
-                self._bus.get_object("org.bluez", device_path),
-                _PROPS_IFACE,
-            )
-            bonded = bool(props.Get(_DEVICE_IFACE, "Bonded"))
+        except dbus.exceptions.DBusException as exc:
+            _log.warning("ANCSBackend: cannot get device interface for %s: %s", device_path, exc)
+            return
+
+        if self._device_addr:
+            # Filter: only handle the configured target device (case-insensitive)
+            try:
+                device_addr = str(device_iface.Get(_DEVICE_IFACE, "Address"))
+            except dbus.exceptions.DBusException as exc:
+                _log.warning("ANCSBackend: cannot read device address: %s", exc)
+                return
+            if device_addr.upper() != self._device_addr.upper():
+                _log.debug(
+                    "ANCSBackend: ignoring device %s (filter=%s)",
+                    device_addr, self._device_addr,
+                )
+                return
+
+        # Initiate LE bond (triggers iOS notification access prompt if not bonded)
+        try:
+            bonded = bool(device_iface.Get(_DEVICE_IFACE, "Bonded"))
             if not bonded:
                 _log.info("ANCSBackend: requesting LE bond with %s", device_path)
                 device_iface.Pair()
