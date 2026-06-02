@@ -36,10 +36,25 @@ def _make_base_pixmap(connected: bool) -> QPixmap:
     return px
 
 
-def _make_icon(connected: bool, unread: int) -> QIcon:
-    """Compose base icon + optional red badge for unread count."""
+def _make_icon(connected: bool, unread: int, repair_needed: bool = False) -> QIcon:
+    """Compose base icon + optional badges: error glyph (repair) or unread count."""
     px = _make_base_pixmap(connected)
-    if unread > 0:
+    if repair_needed:
+        p = QPainter(px)
+        p.setRenderHint(QPainter.Antialiasing)
+        bx = _ICON_SIZE - _BADGE_SIZE
+        p.setBrush(QColor("#f97316"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(bx, 0, _BADGE_SIZE, _BADGE_SIZE)
+        font = QFont()
+        font.setPixelSize(7)
+        font.setBold(True)
+        p.setFont(font)
+        p.setPen(QColor("#ffffff"))
+        from PySide6.QtCore import QRect
+        p.drawText(QRect(bx, 0, _BADGE_SIZE, _BADGE_SIZE), Qt.AlignCenter, "!")
+        p.end()
+    elif unread > 0:
         p = QPainter(px)
         p.setRenderHint(QPainter.Antialiasing)
         # Badge circle in top-right corner
@@ -72,6 +87,7 @@ class TrayIcon(QSystemTrayIcon):
         self._window = window
         self._connected = False
         self._unread = 0
+        self._repair_needed = False
         self._update()
         self._build_menu()
         self.activated.connect(self._on_activated)
@@ -85,6 +101,11 @@ class TrayIcon(QSystemTrayIcon):
     def set_connected(self, connected: bool) -> None:
         self._connected = connected
         self._unread = 0  # reset badge on any connection state change
+        self._update()
+
+    def set_repair_needed(self, needs_repair: bool) -> None:
+        """Show/clear the ANCS repair error glyph on the tray icon."""
+        self._repair_needed = needs_repair
         self._update()
 
     def increment_unread(self) -> None:
@@ -147,8 +168,10 @@ class TrayIcon(QSystemTrayIcon):
         self.reset_unread()
 
     def _update(self) -> None:
-        self.setIcon(_make_icon(self._connected, self._unread))
-        if self._unread > 0:
+        self.setIcon(_make_icon(self._connected, self._unread, self._repair_needed))
+        if self._repair_needed:
+            tip = "Tin Can: iPhone notifications unavailable"
+        elif self._unread > 0:
             tip = f"tincan — {self._unread} unread"
         elif self._connected:
             tip = "tincan — connected"

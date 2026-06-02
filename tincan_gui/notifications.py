@@ -1,4 +1,4 @@
-"""Desktop notification dispatch for inbound messages.
+"""Desktop notification dispatch for inbound messages and system alerts.
 
 Sends freedesktop.org Notify() calls via dbus-python. Dedup guard
 tracks (body, timestamp) per conversation to suppress replay/reconnect
@@ -39,6 +39,8 @@ class DesktopNotifier:
         self._on_action_invoked = on_action_invoked
         self._action_sub = None
         self._bus = None
+        self._repair_notif_id: int = 0
+        self._repair_on_reconnect: Callable[[], None] | None = None
 
     def _ensure_bus(self) -> object | None:
         if self._bus is not None:
@@ -61,8 +63,13 @@ class DesktopNotifier:
         return self._bus
 
     def _on_action_invoked_signal(self, notif_id: int, action_id: str) -> None:
+        nid = int(notif_id)
+        if nid == self._repair_notif_id and self._repair_notif_id != 0:
+            if action_id == "default" and self._repair_on_reconnect:
+                self._repair_on_reconnect()
+            return
         if action_id == "default" and self._on_action_invoked:
-            conv_id = self._notif_to_conv.get(int(notif_id), "")
+            conv_id = self._notif_to_conv.get(nid, "")
             if conv_id:
                 self._on_action_invoked(conv_id)
 
@@ -71,6 +78,38 @@ class DesktopNotifier:
         if not self._should_notify(message):
             return
         self._notify(message)
+
+    def dispatch_repair(self, on_reconnect: Callable[[], None] | None = None) -> None:
+        """Send ANCS repair notification with Reconnect and Dismiss actions.
+
+        Rate-limiting is the caller's responsibility (_repair_notified flag in MainWindow).
+        on_reconnect is called when the user activates the Reconnect action.
+        """
+        import dbus
+
+        self._repair_on_reconnect = on_reconnect
+        try:
+            bus = self._ensure_bus()
+            if bus is None:
+                bus = dbus.SessionBus()
+            proxy = bus.get_object(_NOTIF_SERVICE, _NOTIF_PATH)
+            iface = dbus.Interface(proxy, _NOTIF_IFACE)
+            notif_id = iface.Notify(
+                "Tin Can",
+                dbus.UInt32(0),
+                "tincan",
+                "iPhone notifications unavailable",
+                "The Bluetooth LE link could not be re-armed after 3 attempts.",
+                dbus.Array(
+                    ["default", "Reconnect...", "dismiss", "Dismiss"],
+                    signature="s",
+                ),
+                dbus.Dictionary({}, signature="sv"),
+                dbus.Int32(0),
+            )
+            self._repair_notif_id = int(notif_id)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("ANCS repair notification failed: %s", exc)
 
     def _should_notify(self, message: dict) -> bool:
         from tincan_gui._settings import app_settings

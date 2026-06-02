@@ -5,6 +5,7 @@ Object path: /im/tincan
 
 Implements the interface contract from tincan-56i, with amendments:
   tincan-40c: capabilities dict always includes messages/contacts/ancs keys.
+  tincan-5mze: ancs_needs_repair added to capabilities (FALLBACK state indicator).
   tincan-bxs: Conversation dict always includes last_message_preview(s) and
               unread_count(u); unread_count resets on Connect/reconnect,
               increments on inbound unread MessageReceived.
@@ -59,11 +60,13 @@ class TincanService(dbus.service.Object):
         super().__init__(bus_name, OBJECT_PATH)
         self._connected = False
         self._device_address = ""
-        # tincan-40c: all three capability keys always present, default False.
+        # tincan-40c: all capability keys always present, default False.
+        # tincan-5mze: ancs_needs_repair added for FALLBACK state.
         self._capabilities: dict[str, bool] = {
             "messages": False,
             "contacts": False,
             "ancs": False,
+            "ancs_needs_repair": False,
         }
         self._conversations: dict[str, Conversation] = {}
 
@@ -95,7 +98,12 @@ class TincanService(dbus.service.Object):
             return
         self._connected = False
         self._device_address = ""
-        self._capabilities = {"messages": False, "contacts": False, "ancs": False}
+        self._capabilities = {
+            "messages": False,
+            "contacts": False,
+            "ancs": False,
+            "ancs_needs_repair": False,
+        }
         _log.info("Disconnected")
         self.Disconnected()
 
@@ -131,7 +139,7 @@ class TincanService(dbus.service.Object):
     def CapabilityChanged(self, feature: str, available: bool) -> None:  # noqa: N802
         pass
 
-    _KNOWN_CAPABILITIES = frozenset({"messages", "contacts", "ancs"})
+    _KNOWN_CAPABILITIES = frozenset({"messages", "contacts", "ancs", "ancs_needs_repair"})
 
     def set_capability(self, feature: str, available: bool) -> None:
         """Update a capability and emit CapabilityChanged.

@@ -96,6 +96,53 @@ class StateBBanner(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# ANCS Repair: authorization lost — FALLBACK state (tincan-5mze)
+# ---------------------------------------------------------------------------
+
+class ANCSRepairBanner(QWidget):
+    """Persistent orange banner: ancs_needs_repair=True FALLBACK state (h=56, orange). Design: tincan-5mze.3."""  # noqa: E501
+
+    reconnect_clicked = Signal()
+
+    MSG = "iPhone notifications unavailable - authorization lost, tap Reconnect to restore"
+    ACCESSIBLE_NAME = (
+        "iPhone notifications unavailable - authorization lost. "
+        "Activate Reconnect to restore."
+    )
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(56)
+        self.setStyleSheet(
+            "background-color: #fff7ed; border: 1px solid #f97316;"
+        )
+        self.setAccessibleName(self.ACCESSIBLE_NAME)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 8, 0)
+
+        label = QLabel(self.MSG)
+        label_font = QFont()
+        label_font.setPointSize(11)
+        label.setFont(label_font)
+        label.setStyleSheet("color: #c2410c;")
+        label.setWordWrap(True)
+        layout.addWidget(label, stretch=1)
+
+        reconnect_btn = QPushButton("Reconnect...")
+        reconnect_btn.setMinimumWidth(100)
+        reconnect_btn.setAccessibleName("Reconnect")
+        reconnect_btn.setStyleSheet(
+            "QPushButton { color: #c2410c; background: #ffffff; font-size: 12pt;"
+            " border: 1px solid #f97316; border-radius: 4px; padding: 2px 8px; }"
+            "QPushButton:hover { background: #ffedd5; }"
+            "QPushButton:focus { outline: 2px solid #f97316; outline-offset: 2px; }"
+        )
+        reconnect_btn.clicked.connect(self.reconnect_clicked)
+        layout.addWidget(reconnect_btn)
+
+
+# ---------------------------------------------------------------------------
 # State C: ANCS unavailable
 # ---------------------------------------------------------------------------
 
@@ -153,6 +200,9 @@ class StateCBanner(QWidget):
 def _degradation_banner_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
     if isinstance(obj, StateBBanner):
         # State B = urgent: MAP link dropped, messaging broken
+        return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)
+    if isinstance(obj, ANCSRepairBanner):
+        # ANCS repair = urgent: authorization lost, reconnect required
         return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)
     if isinstance(obj, StateCBanner):
         # State C = informational: ANCS missing, send still works (tincan-5en)

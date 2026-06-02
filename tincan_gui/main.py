@@ -22,7 +22,12 @@ from PySide6.QtWidgets import (
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.dbus_client import TincandClient
-from tincan_gui.degradation_banners import StateABanner, StateBBanner, StateCBanner
+from tincan_gui.degradation_banners import (
+    ANCSRepairBanner,
+    StateABanner,
+    StateBBanner,
+    StateCBanner,
+)
 from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
@@ -113,6 +118,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(600, 400)
         self._current_phone: str = ""     # phone for the open conversation
         self._connected_device: str = ""  # address of the connected BT device
+        self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
@@ -143,6 +149,11 @@ class MainWindow(QMainWindow):
         self._banner_b.hide()
         self._banner_b.show_me_how_clicked.connect(self._on_show_notifications_help)
         root_layout.addWidget(self._banner_b)
+
+        # ANCSRepairBanner between State B and State C (tincan-5mze)
+        self._banner_ancs_repair = ANCSRepairBanner()
+        self._banner_ancs_repair.hide()
+        root_layout.addWidget(self._banner_ancs_repair)
 
         self._banner_c = StateCBanner()
         self._banner_c.hide()
@@ -192,6 +203,7 @@ class MainWindow(QMainWindow):
         self._conv_list.focus_thread_requested.connect(self._compose._input.setFocus)
         self._compose.send_requested.connect(self._on_send)
         self._title_bar.gear_button.clicked.connect(self._open_settings)
+        self._banner_ancs_repair.reconnect_clicked.connect(self._open_pairing_wizard)
 
     def _wire_dbus(self) -> None:
         c = self._dbus_client
@@ -218,7 +230,7 @@ class MainWindow(QMainWindow):
             self._title_bar.set_disconnected()
 
     def _apply_capabilities(self, caps: dict) -> None:
-        # tincan-40c guarantees all three keys always present; default False (not
+        # tincan-40c/tincan-5mze: all keys always present; default False (not
         # capable) when a key is absent so degradation banners show conservatively.
         messages_ok = bool(caps.get("messages", False))
         self._banner_b.setVisible(not messages_ok)
@@ -227,15 +239,33 @@ class MainWindow(QMainWindow):
         else:
             self._compose.set_compose_enabled(False, "messaging unavailable")
         ancs_ok = bool(caps.get("ancs", False))
-        self._update_state_c_banner(ancs_ok)
+        ancs_needs_repair = bool(caps.get("ancs_needs_repair", False))
+        self._update_ancs_repair_banner(ancs_needs_repair)
+        self._update_state_c_banner(ancs_ok, ancs_needs_repair)
 
-    def _update_state_c_banner(self, ancs_ok: bool) -> None:
+    def _update_ancs_repair_banner(self, needs_repair: bool) -> None:
+        """Show/hide ANCSRepairBanner; fire FALLBACK notification on first entry."""
+        self._banner_ancs_repair.setVisible(needs_repair)
+        if needs_repair:
+            if hasattr(self, "_tray"):
+                self._tray.set_repair_needed(True)
+            if not self._repair_notified:
+                self._repair_notified = True
+                self._notifier.dispatch_repair(on_reconnect=self._open_pairing_wizard)
+        else:
+            if hasattr(self, "_tray"):
+                self._tray.set_repair_needed(False)
+            self._repair_notified = False
+
+    def _update_state_c_banner(self, ancs_ok: bool, ancs_needs_repair: bool = False) -> None:
         """Show/hide State C banner; update chip to amber when ANCS limited (tincan-om9).
 
+        State C is hidden when ancs_needs_repair=True — ANCSRepairBanner takes precedence.
         Co-exists with State B — messages gate takes priority for compose state.
         Chip color only changes when the device is actually connected.
         """
-        self._banner_c.setVisible(not ancs_ok)
+        show_c = not ancs_ok and not ancs_needs_repair
+        self._banner_c.setVisible(show_c)
         if self._connected_device:
             if ancs_ok:
                 self._title_bar.set_connected(self._connected_device)
@@ -288,6 +318,7 @@ class MainWindow(QMainWindow):
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
+        self._banner_ancs_repair.hide()
         self._banner_c.hide()
         self._compose.set_compose_enabled(False, "not connected")
         self._tray.set_connected(False)
@@ -351,6 +382,13 @@ class MainWindow(QMainWindow):
         self.activateWindow()
         if conversation_id:
             self._conv_list.select_conversation(conversation_id)
+
+    def _open_pairing_wizard(self) -> None:
+        from tincan_gui.pairing_wizard import PairingWizard
+        from tincand.pairing import PairingOrchestrator
+        orch = PairingOrchestrator(on_state_change=lambda state, reason=None: None)
+        wizard = PairingWizard(orchestrator=orch, parent=self)
+        wizard.exec()
 
     def _open_settings(self) -> None:
         from tincan_gui.settings_dialog import SettingsDialog
