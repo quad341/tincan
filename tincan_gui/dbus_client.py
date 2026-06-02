@@ -17,6 +17,12 @@ from PySide6.QtDBus import (
     QDBusReply,
 )
 
+try:
+    import dbus as _dbus
+    _HAVE_DBUS = True
+except ImportError:
+    _HAVE_DBUS = False
+
 _log = logging.getLogger(__name__)
 
 _BUS_NAME = "im.tincan.Daemon"
@@ -239,24 +245,44 @@ class TincandClient(QObject):
     # Daemon method calls (Qt → daemon)
     # ------------------------------------------------------------------
 
+    def _dbus_call(self, iface_name: str, method: str, *args):
+        """Call a tincand method via dbus-python; returns raw dbus result or None.
+
+        dbus-python returns properly-typed Python objects (dbus.Dictionary,
+        dbus.Array, etc.) without QDBusArgument navigation, avoiding the COW
+        read-only cursor bug seen in PySide6 6.11.1 on QDBusArgument.beginMapEntry().
+        Returns None when dbus-python is unavailable, the daemon is absent, or
+        the call fails for any reason.
+        """
+        if not _HAVE_DBUS:
+            return None
+        try:
+            bus = _dbus.SessionBus()
+            obj = bus.get_object(_BUS_NAME, _OBJECT)
+            iface = _dbus.Interface(obj, iface_name)
+            return getattr(iface, method)(*args)
+        except Exception as exc:
+            _log.debug("%s.%s via dbus-python failed: %s", iface_name, method, exc)
+            return None
+
     def get_status(self) -> dict:
         """Call GetStatus.  Returns {} when daemon is absent."""
         if not self._bus.isConnected():
             return {}
+        result = self._dbus_call(_IFACE_DAEMON, "GetStatus")
+        if result is not None:
+            return {str(k): v for k, v in result.items()} if hasattr(result, "items") else {}
+        # Qt fallback: used when dbus-python is unavailable (unit tests with mocks).
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
         if not iface.isValid():
             return {}
         raw = iface.call("GetStatus")
         if isinstance(raw, QDBusMessage):
-            # Live path: use msg.arguments() directly — QDBusReply.value() returns
-            # a QDBusArgument in an invalid read-state on some PySide6 versions,
-            # causing "write from a read-only object" cursor corruption.
             if raw.type() == QDBusMessage.MessageType.ErrorMessage:
                 _log.debug("GetStatus failed: %s", raw.errorMessage())
                 return {}
             args = raw.arguments()
             return _demarshal_map(args[0] if args else {})
-        # Mock/test path: raw is already a QDBusReply-like object.
         reply = _wrap_reply(raw)
         if not reply.isValid():
             _log.debug("GetStatus failed: %s", reply.error().message())
@@ -267,6 +293,14 @@ class TincandClient(QObject):
         """Call ListConversations.  Returns [] when daemon is absent."""
         if not self._bus.isConnected():
             return []
+        result = self._dbus_call(_IFACE_MESSAGES, "ListConversations")
+        if result is not None:
+            return [
+                {str(k): v for k, v in conv.items()}
+                for conv in result
+                if hasattr(conv, "items")
+            ]
+        # Qt fallback: used when dbus-python is unavailable (unit tests with mocks).
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
         if not iface.isValid():
             return []
