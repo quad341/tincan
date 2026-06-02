@@ -107,7 +107,8 @@ class TestLayer2Integration:
                 svc.Connect('AA:BB:CC:DD:EE:FF')
 
             threading.Thread(target=_trigger, daemon=True).start()
-            GLib.timeout_add_seconds(5, lambda: (results.setdefault('timeout', True), loop.quit(), False)[-1])
+            GLib.timeout_add_seconds(5,
+                lambda: (results.setdefault('timeout', True), loop.quit(), False)[-1])
             loop.run()
 
             if results.get('connected') != 'AA:BB:CC:DD:EE:FF':
@@ -115,7 +116,8 @@ class TestLayer2Integration:
                 sys.exit(1)
         """)
         assert result.returncode == 0, (
-            f"Connected signal not received within 5 s.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Connected signal not received within 5 s."
+            f"\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
     def test_message_received_propagates(self):
@@ -161,7 +163,8 @@ class TestLayer2Integration:
                 })
 
             threading.Thread(target=_trigger, daemon=True).start()
-            GLib.timeout_add_seconds(5, lambda: (results.setdefault('timeout', True), loop.quit(), False)[-1])
+            GLib.timeout_add_seconds(5,
+                lambda: (results.setdefault('timeout', True), loop.quit(), False)[-1])
             loop.run()
 
             if results.get('body') != 'Integration test message':
@@ -169,7 +172,8 @@ class TestLayer2Integration:
                 sys.exit(1)
         """)
         assert result.returncode == 0, (
-            f"MessageReceived signal not received.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+            f"MessageReceived signal not received."
+            f"\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
     def test_connect_then_message_received_in_order(self):
@@ -222,7 +226,8 @@ class TestLayer2Integration:
                 })
 
             threading.Thread(target=_trigger, daemon=True).start()
-            GLib.timeout_add_seconds(5, lambda: (sequence.append('timeout'), loop.quit(), False)[-1])
+            GLib.timeout_add_seconds(5,
+                lambda: (sequence.append('timeout'), loop.quit(), False)[-1])
             loop.run()
 
             if 'timeout' in sequence:

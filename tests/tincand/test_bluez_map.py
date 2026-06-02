@@ -42,17 +42,17 @@ import re
 
 import pytest
 
-from tincand.bluez_map import (
-    build_bmessage,
-    map_messages_to_conversations,
-    parse_map_messages,
-)
 from tests.tincand.fixtures.map_inbox_10msg import (
     EXPECTED_ALICE_UNREAD,
     EXPECTED_BOB_UNREAD,
     EXPECTED_CAROL_UNREAD,
     EXPECTED_SENDER_COUNT,
     MAP_INBOX_10MSG,
+)
+from tincand.bluez_map import (
+    build_bmessage,
+    map_messages_to_conversations,
+    parse_map_messages,
 )
 
 # ---------------------------------------------------------------------------

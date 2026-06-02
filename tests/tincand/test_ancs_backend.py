@@ -19,23 +19,19 @@ Run with: QT_QPA_PLATFORM=offscreen python -m pytest tests/tincand/test_ancs_bac
 from __future__ import annotations
 
 import struct
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tincand.backends.ancs import ANCSBackend
 from tincand.ancs_util import (
-    ANCS_SERVICE_UUID,
     ATTR_APP_ID,
     ATTR_MESSAGE,
     ATTR_TITLE,
     CONTROL_POINT_UUID,
     DATA_SOURCE_UUID,
     NOTIF_SOURCE_UUID,
-    ANCSDataBuffer,
-    build_get_attrs_cmd,
-    parse_notification_source,
 )
+from tincand.backends.ancs import ANCSBackend
 
 # ---------------------------------------------------------------------------
 # D-Bus paths used in managed objects fixture
@@ -191,7 +187,6 @@ class TestStart:
     def test_registers_advertisement_exactly_once(self, ctx):
         backend, mock_bus, _, _ = ctx
         with patch("tincand.backends.ancs.dbus.Interface") as mock_iface:
-            mock_adv_mgr = MagicMock()
             mock_iface.return_value = MagicMock()
             backend.start()
         adv_calls = [
