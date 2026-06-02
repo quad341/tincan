@@ -23,6 +23,7 @@ from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import StateABanner, StateBBanner, StateCBanner
+from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
 
@@ -112,6 +113,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(600, 400)
         self._current_phone: str = ""     # phone for the open conversation
         self._connected_device: str = ""  # address of the connected BT device
+        self._notifier = DesktopNotifier()
         self._build()
         self._wire()
         self._load_stub_data()
@@ -307,6 +309,7 @@ class MainWindow(QMainWindow):
         self._apply_capabilities(caps)
 
     def _on_message_received(self, message: dict) -> None:
+        self._notifier.dispatch(message)
         direction = str(message.get("direction", "inbound"))
         body = str(message.get("body", ""))
         sender = str(message.get("sender", ""))
