@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QSizePolicy,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -27,7 +28,7 @@ from tincan_gui.tray import TrayIcon
 
 
 class TitleBar(QWidget):
-    """Title bar (h=48, navy #1e3a5f): wordmark + connection status chip."""
+    """Title bar (h=48, navy #1e3a5f): wordmark + gear button + connection status chip."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -48,6 +49,20 @@ class TitleBar(QWidget):
 
         layout.addStretch()
 
+        self._gear_btn = QToolButton()
+        self._gear_btn.setText("⚙")
+        self._gear_btn.setFixedSize(32, 32)
+        self._gear_btn.setToolTip("Settings")
+        self._gear_btn.setAccessibleName("Settings")
+        self._gear_btn.setStyleSheet(
+            "QToolButton { color: #ffffff; font-size: 16px; border: none;"
+            " background: transparent; }"
+            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+        )
+        layout.addWidget(self._gear_btn)
+
+        layout.addSpacing(8)
+
         self._status_chip = QLabel("○ Disconnected")
         chip_font = QFont()
         chip_font.setPointSize(12)
@@ -55,6 +70,10 @@ class TitleBar(QWidget):
         self._status_chip.setStyleSheet("color: #fca5a5;")
         self._status_chip.setAccessibleName("Connection status: Disconnected")
         layout.addWidget(self._status_chip)
+
+    @property
+    def gear_button(self) -> QToolButton:
+        return self._gear_btn
 
     @property
     def status_chip(self) -> QLabel:
@@ -164,11 +183,13 @@ class MainWindow(QMainWindow):
         )
         QShortcut(QKeySequence("F5"), self).activated.connect(self.refresh_requested.emit)
         QShortcut(QKeySequence("Ctrl+R"), self).activated.connect(self.refresh_requested.emit)
+        QShortcut(QKeySequence("Alt+,"), self).activated.connect(self._open_settings)
 
     def _wire(self) -> None:
         self._conv_list.conversation_selected.connect(self._on_conversation_selected)
         self._conv_list.focus_thread_requested.connect(self._compose._input.setFocus)
         self._compose.send_requested.connect(self._on_send)
+        self._title_bar.gear_button.clicked.connect(self._open_settings)
 
     def _wire_dbus(self) -> None:
         c = self._dbus_client
@@ -319,6 +340,11 @@ class MainWindow(QMainWindow):
             unread_count=unread_count,
         )
         self._conv_list.update_item(conv_id, data)
+
+    def _open_settings(self) -> None:
+        from tincan_gui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self)
+        dlg.exec()
 
     def _on_show_notifications_help(self) -> None:
         from PySide6.QtWidgets import QMessageBox
