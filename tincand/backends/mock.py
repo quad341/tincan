@@ -15,8 +15,6 @@ from tincand.dbus_service import Conversation
 
 _log = logging.getLogger(__name__)
 
-_DEVICE_ADDRESS = "AA:BB:CC:DD:EE:FF"
-
 _CANNED_CONVERSATIONS = [
     Conversation(
         id="c1",
@@ -78,30 +76,37 @@ class MockBackend(BackendInterface):
         self._service: object | None = None
         self._source_id: int | None = None
         self._tick_index: int = 0
+        self._device_addr: str | None = None
 
     # ------------------------------------------------------------------
     # BackendInterface
     # ------------------------------------------------------------------
 
-    def list_conversations(self) -> list:
-        return list(_CANNED_CONVERSATIONS)
-
-    def register_service(self, service: object) -> None:
-        self._service = service
-
-    def start(self) -> None:
+    def connect(self, device_addr: str) -> None:
         if self._service is None:
-            raise RuntimeError("register_service() must be called before start()")
+            raise RuntimeError("register_service() must be called before connect()")
+        self._device_addr = device_addr
         self._load_conversations()
-        self._service.Connect(_DEVICE_ADDRESS)
+        self._service.Connect(device_addr)  # type: ignore[attr-defined]
         self._source_id = GLib.timeout_add_seconds(3, self._on_tick)
-        _log.info("MockBackend started; connected as %s", _DEVICE_ADDRESS)
+        _log.info("MockBackend connected as %s", device_addr)
 
-    def stop(self) -> None:
+    def disconnect(self) -> None:
         if self._source_id is not None:
             GLib.source_remove(self._source_id)
             self._source_id = None
-        _log.info("MockBackend stopped")
+        if self._service is not None and self._device_addr is not None:
+            self._service.Disconnect()  # type: ignore[attr-defined]
+        _log.info("MockBackend disconnected")
+
+    def poll_inbox(self) -> list:
+        return []
+
+    def get_message(self, handle: str) -> object:
+        return None
+
+    def send_message(self, to: str, body: str) -> str:
+        return f"mock-handle-{to}"
 
     # ------------------------------------------------------------------
     # Internal
@@ -109,7 +114,7 @@ class MockBackend(BackendInterface):
 
     def _load_conversations(self) -> None:
         for conv in _CANNED_CONVERSATIONS:
-            self._service.upsert_conversation(conv)
+            self._service.upsert_conversation(conv)  # type: ignore[attr-defined]
 
     def _on_tick(self) -> bool:
         svc = self._service
@@ -128,6 +133,6 @@ class MockBackend(BackendInterface):
             svc.Disconnect()
         elif event_type == "connect":
             self._load_conversations()
-            svc.Connect(_DEVICE_ADDRESS)
+            svc.Connect(self._device_addr or "AA:BB:CC:DD:EE:FF")
 
         return GLib.SOURCE_CONTINUE

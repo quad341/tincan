@@ -5,36 +5,65 @@ import argparse
 import logging
 import os
 import signal
+import sys
 
 from gi.repository import GLib
 
 _log = logging.getLogger(__name__)
 
+_BACKENDS = {"mock", "bluez-map"}
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="tincand — Bluetooth messaging daemon")
     parser.add_argument(
+        "--backend",
+        choices=sorted(_BACKENDS),
+        default=None,
+        help="Backend to use (default: mock)",
+    )
+    parser.add_argument(
         "--mock",
         action="store_true",
-        help="Use mock backend (no real Bluetooth hardware required)",
+        help="Shorthand for --backend mock",
+    )
+    parser.add_argument(
+        "--device",
+        default="AA:BB:CC:DD:EE:FF",
+        help="Bluetooth device address to connect to",
     )
     return parser.parse_args()
 
 
-def _select_backend(use_mock: bool) -> object:
-    if use_mock or os.environ.get("TINCAN_BACKEND") == "mock":
-        from tincand.backends.mock import MockBackend
+def _resolve_backend_name(args: argparse.Namespace) -> str:
+    if args.mock:
+        return "mock"
+    if args.backend is not None:
+        return args.backend
+    env = os.environ.get("TINCAN_BACKEND")
+    if env is not None:
+        if env not in _BACKENDS:
+            choices = ", ".join(sorted(_BACKENDS))
+            sys.exit(f"Unknown backend in TINCAN_BACKEND: {env!r}. Must be one of: {choices}")
+        return env
+    return "mock"
 
+
+def _select_backend(name: str) -> object:
+    if name == "mock":
+        from tincand.backends.mock import MockBackend
         return MockBackend()
-    raise NotImplementedError(
-        "No backend selected. Use --mock or set TINCAN_BACKEND=mock to start the daemon."
-    )
+    if name == "bluez-map":
+        from tincand.backends.bluez_map import MapBackend
+        return MapBackend()
+    sys.exit(f"Unknown backend: {name!r}. Must be one of: {', '.join(sorted(_BACKENDS))}")
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
-    backend = _select_backend(args.mock)
+    backend_name = _resolve_backend_name(args)
+    backend = _select_backend(backend_name)
 
     import dbus.mainloop.glib
 
@@ -56,12 +85,13 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, _on_sigint)
 
-    backend.start()
+    _log.info("tincand starting with backend=%s device=%s", backend_name, args.device)
+    backend.connect(args.device)
     _log.info("tincand started")
     try:
         loop.run()
     finally:
-        backend.stop()
+        backend.disconnect()
         _log.info("tincand stopped")
 
 

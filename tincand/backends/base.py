@@ -7,25 +7,32 @@ from abc import ABC, abstractmethod
 class BackendInterface(ABC):
     """Contract between tincand and a data-source backend.
 
-    The daemon registers a TincanService with the backend via
-    register_service(), then calls start() to begin operation.
-    The backend drives the service by calling its internal helpers
-    (upsert_conversation, on_message_received, set_capability, Connect,
-    Disconnect) rather than going through D-Bus.
+    Concrete backends receive a TincanService reference via register_service()
+    and drive it by calling its helpers (upsert_conversation,
+    on_message_received, set_capability, Connect, Disconnect) rather than
+    going through D-Bus.
     """
 
-    @abstractmethod
-    def list_conversations(self) -> list:
-        """Return current conversations as Conversation dataclass instances."""
-
-    @abstractmethod
     def register_service(self, service: object) -> None:
-        """Attach the TincanService this backend should drive."""
+        """Wire the TincanService this backend should drive."""
+        self._service = service  # type: ignore[attr-defined]
 
     @abstractmethod
-    def start(self) -> None:
-        """Start the backend (connect, begin polling/timers, etc.)."""
+    def connect(self, device_addr: str) -> None:
+        """Establish connection to device at *device_addr*."""
 
     @abstractmethod
-    def stop(self) -> None:
-        """Stop the backend and release all resources."""
+    def disconnect(self) -> None:
+        """Tear down the connection and release resources."""
+
+    @abstractmethod
+    def poll_inbox(self) -> list:
+        """Return new/unread messages available since last poll."""
+
+    @abstractmethod
+    def get_message(self, handle: str) -> object:
+        """Fetch the full message body for *handle*."""
+
+    @abstractmethod
+    def send_message(self, to: str, body: str) -> str:
+        """Send *body* to *to*; return the assigned message handle."""
