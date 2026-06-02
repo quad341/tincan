@@ -190,7 +190,7 @@ class ANCSBackend(BackendInterface):
         return []
 
     def connect(self, device_addr: str) -> None:
-        if device_addr and not self._device_addr:
+        if device_addr:
             self._device_addr = device_addr
         self.start()
 
@@ -233,17 +233,24 @@ class ANCSBackend(BackendInterface):
         except dbus.exceptions.DBusException as exc:
             _log.warning("ANCSBackend: RegisterAgent failed (may already exist): %s", exc)
 
-        # SolicitUUIDs advertisement — signals iPhone to expose its ANCS service
+        # SolicitUUIDs advertisement — signals iPhone to expose its ANCS service.
+        # RegisterAdvertisement MUST be async: BlueZ calls Properties.GetAll on
+        # our advertisement object during registration; a synchronous call blocks
+        # the main thread and cannot service that callback → deadlock → NoReply.
         self._adv = _SolicitAdvertisement(self._bus)
         try:
             adv_mgr = dbus.Interface(
                 self._bus.get_object("org.bluez", self._adapter_path),
                 _LE_ADV_MANAGER_IFACE,
             )
-            adv_mgr.RegisterAdvertisement(_ADV_PATH, {})
-            _log.debug("ANCSBackend: SolicitUUIDs advertisement registered")
+            adv_mgr.RegisterAdvertisement(
+                _ADV_PATH, {},
+                reply_handler=self._on_adv_registered,
+                error_handler=self._on_adv_error,
+            )
+            _log.debug("ANCSBackend: SolicitUUIDs advertisement registration sent (async)")
         except dbus.exceptions.DBusException as exc:
-            _log.warning("ANCSBackend: RegisterAdvertisement failed: %s", exc)
+            _log.warning("ANCSBackend: RegisterAdvertisement call failed: %s", exc)
 
         # Watch for iPhone connection events
         self._bus.add_signal_receiver(
@@ -253,6 +260,12 @@ class ANCSBackend(BackendInterface):
             path_keyword="path",
         )
         _log.info("ANCSBackend: started — listening for ANCS device connection")
+
+    def _on_adv_registered(self) -> None:
+        _log.info("ANCSBackend: SolicitUUIDs advertisement registered — soliciting ANCS")
+
+    def _on_adv_error(self, exc) -> None:
+        _log.warning("ANCSBackend: RegisterAdvertisement failed: %s", exc)
 
     def stop(self) -> None:
         """Unregister advertisement + agent; clean up."""
@@ -388,6 +401,7 @@ class ANCSBackend(BackendInterface):
                 self._service.set_capability("ancs", False)
             return
 
+        notify_ok = 0
         for path, name in (
             (notif_src_path, "NotifSource"),
             (data_src_path, "DataSource"),
@@ -398,8 +412,18 @@ class ANCSBackend(BackendInterface):
                 )
                 char.StartNotify()
                 _log.debug("ANCSBackend: StartNotify on %s (%s)", name, path)
+                notify_ok += 1
             except dbus.exceptions.DBusException as exc:
                 _log.warning("ANCSBackend: StartNotify failed for %s: %s", name, exc)
+
+        if notify_ok < 2:
+            _log.warning(
+                "ANCSBackend: StartNotify succeeded on %d/2 chars — ANCS unavailable",
+                notify_ok,
+            )
+            if self._service is not None:
+                self._service.set_capability("ancs", False)
+            return
 
         self._notif_src_path = notif_src_path
         self._data_src_path = data_src_path
@@ -447,7 +471,7 @@ class ANCSBackend(BackendInterface):
                     _log.debug("ANCSBackend: remove DataSource receiver: %s", exc)
         self._notif_src_path = None
         self._data_src_path = None
-        self._data_buffer._buffers.clear()
+        self._data_buffer.clear_all()
         self._control_point_proxy = None
         if self._service is not None:
             self._service.set_capability("ancs", False)

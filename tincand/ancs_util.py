@@ -205,3 +205,7 @@ class ANCSDataBuffer:
     def clear(self, notif_uid: int) -> None:
         """Discard the accumulated buffer for *notif_uid*."""
         self._buffers.pop(notif_uid, None)
+
+    def clear_all(self) -> None:
+        """Discard all accumulated buffers (e.g. on device disconnect)."""
+        self._buffers.clear()
