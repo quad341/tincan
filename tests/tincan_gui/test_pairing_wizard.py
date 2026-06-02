@@ -13,9 +13,12 @@ Coverage:
 No hardware or live D-Bus required; mock orchestrator injected.
 Run with: QT_QPA_PLATFORM=offscreen python -m pytest tests/tincan_gui/test_pairing_wizard.py -v
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+
+from PySide6.QtCore import Qt
 
 from tincan_gui.pairing_wizard import PairingWizard
 from tincand.pairing import FailureReason, PairingState
@@ -23,6 +26,7 @@ from tincand.pairing import FailureReason, PairingState
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_orchestrator(state_sequence: list[tuple[str, str | None]] | None = None):
     """Return a MagicMock with a controllable on_state_change registration.
@@ -45,6 +49,7 @@ def _drive_wizard(orch_mock, wizard: PairingWizard, states: list[tuple[str, str 
 # ---------------------------------------------------------------------------
 # §1 Happy path
 # ---------------------------------------------------------------------------
+
 
 class TestHappyPath:
     """All states emitted in order: wizard reaches the Success screen."""
@@ -105,6 +110,7 @@ class TestHappyPath:
 # ---------------------------------------------------------------------------
 # §2 Adapter not ready
 # ---------------------------------------------------------------------------
+
 
 class TestAdapterNotReady:
     """CHECKING_ADAPTER → FAILED(adapter_not_capable) → Failure screen shown."""
@@ -169,6 +175,7 @@ class TestAdapterNotReady:
 # §3 Pairing timeout
 # ---------------------------------------------------------------------------
 
+
 class TestPairingTimeout:
     """FAILED(pair_timeout): wizard shows retry option so user can try again."""
 
@@ -230,6 +237,7 @@ class TestPairingTimeout:
 # ---------------------------------------------------------------------------
 # §4 MAP consent prompt
 # ---------------------------------------------------------------------------
+
 
 class TestMapConsentPrompt:
     """MAP_CONSENT_PROMPT: wizard shows 'Allow message access' screen; user Continue resumes."""
@@ -296,7 +304,7 @@ class TestMapConsentPrompt:
         wizard.show()
 
         _drive_wizard(orch, wizard, self._UP_TO_CONSENT_STATES)
-        qtbot.mouseClick(wizard.map_consent_page.continue_button, None)
+        qtbot.mouseClick(wizard.map_consent_page.continue_button, Qt.LeftButton)
 
         orch.signal_map_consent.assert_called_once()
 
@@ -308,10 +316,14 @@ class TestMapConsentPrompt:
 
         _drive_wizard(orch, wizard, self._UP_TO_CONSENT_STATES)
         # User clicks Continue → orchestrator eventually emits VERIFYING_MAP then SUCCESS
-        _drive_wizard(orch, wizard, [
-            (PairingState.VERIFYING_MAP, None),
-            (PairingState.SUCCESS, None),
-        ])
+        _drive_wizard(
+            orch,
+            wizard,
+            [
+                (PairingState.VERIFYING_MAP, None),
+                (PairingState.SUCCESS, None),
+            ],
+        )
 
         assert wizard.currentPage() is wizard.success_page
 
@@ -319,6 +331,7 @@ class TestMapConsentPrompt:
 # ---------------------------------------------------------------------------
 # §5 Full failure — MAP consent denied
 # ---------------------------------------------------------------------------
+
 
 class TestMapConsentDenied:
     """FAILED(map_consent_denied): wizard reaches Failure screen with plain message."""
