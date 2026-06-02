@@ -11,7 +11,7 @@ from gi.repository import GLib
 
 _log = logging.getLogger(__name__)
 
-_BACKENDS = {"mock", "bluez-map", "ancs"}
+_BACKENDS = {"mock", "ancs"}
 
 
 def _parse_args() -> argparse.Namespace:
@@ -20,59 +20,53 @@ def _parse_args() -> argparse.Namespace:
         "--backend",
         choices=sorted(_BACKENDS),
         default=None,
-        help="Backend to use (default: mock)",
-    )
-    parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="Shorthand for --backend mock",
+        help=(
+            "Backend to use (default: TINCAN_BACKEND env var). "
+            "Choices: mock, ancs."
+        ),
     )
     parser.add_argument(
         "--device",
-        default="AA:BB:CC:DD:EE:FF",
-        help="Bluetooth device address to connect to",
+        default=None,
+        help=(
+            "Bluetooth device address for the ancs backend "
+            "(default: TINCAN_DEVICE env var)."
+        ),
     )
     return parser.parse_args()
 
 
-def _resolve_backend_name(args: argparse.Namespace) -> str:
-    if args.mock:
-        return "mock"
-    if args.backend is not None:
-        return args.backend
-    env = os.environ.get("TINCAN_BACKEND")
-    if env is not None:
-        if env not in _BACKENDS:
-            choices = ", ".join(sorted(_BACKENDS))
-            sys.exit(f"Unknown backend in TINCAN_BACKEND: {env!r}. Must be one of: {choices}")
-        return env
-    return "mock"
-
-
-def _select_backend(name: str) -> object:
+def _select_backend(args: argparse.Namespace) -> object:
+    """Instantiate the backend named by args.backend or TINCAN_BACKEND env var."""
+    name = args.backend or os.environ.get("TINCAN_BACKEND")
+    if not name:
+        choices = ", ".join(sorted(_BACKENDS))
+        sys.exit(
+            f"Backend required: pass --backend {{{'|'.join(sorted(_BACKENDS))}}} "
+            f"or set TINCAN_BACKEND. Choices: {choices}"
+        )
     if name == "mock":
         from tincand.backends.mock import MockBackend
+
         return MockBackend()
-    if name == "bluez-map":
-        from tincand.backends.bluez_map import MapBackend
-        return MapBackend()
     if name == "ancs":
-        from tincand.backends.ancs import AncsBackend
-        return AncsBackend()
-    sys.exit(f"Unknown backend: {name!r}. Must be one of: {', '.join(sorted(_BACKENDS))}")
+        from tincand.backends.ancs import ANCSBackend
+
+        device_addr = args.device or os.environ.get("TINCAN_DEVICE")
+        return ANCSBackend(device_addr=device_addr)
+    choices = ", ".join(sorted(_BACKENDS))
+    sys.exit(f"Unknown backend {name!r}. Must be one of: {choices}")
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
-    backend_name = _resolve_backend_name(args)
-    backend = _select_backend(backend_name)
+    backend = _select_backend(args)
 
+    import dbus
     import dbus.mainloop.glib
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-
-    import dbus
 
     from tincand.dbus_service import TincanService
 
@@ -88,8 +82,10 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, _on_sigint)
 
-    _log.info("tincand starting with backend=%s device=%s", backend_name, args.device)
-    backend.connect(args.device)
+    device = args.device or os.environ.get("TINCAN_DEVICE", "")
+    backend_name = args.backend or os.environ.get("TINCAN_BACKEND", "")
+    _log.info("tincand starting with backend=%s device=%s", backend_name, device)
+    backend.connect(device)
     _log.info("tincand started")
     try:
         loop.run()

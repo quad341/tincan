@@ -260,8 +260,13 @@ class ANCSBackend(BackendInterface):
       DataSource  → _on_data_source_changed  → ANCSDataBuffer → parse → on_message_received
     """
 
-    def __init__(self, adapter_path: str = "/org/bluez/hci0") -> None:
+    def __init__(
+        self,
+        adapter_path: str = "/org/bluez/hci0",
+        device_addr: str | None = None,
+    ) -> None:
         self._adapter_path = adapter_path
+        self._device_addr = device_addr  # optional: filter by address in _on_device_connected
         self._service = None
         self._bus: dbus.Bus | None = None
         self._app: GattApplication | None = None
