@@ -176,6 +176,8 @@ class ANCSBackend(BackendInterface):
         self._agent: _PairingAgent | None = None
         self._data_buffer = ANCSDataBuffer()
         self._control_point_proxy = None
+        self._notif_src_path: str | None = None
+        self._data_src_path: str | None = None
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -399,6 +401,8 @@ class ANCSBackend(BackendInterface):
             except dbus.exceptions.DBusException as exc:
                 _log.warning("ANCSBackend: StartNotify failed for %s: %s", name, exc)
 
+        self._notif_src_path = notif_src_path
+        self._data_src_path = data_src_path
         self._bus.add_signal_receiver(
             self._on_notif_source_changed,
             signal_name="PropertiesChanged",
@@ -406,7 +410,7 @@ class ANCSBackend(BackendInterface):
             path=notif_src_path,
         )
         self._bus.add_signal_receiver(
-            lambda iface, changed, inv: self._on_data_source_changed(changed),
+            self._on_data_source_changed_handler,
             signal_name="PropertiesChanged",
             dbus_interface=_PROPS_IFACE,
             path=data_src_path,
@@ -416,7 +420,33 @@ class ANCSBackend(BackendInterface):
             self._service.set_capability("ancs", True)
         _log.info("ANCSBackend: ANCS link established on %s", device_path)
 
+    def _on_data_source_changed_handler(self, iface, changed, invalidated) -> None:
+        self._on_data_source_changed(changed)
+
     def _on_device_disconnected(self) -> None:
+        if self._bus is not None:
+            if self._notif_src_path:
+                try:
+                    self._bus.remove_signal_receiver(
+                        self._on_notif_source_changed,
+                        signal_name="PropertiesChanged",
+                        dbus_interface=_PROPS_IFACE,
+                        path=self._notif_src_path,
+                    )
+                except Exception as exc:
+                    _log.debug("ANCSBackend: remove NotifSource receiver: %s", exc)
+            if self._data_src_path:
+                try:
+                    self._bus.remove_signal_receiver(
+                        self._on_data_source_changed_handler,
+                        signal_name="PropertiesChanged",
+                        dbus_interface=_PROPS_IFACE,
+                        path=self._data_src_path,
+                    )
+                except Exception as exc:
+                    _log.debug("ANCSBackend: remove DataSource receiver: %s", exc)
+        self._notif_src_path = None
+        self._data_src_path = None
         self._data_buffer._buffers.clear()
         self._control_point_proxy = None
         if self._service is not None:

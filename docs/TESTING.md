@@ -30,7 +30,7 @@ sudo dnf install python3-dbus python3-gobject bluez bluez-obexd
 |---|---|
 | Run the tests | PySide6, pytest, pytest-qt |
 | See the GUI (mock data) | PySide6, dbus-python |
-| Run the daemon | dbus-python *(plus a daemon entry point — not built yet)* |
+| Run the daemon | dbus-python |
 | Run the spikes | dbus-python, PyGObject, bluetoothd, obexd, (ancs4linux), **a paired iPhone** |
 
 ---
