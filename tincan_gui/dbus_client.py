@@ -9,7 +9,13 @@ import logging
 from typing import Optional
 
 from PySide6.QtCore import QObject, Signal, Slot
-from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
+from PySide6.QtDBus import (
+    QDBusArgument,
+    QDBusConnection,
+    QDBusInterface,
+    QDBusMessage,
+    QDBusReply,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -18,6 +24,58 @@ _OBJECT = "/im/tincan"
 _IFACE_DAEMON = "im.tincan.Daemon"
 _IFACE_MESSAGES = "im.tincan.Messages"
 
+
+# ---------------------------------------------------------------------------
+# QDBusArgument demarshalling helpers
+# ---------------------------------------------------------------------------
+
+def _demarshal_map(value) -> dict:
+    """Demarshal a{sv} QDBusArgument (or plain dict) into a Python dict."""
+    if isinstance(value, dict):
+        return dict(value)
+    if not isinstance(value, QDBusArgument):
+        return {}
+    result: dict = {}
+    value.beginMap()
+    while not value.atEnd():
+        value.beginMapEntry()
+        k = value.asVariant()
+        v = value.asVariant()
+        value.endMapEntry()
+        result[str(k)] = v
+    value.endMap()
+    return result
+
+
+def _demarshal_list_of_maps(value) -> list[dict]:
+    """Demarshal aa{sv} QDBusArgument (or plain list) into a list of dicts."""
+    if isinstance(value, list):
+        return [_demarshal_map(item) for item in value]
+    if not isinstance(value, QDBusArgument):
+        return []
+    result: list[dict] = []
+    value.beginArray()
+    while not value.atEnd():
+        result.append(_demarshal_map(value))
+    value.endArray()
+    return result
+
+
+def _wrap_reply(msg):
+    """Wrap a QDBusMessage in QDBusReply; pass through non-QDBusMessage values.
+
+    iface.call() returns QDBusMessage in production but tests may inject mocks
+    that already behave like QDBusReply (have .isValid() / .value()).  Only wrap
+    when we actually have a QDBusMessage so we don't break mock-based tests.
+    """
+    if isinstance(msg, QDBusMessage):
+        return QDBusReply(msg)
+    return msg
+
+
+# ---------------------------------------------------------------------------
+# Client
+# ---------------------------------------------------------------------------
 
 class TincandClient(QObject):
     """D-Bus client for tincand.  Emits Qt signals when daemon signals arrive."""
@@ -87,7 +145,7 @@ class TincandClient(QObject):
     @Slot("QVariantMap")
     def _on_message_received(self, message) -> None:
         _log.debug("tincand: MessageReceived")
-        self.message_received.emit(dict(message))
+        self.message_received.emit(_demarshal_map(message))
 
     @Slot(str)
     def _on_message_sent(self, message_id: str) -> None:
@@ -97,7 +155,7 @@ class TincandClient(QObject):
     @Slot("QVariantMap")
     def _on_conversation_updated(self, conversation) -> None:
         _log.debug("tincand: ConversationUpdated")
-        self.conversation_updated.emit(dict(conversation))
+        self.conversation_updated.emit(_demarshal_map(conversation))
 
     # ------------------------------------------------------------------
     # Daemon method calls (Qt → daemon)
@@ -110,12 +168,11 @@ class TincandClient(QObject):
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
         if not iface.isValid():
             return {}
-        reply: QDBusReply = iface.call("GetStatus")
+        reply = _wrap_reply(iface.call("GetStatus"))
         if not reply.isValid():
             _log.debug("GetStatus failed (daemon likely absent): %s", reply.error().message())
             return {}
-        value = reply.value()
-        return dict(value) if value is not None else {}
+        return _demarshal_map(reply.value())
 
     def list_conversations(self) -> list[dict]:
         """Call ListConversations.  Returns [] when daemon is absent."""
@@ -124,14 +181,11 @@ class TincandClient(QObject):
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
         if not iface.isValid():
             return []
-        reply: QDBusReply = iface.call("ListConversations")
+        reply = _wrap_reply(iface.call("ListConversations"))
         if not reply.isValid():
             _log.debug("ListConversations failed: %s", reply.error().message())
             return []
-        value = reply.value()
-        if not value:
-            return []
-        return [dict(c) for c in value]
+        return _demarshal_list_of_maps(reply.value())
 
     def send_message(self, to: str, body: str) -> str:
         """Call SendMessage.  Returns the new message_id or '' on error."""
@@ -142,7 +196,7 @@ class TincandClient(QObject):
         if not iface.isValid():
             _log.warning("send_message: tincand not running")
             return ""
-        reply: QDBusReply = iface.call("SendMessage", to, body)
+        reply = _wrap_reply(iface.call("SendMessage", to, body))
         if not reply.isValid():
             _log.warning("SendMessage failed: %s", reply.error().message())
             return ""
