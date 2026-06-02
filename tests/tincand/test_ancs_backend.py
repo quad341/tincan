@@ -1,17 +1,20 @@
-"""Tests: ANCSBackend lifecycle state machine and dispatch pipeline.
-Bead: tincan-87a
+"""Tests: ANCSBackend — corrected GATT consumer model.
+Bead: tincan-2ee
 
 Coverage:
-  §1 BackendInterface compliance — list_conversations, register_service
-  §2 start() — RegisterApplication + RegisterAdvertisement each called once
-  §3 stop() — set_capability('ancs', False); idempotent double-call safe
-  §4 Connected=True signal → subscription + set_capability('ancs', True)
-  §5 Connected=False signal → clear buffer + set_capability('ancs', False)
-  §6 Reconnect: second Connected=True after DISCONNECTED re-runs subscription
-  §7 device_addr=None accepts any device; set value filters case-insensitively
-  §8 _on_notif_source_changed — cat 4/6 event_id=0 writes ControlPoint; cat 0 ignores
-  §9 _on_data_source_changed — on completion calls on_message_received correct shape
+  §1  BackendInterface compliance — list_conversations, register_service
+  §2  start() — AgentManager1 + LEAdvertisingManager1 each called once; no GattManager1
+  §3  stop() — set_capability('ancs', False); idempotent double-call safe
+  §4  Connected=True signal → subscription + set_capability('ancs', True)
+  §5  Connected=False signal → clear buffer + set_capability('ancs', False)
+  §6  Reconnect: second Connected=True after DISCONNECTED re-runs subscription
+  §7  device_addr=None accepts any device; set value filters case-insensitively
+  §8  _on_notif_source_changed — cat 4/6 event_id=0 writes ControlPoint; cat 0 ignores
+  §9  _on_data_source_changed — on completion calls on_message_received correct shape
   §10 Stale buffer cleared before new ControlPoint write for same UID
+  §11 GATT consumer contract — SolicitUUIDs adv, no local GattApplication registered
+  §12 LE bond flow — Bonded=True skips Pair(); Bonded=False calls Pair(); failure path
+  §13 ANCS service not found — set_capability(False), graceful exit, no crash
 
 No hardware or real D-Bus — all D-Bus objects mocked.
 Run with: QT_QPA_PLATFORM=offscreen python -m pytest tests/tincand/test_ancs_backend.py -v
@@ -87,17 +90,20 @@ def _data_source_tlv(uid: int, title: str = "Alice", message: str = "Hi",
 def ctx():
     """Yield (backend, mock_bus, mock_ctrl_pt, mock_service).
 
-    - dbus.service.Object.__init__ is a no-op so GATT scaffold classes
-      can be instantiated without a real bus.
+    - dbus.service.Object.__init__ is a no-op so scaffold classes can be
+      instantiated without a real bus.
     - dbus.SystemBus() returns mock_bus.
     - mock_bus.get_object() returns a tagged MagicMock so dbus.Interface()
-      can route by path: ObjectManager → obj_mgr_mock, ControlPoint path
-      → mock_ctrl_pt, everything else → a fresh MagicMock.
+      can route by path: ObjectManager → obj_mgr_mock, Device1 →
+      mock_device (Bonded=True by default), ControlPoint → mock_ctrl_pt,
+      everything else → a fresh MagicMock.
     - backend has a mock service already registered.
     """
     mock_bus = MagicMock(name="SystemBus")
     mock_ctrl_pt = MagicMock(name="ControlPoint")
     mock_service = MagicMock(name="TincanService")
+    mock_device = MagicMock(name="Device1")
+    mock_device.Get.return_value = True  # Bonded=True; no Pair() by default
 
     obj_mgr_mock = MagicMock(name="ObjectManager")
     obj_mgr_mock.GetManagedObjects.return_value = _make_managed_objects()
@@ -113,6 +119,8 @@ def ctx():
         path = getattr(obj, "_dbus_path", "")
         if iface == "org.freedesktop.DBus.ObjectManager":
             return obj_mgr_mock
+        if iface == "org.bluez.Device1":
+            return mock_device
         if iface == "org.bluez.GattCharacteristic1" and path == _CTRL_PT_PATH:
             return mock_ctrl_pt
         return MagicMock(name=f"Interface({iface}@{path})")
@@ -177,16 +185,16 @@ class TestBackendInterfaceCompliance:
 class TestStart:
     """start() connects to the system bus and registers both GATT objects."""
 
-    def test_registers_application_exactly_once(self, ctx):
+    def test_registers_pairing_agent_exactly_once(self, ctx):
         backend, mock_bus, _, _ = ctx
         with patch("tincand.backends.ancs.dbus.Interface") as mock_iface:
             mock_iface.return_value = MagicMock()
             backend.start()
-        gatt_calls = [
+        agent_calls = [
             c for c in mock_iface.call_args_list
-            if "GattManager1" in str(c)
+            if "AgentManager1" in str(c)
         ]
-        assert len(gatt_calls) >= 1
+        assert len(agent_calls) >= 1
 
     def test_registers_advertisement_exactly_once(self, ctx):
         backend, mock_bus, _, _ = ctx
@@ -642,3 +650,229 @@ class TestStaleBufferCleared:
             [],
         )
         mock_ctrl_pt.WriteValue.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# §11 GATT Consumer Model Contract
+# ---------------------------------------------------------------------------
+
+class TestGattConsumerModel:
+    """Corrected ANCSBackend acts as a GATT client — no local GATT server registration."""
+
+    def test_no_gatt_manager1_called_during_start(self, ctx):
+        """start() must not register a local GattApplication via GattManager1."""
+        backend, _, _, _ = ctx
+        with patch("tincand.backends.ancs.dbus.Interface") as mock_iface:
+            mock_iface.return_value = MagicMock()
+            backend.start()
+        gatt_calls = [c for c in mock_iface.call_args_list if "GattManager1" in str(c)]
+        assert len(gatt_calls) == 0
+
+    def test_advertisement_uses_solicituuids_not_serviceuuids(self, started):
+        """Advertisement solicits ANCS from iPhone — SolicitUUIDs, not ServiceUUIDs."""
+        backend, *_ = started
+        assert backend._adv is not None
+        props = backend._adv._props
+        assert "SolicitUUIDs" in props
+        assert "ServiceUUIDs" not in props
+
+    def test_advertisement_solicituuids_contains_ancs_service_uuid(self, started):
+        """SolicitUUIDs contains the ANCS service UUID (7905F431-...)."""
+        backend, *_ = started
+        assert backend._adv is not None
+        uuid_strings = [str(u) for u in backend._adv._props["SolicitUUIDs"]]
+        assert any(ANCS_SERVICE_UUID.upper() in u.upper() for u in uuid_strings)
+
+    def test_no_local_gatt_app_on_backend(self, started):
+        """Backend does not have _app — GattApplication is gone in the consumer model."""
+        backend, *_ = started
+        assert not hasattr(backend, "_app")
+
+
+# ---------------------------------------------------------------------------
+# §12 LE Bond Flow
+# ---------------------------------------------------------------------------
+
+def _make_bond_ctx_helpers():
+    """Shared factory for bond_ctx and no_ancs_ctx fixtures."""
+    mock_bus = MagicMock(name="SystemBus")
+    mock_ctrl_pt = MagicMock(name="ControlPoint")
+    mock_service = MagicMock(name="TincanService")
+    mock_device = MagicMock(name="Device1")
+    mock_device.Get.return_value = True  # Bonded=True by default
+
+    obj_mgr_mock = MagicMock(name="ObjectManager")
+    obj_mgr_mock.GetManagedObjects.return_value = _make_managed_objects()
+
+    def _get_object(service, path):
+        obj = MagicMock(name=f"obj({path})")
+        obj._dbus_path = str(path)
+        return obj
+
+    mock_bus.get_object.side_effect = _get_object
+    return mock_bus, mock_ctrl_pt, mock_service, mock_device, obj_mgr_mock
+
+
+class TestLeBond:
+    """LE bond flow: Bonded check, conditional Pair(), graceful failure."""
+
+    @pytest.fixture
+    def bond_ctx(self):
+        """Started backend with an explicit, configurable Device1 mock."""
+        mock_bus, mock_ctrl_pt, mock_service, mock_device, obj_mgr_mock = (
+            _make_bond_ctx_helpers()
+        )
+
+        def _make_interface(obj, iface):
+            path = getattr(obj, "_dbus_path", "")
+            if iface == "org.freedesktop.DBus.ObjectManager":
+                return obj_mgr_mock
+            if iface == "org.bluez.Device1":
+                return mock_device
+            if iface == "org.bluez.GattCharacteristic1" and path == _CTRL_PT_PATH:
+                return mock_ctrl_pt
+            return MagicMock(name=f"Interface({iface}@{path})")
+
+        with (
+            patch("dbus.service.Object.__init__", return_value=None),
+            patch("tincand.backends.ancs.dbus.SystemBus", return_value=mock_bus),
+            patch("tincand.backends.ancs.dbus.Interface", side_effect=_make_interface),
+            patch("tincand.backends.ancs.dbus.exceptions") as mock_exc,
+        ):
+            mock_exc.DBusException = Exception
+            backend = ANCSBackend()
+            backend.register_service(mock_service)
+            backend.start()
+            yield backend, mock_device, mock_service
+
+    def test_already_bonded_device_does_not_call_pair(self, bond_ctx):
+        backend, mock_device, _ = bond_ctx
+        mock_device.Get.return_value = True  # Bonded=True
+        backend._on_device_connected(_DEV_PATH)
+        mock_device.Pair.assert_not_called()
+
+    def test_unbonded_device_calls_pair(self, bond_ctx):
+        backend, mock_device, _ = bond_ctx
+        mock_device.Get.return_value = False  # Bonded=False → must Pair()
+        backend._on_device_connected(_DEV_PATH)
+        mock_device.Pair.assert_called_once()
+
+    def test_le_bond_failure_calls_set_capability_false(self, bond_ctx):
+        backend, mock_device, mock_service = bond_ctx
+        mock_device.Get.return_value = False
+        mock_device.Pair.side_effect = Exception("org.bluez.Error.AuthenticationFailed")
+        backend._on_device_connected(_DEV_PATH)
+        mock_service.set_capability.assert_called_with("ancs", False)
+
+    def test_le_bond_failure_does_not_raise(self, bond_ctx):
+        backend, mock_device, _ = bond_ctx
+        mock_device.Get.return_value = False
+        mock_device.Pair.side_effect = Exception("Bond failed")
+        backend._on_device_connected(_DEV_PATH)  # must not propagate exception
+
+    def test_le_bond_failure_leaves_control_point_proxy_none(self, bond_ctx):
+        backend, mock_device, _ = bond_ctx
+        mock_device.Get.return_value = False
+        mock_device.Pair.side_effect = Exception("Bond failed")
+        backend._on_device_connected(_DEV_PATH)
+        assert backend._control_point_proxy is None
+
+
+# ---------------------------------------------------------------------------
+# §13 ANCS Service Not Found
+# ---------------------------------------------------------------------------
+
+class TestAncsServiceNotFound:
+    """ANCS GATT chars missing after bond → set_capability(False), graceful exit."""
+
+    @pytest.fixture
+    def no_ancs_ctx(self):
+        """Started backend where GetManagedObjects returns no ANCS characteristics."""
+        mock_bus, _, mock_service, mock_device, _ = _make_bond_ctx_helpers()
+        # Override ObjectManager to return no chars
+        obj_mgr_mock = MagicMock(name="ObjectManager")
+        obj_mgr_mock.GetManagedObjects.return_value = {}
+
+        def _get_object(service, path):
+            obj = MagicMock(name=f"obj({path})")
+            obj._dbus_path = str(path)
+            return obj
+
+        mock_bus.get_object.side_effect = _get_object
+
+        def _make_interface(obj, iface):
+            if iface == "org.freedesktop.DBus.ObjectManager":
+                return obj_mgr_mock
+            if iface == "org.bluez.Device1":
+                return mock_device
+            return MagicMock(name=f"Interface({iface})")
+
+        with (
+            patch("dbus.service.Object.__init__", return_value=None),
+            patch("tincand.backends.ancs.dbus.SystemBus", return_value=mock_bus),
+            patch("tincand.backends.ancs.dbus.Interface", side_effect=_make_interface),
+            patch("tincand.backends.ancs.dbus.exceptions") as mock_exc,
+        ):
+            mock_exc.DBusException = Exception
+            backend = ANCSBackend()
+            backend.register_service(mock_service)
+            backend.start()
+            yield backend, mock_service
+
+    def test_ancs_service_not_found_calls_set_capability_false(self, no_ancs_ctx):
+        backend, mock_service = no_ancs_ctx
+        backend._on_device_connected(_DEV_PATH)
+        mock_service.set_capability.assert_called_with("ancs", False)
+
+    def test_ancs_service_not_found_does_not_raise(self, no_ancs_ctx):
+        backend, _ = no_ancs_ctx
+        backend._on_device_connected(_DEV_PATH)  # must not propagate exception
+
+    def test_ancs_service_not_found_control_point_proxy_remains_none(self, no_ancs_ctx):
+        backend, _ = no_ancs_ctx
+        backend._on_device_connected(_DEV_PATH)
+        assert backend._control_point_proxy is None
+
+    def test_chars_on_other_device_path_not_matched(self):
+        """GATT chars from a different device path are ignored — no false ANCS link."""
+        other_dev = "/org/bluez/hci0/dev_11_22_33_44_55_66"
+        mock_bus = MagicMock(name="SystemBus")
+        mock_service = MagicMock(name="TincanService")
+        mock_device = MagicMock(name="Device1")
+        mock_device.Get.return_value = True  # bonded
+
+        # Chars exist but under a DIFFERENT device path
+        obj_mgr_mock = MagicMock(name="ObjectManager")
+        obj_mgr_mock.GetManagedObjects.return_value = {
+            f"{other_dev}/service01/char01": {_GATT_CHAR_IFACE: {"UUID": NOTIF_SOURCE_UUID}},
+            f"{other_dev}/service01/char02": {_GATT_CHAR_IFACE: {"UUID": CONTROL_POINT_UUID}},
+            f"{other_dev}/service01/char03": {_GATT_CHAR_IFACE: {"UUID": DATA_SOURCE_UUID}},
+        }
+
+        def _get_object(service, path):
+            obj = MagicMock(name=f"obj({path})")
+            obj._dbus_path = str(path)
+            return obj
+
+        mock_bus.get_object.side_effect = _get_object
+
+        def _make_interface(obj, iface):
+            if iface == "org.freedesktop.DBus.ObjectManager":
+                return obj_mgr_mock
+            if iface == "org.bluez.Device1":
+                return mock_device
+            return MagicMock(name=f"Interface({iface})")
+
+        with (
+            patch("dbus.service.Object.__init__", return_value=None),
+            patch("tincand.backends.ancs.dbus.SystemBus", return_value=mock_bus),
+            patch("tincand.backends.ancs.dbus.Interface", side_effect=_make_interface),
+            patch("tincand.backends.ancs.dbus.exceptions") as mock_exc,
+        ):
+            mock_exc.DBusException = Exception
+            backend = ANCSBackend()
+            backend.register_service(mock_service)
+            backend.start()
+            backend._on_device_connected(_DEV_PATH)  # _DEV_PATH ≠ other_dev
+
+        mock_service.set_capability.assert_called_with("ancs", False)
