@@ -872,3 +872,103 @@ class TestAncsServiceNotFound:
             backend._on_device_connected(_DEV_PATH)  # _DEV_PATH ≠ other_dev
 
         mock_service.set_capability.assert_called_with("ancs", False)
+
+
+# ---------------------------------------------------------------------------
+# §14 Signal receiver cleanup on disconnect (regression: tincan-63l3 / e140d31)
+# ---------------------------------------------------------------------------
+
+class TestSignalReceiverCleanup:
+    """_on_device_disconnected removes both GATT characteristic receivers.
+
+    Before e140d31, disconnect never called remove_signal_receiver — receivers
+    accumulated on repeated reconnect cycles.  These tests pin that fix.
+    """
+
+    # -- receiver identity -----------------------------------------------
+
+    def test_disconnected_removes_notif_source_receiver(self, subscribed):
+        """remove_signal_receiver called with _on_notif_source_changed as handler."""
+        backend, mock_bus, _, _ = subscribed
+        backend._on_device_disconnected()
+        handlers = [c.args[0] for c in mock_bus.remove_signal_receiver.call_args_list]
+        assert backend._on_notif_source_changed in handlers
+
+    def test_disconnected_removes_data_source_receiver(self, subscribed):
+        """remove_signal_receiver called with _on_data_source_changed_handler as handler."""
+        backend, mock_bus, _, _ = subscribed
+        backend._on_device_disconnected()
+        handlers = [c.args[0] for c in mock_bus.remove_signal_receiver.call_args_list]
+        assert backend._on_data_source_changed_handler in handlers
+
+    # -- path correctness ------------------------------------------------
+
+    def test_disconnected_notif_src_receiver_removed_with_correct_path(self, subscribed):
+        """NotifSource receiver is removed using _NOTIF_SRC_PATH."""
+        backend, mock_bus, _, _ = subscribed
+        backend._on_device_disconnected()
+        paths = [c.kwargs.get("path") for c in mock_bus.remove_signal_receiver.call_args_list]
+        assert _NOTIF_SRC_PATH in paths
+
+    def test_disconnected_data_src_receiver_removed_with_correct_path(self, subscribed):
+        """DataSource receiver is removed using _DATA_SRC_PATH."""
+        backend, mock_bus, _, _ = subscribed
+        backend._on_device_disconnected()
+        paths = [c.kwargs.get("path") for c in mock_bus.remove_signal_receiver.call_args_list]
+        assert _DATA_SRC_PATH in paths
+
+    # -- state fields cleared --------------------------------------------
+
+    def test_disconnected_clears_notif_src_path_field(self, subscribed):
+        backend, *_ = subscribed
+        assert backend._notif_src_path is not None  # sanity: was set by connect
+        backend._on_device_disconnected()
+        assert backend._notif_src_path is None
+
+    def test_disconnected_clears_data_src_path_field(self, subscribed):
+        backend, *_ = subscribed
+        assert backend._data_src_path is not None
+        backend._on_device_disconnected()
+        assert backend._data_src_path is None
+
+    # -- no-op paths (not subscribed) ------------------------------------
+
+    def test_started_not_subscribed_disconnect_does_not_call_remove_receiver(self, started):
+        """Started but never subscribed: paths are None, remove_signal_receiver must not fire."""
+        backend, mock_bus, _, _ = started
+        backend._on_device_disconnected()
+        mock_bus.remove_signal_receiver.assert_not_called()
+
+    # -- robustness ------------------------------------------------------
+
+    def test_remove_receiver_exception_does_not_propagate(self, subscribed):
+        """remove_signal_receiver raising must not bubble up from _on_device_disconnected."""
+        backend, mock_bus, _, _ = subscribed
+        mock_bus.remove_signal_receiver.side_effect = RuntimeError("bus gone")
+        backend._on_device_disconnected()  # must not raise
+
+    # -- reconnect regression (the core defect) --------------------------
+
+    def test_reconnect_cycle_re_registers_both_receivers(self, subscribed):
+        """After disconnect+reconnect, add_signal_receiver is called again for ANCS paths."""
+        backend, mock_bus, _, _ = subscribed
+        add_calls_before = mock_bus.add_signal_receiver.call_count
+        backend._on_device_disconnected()
+        backend._on_device_connected(_DEV_PATH)
+        add_calls_after = mock_bus.add_signal_receiver.call_count
+        # Two new add_signal_receiver calls for the new subscription
+        assert add_calls_after >= add_calls_before + 2
+
+    def test_reconnect_second_disconnect_removes_receivers_again(self, subscribed):
+        """Disconnect → reconnect → disconnect: remove_signal_receiver fires each cycle."""
+        backend, mock_bus, _, _ = subscribed
+        # First cycle
+        backend._on_device_disconnected()
+        remove_count_after_first = mock_bus.remove_signal_receiver.call_count
+        assert remove_count_after_first == 2  # one per characteristic
+
+        # Reconnect then disconnect again
+        backend._on_device_connected(_DEV_PATH)
+        backend._on_device_disconnected()
+        remove_count_after_second = mock_bus.remove_signal_receiver.call_count
+        assert remove_count_after_second == 4  # two more removals on second cycle
