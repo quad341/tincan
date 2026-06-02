@@ -290,11 +290,11 @@ class TestSignalReception:
     """At least one D-Bus signal is received by TincandClient within timeout."""
 
     def test_connected_signal_received_within_5s(self):
-        """The Connected signal emitted by MockBackend.start() is received by TincandClient.
+        """The Connected signal is received by TincandClient within 5 s.
 
-        MockBackend calls service.Connect() when start() is called, emitting Connected.
-        We trigger a second Connect() call via direct D-Bus invocation so it fires
-        after the client is subscribed.
+        MockBackend calls service.Connect('') on daemon startup, so the daemon
+        is already connected when the client subscribes.  We call Disconnect()
+        first to reset state, then Connect() to trigger a fresh Connected signal.
         """
         result = _run_in_session(f"""
 {_DAEMON_PREAMBLE}
@@ -302,8 +302,8 @@ import time
 
 daemon = _start_daemon()
 try:
-    from PySide6.QtCore import QCoreApplication, QTimer
-    from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusReply
+    from PySide6.QtCore import QCoreApplication
+    from PySide6.QtDBus import QDBusConnection, QDBusInterface
     from tincan_gui.dbus_client import TincandClient
 
     app = QCoreApplication([])
@@ -312,11 +312,13 @@ try:
     received = []
     client.connected.connect(lambda addr: received.append(str(addr)))
 
-    # Trigger a new Connected signal by calling Connect() on the daemon.
     bus = QDBusConnection.sessionBus()
     iface = QDBusInterface(
         'im.tincan.Daemon', '/im/tincan', 'im.tincan.Daemon', bus
     )
+    # MockBackend already called Connect('') on start — must Disconnect first.
+    iface.call('Disconnect')
+    time.sleep(0.05)
     iface.call('Connect', 'AA:BB:CC:DD:EE:FF')
 
     # Poll event loop for up to 5 s

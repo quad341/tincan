@@ -32,43 +32,75 @@ _IFACE_MESSAGES = "im.tincan.Messages"
 def _read_dbus_value(arg: QDBusArgument):
     """Read the current value from a QDBusArgument, recursing for complex types.
 
-    PySide6's asVariant() returns VoidPtr/None for nested complex types (e.g.
-    a{sb} inside an a{sv} variant slot).  Check currentType() first and
-    navigate MapType / ArrayType explicitly instead of letting asVariant()
-    attempt the conversion.
+    PySide6's asVariant() returns VoidPtr/None for nested complex types such as
+    a{sb} inside an a{sv} variant slot.  Each ElementType case is handled
+    explicitly so we never call asVariant() on MapType or ArrayType positions.
     """
     t = arg.currentType()
     if t == QDBusArgument.ElementType.MapType:
         inner: dict = {}
-        arg.beginMap()
-        while not arg.atEnd():
-            arg.beginMapEntry()
-            k = arg.asVariant()
-            v = _read_dbus_value(arg)
-            arg.endMapEntry()
-            if k is not None:
-                inner[str(k)] = v
-        arg.endMap()
+        try:
+            arg.beginMap()
+            while not arg.atEnd():
+                arg.beginMapEntry()
+                k = arg.asVariant()
+                v = _read_dbus_value(arg)
+                arg.endMapEntry()
+                if k is not None:
+                    inner[str(k)] = v
+            arg.endMap()
+        except Exception as exc:
+            _log.debug("_read_dbus_value[Map] error: %s", exc)
         return inner
     if t == QDBusArgument.ElementType.ArrayType:
         items: list = []
-        arg.beginArray()
-        while not arg.atEnd():
-            items.append(_read_dbus_value(arg))
-        arg.endArray()
+        try:
+            arg.beginArray()
+            while not arg.atEnd():
+                items.append(_read_dbus_value(arg))
+            arg.endArray()
+        except Exception as exc:
+            _log.debug("_read_dbus_value[Array] error: %s", exc)
         return items
-    # VariantType or BasicType: asVariant() works for primitives; if it
-    # returns a QDBusArgument (complex inner type) recurse once more.
-    v = arg.asVariant()
+    if t == QDBusArgument.ElementType.VariantType:
+        # VariantType: asVariant() dereferences the 'v' wrapper.  For types Qt
+        # knows (bool, str, int) it returns a Python native.  For unregistered
+        # compound types (e.g. a{sb}) it returns a QDBusArgument already
+        # positioned at the inner data — recurse in that case.  Treat None /
+        # VoidPtr as an empty dict (best-effort) without corrupting the cursor.
+        try:
+            v = arg.asVariant()
+        except Exception:
+            return {}
+        if isinstance(v, QDBusArgument):
+            return _read_dbus_value(v)
+        return v if v is not None else {}
+    # BasicType or unknown: asVariant() returns a Python native or QDBusArgument.
+    try:
+        v = arg.asVariant()
+    except Exception:
+        return None
     if isinstance(v, QDBusArgument):
         return _read_dbus_value(v)
     return v
 
 
 def _demarshal_map(value) -> dict:
-    """Demarshal a{sv} QDBusArgument (or plain dict) into a Python dict."""
+    """Demarshal a{sv} into a Python dict.
+
+    Accepts a QDBusArgument (navigated directly), a plain dict (returned as-is,
+    with QDBusArgument values recursed), or any other type (returns {}).
+    """
     if isinstance(value, dict):
-        return dict(value)
+        # PySide6 may auto-convert a{sv} → dict but leave nested complex types
+        # (e.g. a{sb}) as QDBusArgument values — recurse on those.
+        result = {}
+        for k, v in value.items():
+            if isinstance(v, QDBusArgument):
+                result[str(k)] = _read_dbus_value(v)
+            else:
+                result[str(k)] = v
+        return result
     if not isinstance(value, QDBusArgument):
         return {}
     result: dict = {}
@@ -88,7 +120,10 @@ def _demarshal_map(value) -> dict:
 
 
 def _demarshal_list_of_maps(value) -> list[dict]:
-    """Demarshal aa{sv} QDBusArgument (or plain list) into a list of dicts."""
+    """Demarshal aa{sv} into a list of dicts.
+
+    Accepts a QDBusArgument, a plain list (items recursed), or any other type.
+    """
     if isinstance(value, list):
         return [_demarshal_map(item) for item in value]
     if not isinstance(value, QDBusArgument):
@@ -211,9 +246,20 @@ class TincandClient(QObject):
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
         if not iface.isValid():
             return {}
-        reply = _wrap_reply(iface.call("GetStatus"))
+        raw = iface.call("GetStatus")
+        if isinstance(raw, QDBusMessage):
+            # Live path: use msg.arguments() directly — QDBusReply.value() returns
+            # a QDBusArgument in an invalid read-state on some PySide6 versions,
+            # causing "write from a read-only object" cursor corruption.
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.debug("GetStatus failed: %s", raw.errorMessage())
+                return {}
+            args = raw.arguments()
+            return _demarshal_map(args[0] if args else {})
+        # Mock/test path: raw is already a QDBusReply-like object.
+        reply = _wrap_reply(raw)
         if not reply.isValid():
-            _log.debug("GetStatus failed (daemon likely absent): %s", reply.error().message())
+            _log.debug("GetStatus failed: %s", reply.error().message())
             return {}
         return _demarshal_map(reply.value())
 
@@ -224,7 +270,14 @@ class TincandClient(QObject):
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
         if not iface.isValid():
             return []
-        reply = _wrap_reply(iface.call("ListConversations"))
+        raw = iface.call("ListConversations")
+        if isinstance(raw, QDBusMessage):
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.debug("ListConversations failed: %s", raw.errorMessage())
+                return []
+            args = raw.arguments()
+            return _demarshal_list_of_maps(args[0] if args else [])
+        reply = _wrap_reply(raw)
         if not reply.isValid():
             _log.debug("ListConversations failed: %s", reply.error().message())
             return []
