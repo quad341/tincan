@@ -116,11 +116,13 @@ Definition of done: **hold a real SMS conversation from the desktop, reliably.**
 
 - **M1.1** `tincand` skeleton: D-Bus/obex session management, pairing + reconnect
   handling, the internal API/event-stream boundary.
-- **M1.2** Inbound: list + fetch message bodies; **ANCS-triggered fetch** for
-  real-time incoming (deliberate mitigation for flaky MAP MNS — see Risk R1);
-  conversation grouping (cope with the iOS group-text attribution bug, R5).
-- **M1.3** Outbound: `PushMessage` send; surface the SMS-vs-iMessage auto-routing
-  reality to the user honestly.
+- **M1.2** ✅ *Implemented.* Inbound: `poll_inbox()` via MAP UpdateInbox/ListMessages/
+  GetMessage with retry; ANCS backend (AncsBackend, pending hardware validation
+  tincan-r23) for instant trigger; conversation grouping by Sender. Risk R1 mitigated:
+  MAP polling is the primary read path; ANCS is an instant supplement.
+- **M1.3** ✅ *Implemented.* Outbound: `build_bmsg()` + `MapBackend.send_message()`
+  via `PushMessage` + Transfer1 watch. iOS auto-upgrades to iMessage for iMessage
+  contacts (confirmed in spike). GUI `SendMessage` still stub — wire-up is next.
 - **M1.4** PySide6 GUI: conversation list, thread view, compose/send; contact-name
   resolution via PBAP.
 - **M1.5** Hardening: reconnect, onboarding UX for the iOS "Show Notifications"
@@ -161,25 +163,31 @@ Likely partly done for name-resolution in phase 1; finish full sync / search her
 
 | # | Risk | Severity | Mitigation |
 |---|------|----------|------------|
-| R1 | MAP real-time new-message push (MNS) is the flakiest, least-maintained piece on Linux | High → **mitigated** | Use **ANCS over BLE as the instant "new SMS" trigger**, then fetch the body over MAP. Sidesteps obexd's MNS entirely. Polling `UpdateInbox`/`ListMessages` as a further fallback. |
+| R1 | MAP real-time new-message push (MNS) is the flakiest, least-maintained piece on Linux | High → **resolved** | MNS not used. **MAP polling** (`UpdateInbox`/`ListMessages`/`GetMessage`) is the primary read path, implemented and validated. ANCS (AncsBackend) is the instant trigger supplement, pending hardware validation (tincan-r23). |
 | R2 | HFP **SCO call audio** unreliable on the integrated MediaTek-class adapter | High | **Deferred to phase 3.** Try built-in first; keep a known-good USB BT dongle (CSR8510 / BCM20702) as fallback. Dedicated audio de-risk spike before committing the calls UI. |
 | R3 | Apple tightens message/notification surfacing across iOS versions | Medium (ongoing) | Capability detection + graceful degradation; **no hardcoded version assumptions** (design principle #2). |
 | R4 | obexd's MAP client is functional but lightly maintained / historically buggy | Medium | Drive the `org.bluez.obex` D-Bus API directly; be prepared to patch obexd and contribute upstream. |
 | R5 | iOS group-text sender attribution is lossy; sent-folder path is mislabeled | Low–Med | Absorb in the daemon's normalization layer; don't leak the quirk into the UI. |
-| R6 | iMessage-incoming over MAP is unconfirmed (evidence shows SMS only) | Scope clarity | Validate in phase 0; if absent, document as a known limit, not a bug. |
+| R6 | iMessage-incoming over MAP is unconfirmed (evidence shows SMS only) | **RESOLVED** | Spike confirmed: iMessage threads ARE present in MAP inbox, listed as `sms-gsm` type (iOS rebrands the TYPE field). Full body available via `GetMessage`. |
 | R7 | iOS drops the MAP link unless the paired device has "Show Notifications" enabled | Low but UX-critical | Onboarding flow must instruct the user and detect the condition. |
 
 ## 6. Open questions (resolve in phase 0)
 
-- Does iOS 26.5 reliably expose **SMS message bodies** over MAP? (Older reports
-  say yes; verify on-device.)
-- Does iOS 26.5 expose **iMessage** content in the MAP inbox listing at all, or
-  SMS only? (R6)
-- Does **ANCS** reliably fire for the Messages app *with sender* on 26.5?
-- Can the **built-in MediaTek adapter** hold simultaneous BLE (ANCS) + Classic
-  (MAP) sessions to the same phone? (R2/M0.3)
-- Is `tincand` better as a **D-Bus session service** or a local socket / JSON-RPC
-  endpoint for clients? (Decide during M1.1.)
+- ✅ **OQ-1:** Does iOS 26.5 reliably expose **SMS message bodies** over MAP?
+  **YES.** Spike confirmed: `GetMessage` returns full body text. `ListMessages`
+  returns up to ~10 recent messages per session. No `SetFolder`/`ListFolders`
+  needed — `ListMessages('inbox', {})` works directly.
+- ✅ **OQ-2:** Does iOS 26.5 expose **iMessage** content in the MAP inbox? **YES.**
+  iMessage threads appear in the inbox listing. `TYPE` field is always `sms-gsm`
+  (iOS rebrands it). Use `GetMessage` for full body. R6 resolved.
+- ✅ **OQ-SEND:** Does `PushMessage` (outbound send) work? **YES.** iOS delivers the
+  message and auto-upgrades SMS→iMessage for iMessage contacts.
+- ⏳ **OQ-3:** Does **ANCS** reliably fire for Messages *with sender* on 26.5?
+  Pending hardware run (tincan-r23).
+- ⏳ **OQ-4:** Can the **built-in MediaTek adapter** hold simultaneous BLE (ANCS) +
+  Classic (MAP)? Pending hardware run (tincan-r23).
+- ✅ **IPC decision:** `tincand` is a **D-Bus session service** (`im.tincan.Daemon`
+  on session bus). Decided during M1.1.
 
 ## 7. Environment & prerequisites
 
