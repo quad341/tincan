@@ -21,6 +21,7 @@ Run with: QT_QPA_PLATFORM=offscreen python -m pytest tests/tincand/test_ancs_bac
 """
 from __future__ import annotations
 
+import inspect
 import struct
 from unittest.mock import MagicMock, patch
 
@@ -972,3 +973,453 @@ class TestSignalReceiverCleanup:
         backend._on_device_disconnected()
         remove_count_after_second = mock_bus.remove_signal_receiver.call_count
         assert remove_count_after_second == 4  # two more removals on second cycle
+
+
+# ===========================================================================
+# Lifecycle state machine tests (tincan-5mze)
+# ===========================================================================
+# Fixture: `lc` — GLib mocked; backend started and connected (CONNECTING state).
+#
+# Timer allocation (deterministic):
+#   timers[1] = _check_notifying_after_subscribe  (500 ms poll, created in _on_device_connected)
+#   timers[2] = _health_check | _attempt_le_rearm  (created by firing timers[1])
+#   timers[3] = _attempt_le_rearm                  (created when health check fails)
+#
+# _notifying dict: configure _verify_notifying() return values per char path.
+# Both paths default to True (healthy ANCS link).
+
+_LC_PROPS_IFACE = "org.freedesktop.DBus.Properties"
+
+
+@pytest.fixture
+def lc():
+    """Lifecycle context: GLib mocked, backend started + device connected (CONNECTING).
+
+    Yields (backend, mock_service, mock_bus, mock_glib, timers, notifying).
+    """
+    _notifying = {_NOTIF_SRC_PATH: True, _DATA_SRC_PATH: True}
+    mock_bus = MagicMock(name="SystemBus")
+    mock_ctrl_pt = MagicMock(name="ControlPoint")
+    mock_service = MagicMock(name="TincanService")
+    mock_device = MagicMock(name="Device1")
+    mock_device.Get.return_value = True  # Bonded=True by default
+
+    obj_mgr_mock = MagicMock(name="ObjectManager")
+    obj_mgr_mock.GetManagedObjects.return_value = _make_managed_objects()
+
+    def _get_object(service, path):
+        obj = MagicMock(name=f"obj({path})")
+        obj._dbus_path = str(path)
+        return obj
+
+    mock_bus.get_object.side_effect = _get_object
+
+    def _make_lc_interface(obj, iface):
+        path = getattr(obj, "_dbus_path", "")
+        if iface == "org.freedesktop.DBus.ObjectManager":
+            return obj_mgr_mock
+        if iface == "org.bluez.Device1":
+            return mock_device
+        if iface == _GATT_CHAR_IFACE and path == _CTRL_PT_PATH:
+            return mock_ctrl_pt
+        if iface == _LC_PROPS_IFACE:
+            props = MagicMock()
+            _path = path
+            props.Get.side_effect = lambda _i, _p: _notifying.get(_path, True)
+            return props
+        return MagicMock(name=f"Interface({iface}@{path})")
+
+    mock_glib = MagicMock(name="GLib")
+    mock_glib.SOURCE_REMOVE = False
+    mock_glib.SOURCE_CONTINUE = True
+    _timers: dict = {}
+    _next_id = [0]
+
+    def _timeout_add(interval_ms, cb):
+        _next_id[0] += 1
+        tid = _next_id[0]
+        _timers[tid] = cb
+        return tid
+
+    mock_glib.timeout_add.side_effect = _timeout_add
+    mock_glib.source_remove.side_effect = lambda tid: _timers.pop(tid, None)
+
+    with (
+        patch("dbus.service.Object.__init__", return_value=None),
+        patch("tincand.backends.ancs.dbus.SystemBus", return_value=mock_bus),
+        patch("tincand.backends.ancs.dbus.Interface", side_effect=_make_lc_interface),
+        patch("tincand.backends.ancs.dbus.exceptions") as mock_exc,
+        patch("tincand.backends.ancs.GLib", mock_glib),
+    ):
+        mock_exc.DBusException = Exception
+        backend = ANCSBackend()
+        backend.register_service(mock_service)
+        backend.start()
+        backend._on_device_connected(_DEV_PATH)
+        # timers[1] = _check_notifying_after_subscribe (500 ms poll)
+        yield backend, mock_service, mock_bus, mock_glib, _timers, _notifying
+
+
+# ---------------------------------------------------------------------------
+# §15 CONNECTING → ACTIVE (500 ms Notifying poll passes)
+# ---------------------------------------------------------------------------
+
+class TestConnectingToActive:
+    """500 ms poll: both chars Notifying=True → ACTIVE confirmed, health check scheduled."""
+
+    def test_poll_pass_schedules_health_check_at_30s(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        timers[1]()
+        intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
+        assert 30_000 in intervals
+
+    def test_poll_pass_sets_health_check_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        assert backend._health_check_id is not None
+
+    def test_poll_pass_does_not_call_set_capability_ancs_false(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        mock_service.reset_mock()
+        timers[1]()
+        false_calls = [c for c in mock_service.set_capability.call_args_list
+                       if list(c.args) == ["ancs", False]]
+        assert not false_calls
+
+    def test_poll_pass_heal_timer_not_scheduled(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        assert backend._heal_timer_id is None
+
+    def test_poll_pass_returns_source_remove(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        result = timers[1]()
+        assert result == mock_glib.SOURCE_REMOVE
+
+
+# ---------------------------------------------------------------------------
+# §16 CONNECTING → HEALING (500 ms Notifying poll fails)
+# ---------------------------------------------------------------------------
+
+class TestConnectingToHealing:
+    """500 ms poll: either char Notifying=False → HEALING entered, capability cleared."""
+
+    def test_poll_fail_notif_src_calls_set_capability_ancs_false(self, lc):
+        backend, mock_service, _, _, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        mock_service.reset_mock()
+        timers[1]()
+        mock_service.set_capability.assert_called_with("ancs", False)
+
+    def test_poll_fail_data_src_calls_set_capability_ancs_false(self, lc):
+        backend, mock_service, _, _, timers, notifying = lc
+        notifying[_DATA_SRC_PATH] = False
+        mock_service.reset_mock()
+        timers[1]()
+        mock_service.set_capability.assert_called_with("ancs", False)
+
+    def test_poll_fail_schedules_heal_timer_at_5s(self, lc):
+        backend, _, _, mock_glib, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()
+        intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
+        assert 5_000 in intervals
+
+    def test_poll_fail_sets_heal_timer_id(self, lc):
+        backend, _, _, _, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()
+        assert backend._heal_timer_id is not None
+
+    def test_poll_fail_health_check_not_scheduled(self, lc):
+        backend, _, _, _, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()
+        assert backend._health_check_id is None
+
+
+# ---------------------------------------------------------------------------
+# §17 ACTIVE → ACTIVE (30 s health check passes)
+# ---------------------------------------------------------------------------
+
+class TestActiveHealthCheckPass:
+    """30 s health check: both chars Notifying=True → SOURCE_CONTINUE, no HEALING."""
+
+    def test_health_check_pass_returns_source_continue(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        timers[1]()           # → ACTIVE; timers[2] = _health_check
+        result = timers[2]()
+        assert result == mock_glib.SOURCE_CONTINUE
+
+    def test_health_check_pass_does_not_call_set_capability_ancs_false(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        timers[1]()
+        mock_service.reset_mock()
+        timers[2]()
+        false_calls = [c for c in mock_service.set_capability.call_args_list
+                       if list(c.args) == ["ancs", False]]
+        assert not false_calls
+
+    def test_health_check_pass_health_check_id_remains_set(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        timers[2]()
+        assert backend._health_check_id is not None
+
+    def test_health_check_pass_no_heal_timer_scheduled(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        timers[2]()
+        assert backend._heal_timer_id is None
+
+
+# ---------------------------------------------------------------------------
+# §18 ACTIVE → HEALING (30 s health check fails)
+# ---------------------------------------------------------------------------
+
+class TestActiveToHealing:
+    """30 s health check: either char Notifying=False → HEALING entered."""
+
+    def test_health_check_fail_calls_set_capability_ancs_false(self, lc):
+        backend, mock_service, _, _, timers, notifying = lc
+        timers[1]()           # → ACTIVE
+        notifying[_NOTIF_SRC_PATH] = False
+        mock_service.reset_mock()
+        timers[2]()           # health check fails
+        mock_service.set_capability.assert_called_with("ancs", False)
+
+    def test_health_check_fail_returns_source_remove(self, lc):
+        backend, _, _, mock_glib, timers, notifying = lc
+        timers[1]()
+        notifying[_NOTIF_SRC_PATH] = False
+        result = timers[2]()
+        assert result == mock_glib.SOURCE_REMOVE
+
+    def test_health_check_fail_schedules_heal_timer(self, lc):
+        backend, _, _, mock_glib, timers, notifying = lc
+        timers[1]()
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[2]()
+        assert backend._heal_timer_id is not None
+        intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
+        assert 5_000 in intervals
+
+    def test_health_check_fail_clears_health_check_id(self, lc):
+        backend, _, _, _, timers, notifying = lc
+        timers[1]()
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[2]()
+        assert backend._health_check_id is None
+
+
+# ---------------------------------------------------------------------------
+# §19 HEALING → FALLBACK (3rd rearm attempt exhausted)
+# ---------------------------------------------------------------------------
+
+class TestHealingToFallback:
+    """3rd _attempt_le_rearm call → FALLBACK entered, ancs_needs_repair=True."""
+
+    @pytest.fixture
+    def healing(self, lc):
+        """lc advanced to HEALING state (500 ms poll failed)."""
+        backend, mock_service, mock_bus, mock_glib, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()   # → HEALING; timers[2] = _attempt_le_rearm
+        return backend, mock_service, mock_bus, mock_glib, timers, notifying
+
+    def test_first_attempt_returns_source_continue(self, healing):
+        backend, _, _, mock_glib, _, _ = healing
+        result = backend._attempt_le_rearm()
+        assert result == mock_glib.SOURCE_CONTINUE
+
+    def test_second_attempt_returns_source_continue(self, healing):
+        backend, _, _, mock_glib, _, _ = healing
+        backend._attempt_le_rearm()
+        result = backend._attempt_le_rearm()
+        assert result == mock_glib.SOURCE_CONTINUE
+
+    def test_third_attempt_enters_fallback_sets_ancs_needs_repair(self, healing):
+        backend, mock_service, _, _, _, _ = healing
+        backend._attempt_le_rearm()
+        backend._attempt_le_rearm()
+        mock_service.reset_mock()
+        backend._attempt_le_rearm()
+        mock_service.set_capability.assert_called_with("ancs_needs_repair", True)
+
+    def test_third_attempt_returns_source_remove(self, healing):
+        backend, _, _, mock_glib, _, _ = healing
+        backend._attempt_le_rearm()
+        backend._attempt_le_rearm()
+        result = backend._attempt_le_rearm()
+        assert result == mock_glib.SOURCE_REMOVE
+
+    def test_third_attempt_clears_heal_timer_id(self, healing):
+        backend, _, _, _, _, _ = healing
+        backend._attempt_le_rearm()
+        backend._attempt_le_rearm()
+        backend._attempt_le_rearm()
+        assert backend._heal_timer_id is None
+
+    def test_heal_attempts_counter_increments(self, healing):
+        backend, _, _, _, _, _ = healing
+        backend._attempt_le_rearm()
+        assert backend._heal_attempts == 1
+        backend._attempt_le_rearm()
+        assert backend._heal_attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# §20 HEALING → ACTIVE (rearm succeeds) [TDD: fails until builder implements]
+# ---------------------------------------------------------------------------
+
+class TestHealingToActive:
+    """Rearm detects Notifying=True → transitions back to ACTIVE.
+
+    These tests FAIL until the builder implements the rearm success path
+    inside _attempt_le_rearm (currently SPIKE-TBD stub).
+    """
+
+    @pytest.fixture
+    def healing(self, lc):
+        backend, mock_service, mock_bus, mock_glib, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()
+        return backend, mock_service, mock_bus, mock_glib, timers, notifying
+
+    def test_rearm_success_calls_set_capability_ancs_true(self, healing):
+        backend, mock_service, _, _, _, notifying = healing
+        notifying[_NOTIF_SRC_PATH] = True  # rearm restored Notifying
+        notifying[_DATA_SRC_PATH] = True
+        mock_service.reset_mock()
+        backend._attempt_le_rearm()
+        mock_service.set_capability.assert_called_with("ancs", True)
+
+    def test_rearm_success_clears_heal_timer_id(self, healing):
+        backend, _, _, _, _, notifying = healing
+        notifying[_NOTIF_SRC_PATH] = True
+        notifying[_DATA_SRC_PATH] = True
+        backend._attempt_le_rearm()
+        assert backend._heal_timer_id is None
+
+    def test_rearm_success_resets_ancs_needs_repair(self, healing):
+        backend, mock_service, _, _, _, notifying = healing
+        backend._heal_attempts = 3
+        backend._service.set_capability("ancs_needs_repair", True)
+        notifying[_NOTIF_SRC_PATH] = True
+        notifying[_DATA_SRC_PATH] = True
+        mock_service.reset_mock()
+        backend._attempt_le_rearm()
+        mock_service.set_capability.assert_any_call("ancs_needs_repair", False)
+
+
+# ---------------------------------------------------------------------------
+# §21 Timer hygiene — stop() and _on_device_disconnected() clear all timers
+# ---------------------------------------------------------------------------
+
+class TestTimerHygiene:
+    """stop() and _on_device_disconnected() clear both timer IDs; spurious fires no-op."""
+
+    def test_stop_from_active_clears_health_check_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE
+        assert backend._health_check_id is not None
+        backend.stop()
+        assert backend._health_check_id is None
+
+    def test_stop_from_healing_clears_heal_timer_id(self, lc):
+        backend, _, _, _, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()   # → HEALING
+        assert backend._heal_timer_id is not None
+        backend.stop()
+        assert backend._heal_timer_id is None
+
+    def test_disconnect_from_active_clears_health_check_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE
+        assert backend._health_check_id is not None
+        backend._on_device_disconnected()
+        assert backend._health_check_id is None
+
+    def test_disconnect_from_healing_clears_heal_timer_id(self, lc):
+        backend, _, _, _, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()   # → HEALING
+        assert backend._heal_timer_id is not None
+        backend._on_device_disconnected()
+        assert backend._heal_timer_id is None
+
+    def test_spurious_health_check_after_stop_returns_source_remove(self, lc):
+        backend, mock_service, _, mock_glib, timers, _ = lc
+        timers[1]()   # → ACTIVE
+        health_check = backend._health_check
+        backend.stop()
+        mock_service.reset_mock()
+        result = health_check()
+        assert result == mock_glib.SOURCE_REMOVE
+
+    def test_spurious_health_check_after_stop_no_set_capability(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        timers[1]()
+        health_check = backend._health_check
+        backend.stop()
+        mock_service.reset_mock()
+        health_check()
+        mock_service.set_capability.assert_not_called()
+
+    def test_spurious_poll_after_disconnect_returns_source_remove(self, lc):
+        backend, mock_service, _, mock_glib, timers, _ = lc
+        poll = timers[1]
+        backend._on_device_disconnected()
+        mock_service.reset_mock()
+        result = poll()
+        assert result == mock_glib.SOURCE_REMOVE
+
+    def test_spurious_poll_after_disconnect_no_set_capability(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        poll = timers[1]
+        backend._on_device_disconnected()
+        mock_service.reset_mock()
+        poll()
+        mock_service.set_capability.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §22 HEALING stub — _attempt_le_rearm contains SPIKE-TBD, makes no D-Bus calls
+# ---------------------------------------------------------------------------
+
+class TestHealingStub:
+    """_attempt_le_rearm is a documented stub pending spike results."""
+
+    def test_spike_tbd_comment_in_source(self):
+        src = inspect.getsource(ANCSBackend._attempt_le_rearm)
+        assert "SPIKE-TBD" in src
+
+    def test_stub_makes_no_dbus_bus_calls(self, lc):
+        backend, _, mock_bus, _, _, _ = lc
+        mock_bus.reset_mock()
+        backend._heal_attempts = 0
+        backend._attempt_le_rearm()
+        mock_bus.get_object.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §23 Double-subscribe guard
+# ---------------------------------------------------------------------------
+
+class TestDoubleSubscribeGuard:
+    """Second _on_device_connected while _notif_src_path is set → no-op."""
+
+    def test_second_connect_while_subscribed_schedules_no_new_timer(self, lc):
+        backend, _, _, mock_glib, _, _ = lc
+        assert backend._notif_src_path is not None
+        count_before = mock_glib.timeout_add.call_count
+        backend._on_device_connected(_DEV_PATH)
+        assert mock_glib.timeout_add.call_count == count_before
+
+    def test_second_connect_while_subscribed_no_capability_change(self, lc):
+        backend, mock_service, _, _, _, _ = lc
+        assert backend._notif_src_path is not None
+        mock_service.reset_mock()
+        backend._on_device_connected(_DEV_PATH)
+        mock_service.set_capability.assert_not_called()
