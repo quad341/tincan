@@ -29,6 +29,7 @@ import struct
 
 import dbus
 import dbus.service
+from gi.repository import GLib
 
 from tincand.ancs_util import (
     ANCS_SERVICE_UUID,
@@ -178,6 +179,9 @@ class ANCSBackend(BackendInterface):
         self._control_point_proxy = None
         self._notif_src_path: str | None = None
         self._data_src_path: str | None = None
+        self._health_check_id: int | None = None
+        self._heal_timer_id: int | None = None
+        self._heal_attempts: int = 0
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -272,6 +276,15 @@ class ANCSBackend(BackendInterface):
         if self._bus is None:
             return
 
+        if self._health_check_id is not None:
+            GLib.source_remove(self._health_check_id)
+            self._health_check_id = None
+        if self._heal_timer_id is not None:
+            GLib.source_remove(self._heal_timer_id)
+            self._heal_timer_id = None
+        self._notif_src_path = None
+        self._data_src_path = None
+
         try:
             adv_mgr = dbus.Interface(
                 self._bus.get_object("org.bluez", self._adapter_path),
@@ -312,6 +325,9 @@ class ANCSBackend(BackendInterface):
     def _on_device_connected(self, device_path: str) -> None:
         """Establish LE bond, then discover and subscribe to ANCS chars."""
         if self._bus is None:
+            return
+        # Double-subscribe guard: at-start probe and PropertiesChanged can both fire
+        if self._notif_src_path is not None:
             return
 
         # Get device properties via Device1 interface
@@ -440,14 +456,25 @@ class ANCSBackend(BackendInterface):
             path=data_src_path,
         )
 
+        # Optimistic ACTIVE entry — corrected to HEALING if Notifying=False at 500ms
         if self._service is not None:
             self._service.set_capability("ancs", True)
-        _log.info("ANCSBackend: ANCS link established on %s", device_path)
+        _log.info(
+            "ANCSBackend: StartNotify done on %s — validating Notifying in 500 ms",
+            device_path,
+        )
+        GLib.timeout_add(500, self._check_notifying_after_subscribe)
 
     def _on_data_source_changed_handler(self, iface, changed, invalidated) -> None:
         self._on_data_source_changed(changed)
 
     def _on_device_disconnected(self) -> None:
+        if self._health_check_id is not None:
+            GLib.source_remove(self._health_check_id)
+            self._health_check_id = None
+        if self._heal_timer_id is not None:
+            GLib.source_remove(self._heal_timer_id)
+            self._heal_timer_id = None
         if self._bus is not None:
             if self._notif_src_path:
                 try:
@@ -476,6 +503,83 @@ class ANCSBackend(BackendInterface):
         if self._service is not None:
             self._service.set_capability("ancs", False)
         _log.info("ANCSBackend: device disconnected")
+
+    # ------------------------------------------------------------------
+    # Lifecycle: Notifying validation, health check, HEALING, FALLBACK
+    # ------------------------------------------------------------------
+
+    def _verify_notifying(self, path: str) -> bool:
+        try:
+            p = dbus.Interface(self._bus.get_object("org.bluez", path), _PROPS_IFACE)
+            return bool(p.Get(_GATT_CHAR_IFACE, "Notifying"))
+        except Exception:
+            return False
+
+    def _check_notifying_after_subscribe(self) -> bool:
+        """500 ms post-StartNotify Notifying poll (CHECK state)."""
+        if self._bus is None or self._notif_src_path is None or self._data_src_path is None:
+            return GLib.SOURCE_REMOVE
+        if (self._verify_notifying(self._notif_src_path) and
+                self._verify_notifying(self._data_src_path)):
+            _log.info("ANCSBackend: Notifying=True on both chars — ACTIVE confirmed")
+            self._health_check_id = GLib.timeout_add(30_000, self._health_check)
+        else:
+            _log.warning("ANCSBackend: Notifying=False after StartNotify — entering HEALING")
+            self._enter_healing()
+        return GLib.SOURCE_REMOVE
+
+    def _health_check(self) -> bool:
+        """30 s health check while ACTIVE; reschedules on pass, enters HEALING on fail."""
+        if self._bus is None or self._notif_src_path is None or self._data_src_path is None:
+            self._health_check_id = None
+            return GLib.SOURCE_REMOVE
+        if (self._verify_notifying(self._notif_src_path) and
+                self._verify_notifying(self._data_src_path)):
+            _log.debug("ANCSBackend: health check OK")
+            return GLib.SOURCE_CONTINUE
+        _log.warning("ANCSBackend: health check — Notifying=False — entering HEALING")
+        self._health_check_id = None
+        self._enter_healing()
+        return GLib.SOURCE_REMOVE
+
+    def _enter_healing(self) -> None:
+        """Enter HEALING state: clear capability, cancel health check, start heal timer."""
+        if self._service is not None:
+            self._service.set_capability("ancs", False)
+        if self._health_check_id is not None:
+            GLib.source_remove(self._health_check_id)
+            self._health_check_id = None
+        self._heal_attempts = 0
+        self._heal_timer_id = GLib.timeout_add(5_000, self._attempt_le_rearm)
+        _log.warning("ANCSBackend: HEALING — max 3 attempts at 5 s each")
+
+    def _attempt_le_rearm(self) -> bool:
+        """HEALING body — SPIKE-TBD: no autonomous LE rearm strategy confirmed yet.
+
+        Spike results (tincan-jr96): iOS does not open LE for already-bonded devices.
+        ConnectProfile(ANCS) and Disconnect+Reconnect both failed to produce Notifying=True.
+        Body is intentionally left as a stub until mayor reports spike results.
+        """
+        # SPIKE-TBD: insert hardware-validated rearm strategy here when spike is complete
+        self._heal_attempts += 1
+        _log.warning(
+            "ANCSBackend: HEALING attempt %d/3 — SPIKE-TBD: no rearm strategy confirmed",
+            self._heal_attempts,
+        )
+        if self._heal_attempts >= 3:
+            self._heal_timer_id = None
+            self._enter_fallback()
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def _enter_fallback(self) -> None:
+        """Enter FALLBACK: all healing attempts exhausted, wizard intervention required."""
+        if self._service is not None:
+            self._service.set_capability("ancs_needs_repair", True)
+        _log.warning(
+            "ANCSBackend: FALLBACK — LE ANCS link could not be re-armed after 3 attempts; "
+            "wizard tap-to-reconnect required",
+        )
 
     def _on_notif_source_changed(self, interface, changed, invalidated):
         if "Value" not in changed:
