@@ -1,4 +1,4 @@
-"""Capability degradation banners: State A (disconnected), B (Show Notifications off), C (ANCS)."""
+"""Capability degradation banners: State A (disconnected), B (Show Notifications off), C (push notifications)."""  # noqa: E501
 from __future__ import annotations
 
 from typing import Optional
@@ -105,13 +105,13 @@ class StateCBanner(QWidget):
     refresh_clicked = Signal()
 
     MSG = (
-        "ℹ Real-time message delivery unavailable (ANCS not connected)"
-        " · New messages appear after manual refresh"
+        "ℹ Real-time push notifications unavailable"
+        " · New messages appear after manual refresh."
         " · Send and conversation list still work."
     )
     # tincan-5en: accessible name uses plain-text form per spec §5
     ACCESSIBLE_NAME = (
-        "Real-time message delivery unavailable. ANCS not connected. "
+        "Real-time push notifications unavailable. "
         "New messages appear after manual refresh. "
         "Send and conversation list still work."
     )

@@ -198,15 +198,25 @@ class ConnectedPage(_TincanPage):
         layout.addLayout(self._summary_layout)
         layout.addStretch()
 
+    _CAPABILITY_LABELS = {
+        "messages": ("Messages", "Messages (unavailable)"),
+        "contacts": ("Contacts", "Contacts (unavailable)"),
+        "ancs": ("Push notifications", "Push notifications (not yet active)"),
+    }
+
     def set_capabilities(self, capabilities: dict[str, bool]) -> None:
         while self._summary_layout.count():
             item = self._summary_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         for feature, ok in capabilities.items():
+            ok_label, warn_label = self._CAPABILITY_LABELS.get(
+                feature, (feature.capitalize(), f"{feature.capitalize()} (unavailable)")
+            )
             icon = "✓" if ok else "⚠"
+            text = ok_label if ok else warn_label
             color = "#065f46" if ok else "#92400e"
-            label = QLabel(f"{icon}  {feature}")
+            label = QLabel(f"{icon}  {text}")
             font = QFont()
             font.setPointSize(12)
             label.setFont(font)

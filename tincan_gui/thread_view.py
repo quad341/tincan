@@ -98,9 +98,9 @@ class MessageBubble(QWidget):
             warn.setWordWrap(True)
             bubble_layout.addWidget(warn)
 
-        # Body unavailable uses a fixed message
+        # Body unavailable uses canonical plain-language strings (tincan-063z)
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
-            body_text = "⚠ Message content unavailable — MAP did not return body"
+            body_text = "⚠ Message content unavailable"
         else:
             body_text = self._data.body
 
@@ -111,6 +111,15 @@ class MessageBubble(QWidget):
         body_label.setWordWrap(True)
         body_label.setStyleSheet(f"color: {style['fg']};")
         bubble_layout.addWidget(body_label)
+
+        if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
+            sub = QLabel("Message body not available from phone")
+            sub_font = QFont()
+            sub_font.setPointSize(11)
+            sub.setFont(sub_font)
+            sub.setStyleSheet("color: #92400e;")
+            sub.setWordWrap(True)
+            bubble_layout.addWidget(sub)
 
         # Meta label (sender · time or time · Sent ✓)
         if self._data.bubble_type == BubbleType.OUTBOUND:
