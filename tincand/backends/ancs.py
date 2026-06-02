@@ -306,7 +306,7 @@ class ANCSBackend(BackendInterface):
             return
 
         self._app = GattApplication(self._bus)
-        LEAdvertisement1(self._bus)   # registers itself; stored implicitly by dbus-python
+        self._adv = LEAdvertisement1(self._bus)
         GattCharacteristic1(
             self._bus, _CHAR0_PATH, NOTIF_SOURCE_UUID, ["notify"], _SVC_PATH
         )
