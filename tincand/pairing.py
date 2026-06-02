@@ -1,4 +1,5 @@
 """tincand/pairing.py — dual-mode ANCS+MAP pairing state machine."""
+
 from __future__ import annotations
 
 import logging
@@ -34,6 +35,7 @@ class FailureReason:
     PAIR_TIMEOUT = "pair_timeout"
     ANCS_NOT_EXPOSED = "ancs_not_exposed"
     MAP_CONSENT_DENIED = "map_consent_denied"
+    MAP_SESSION_ERROR = "map_session_error"
 
 
 class BluezMap:
@@ -138,6 +140,8 @@ class PairingOrchestrator:
     def _on_device_paired(self, dev_path: str) -> None:
         """Signal: iOS completed pairing with this adapter."""
         with self._lock:
+            if self._done:
+                return
             if self._pair_timer:
                 self._pair_timer.cancel()
                 self._pair_timer = None
@@ -156,6 +160,8 @@ class PairingOrchestrator:
     def _on_ancs_chars_appeared(self, dev_path: str) -> None:
         """Signal: BlueZ discovered ANCS characteristics on the paired device."""
         with self._lock:
+            if self._done:
+                return
             if self._ancs_timer:
                 self._ancs_timer.cancel()
                 self._ancs_timer = None
@@ -182,9 +188,12 @@ class PairingOrchestrator:
                     self._fail(FailureReason.MAP_CONSENT_DENIED)
             else:
                 _log.warning("PairingOrchestrator: MAP session error: %s", exc)
-                self._fail(FailureReason.MAP_CONSENT_DENIED)
+                self._fail(FailureReason.MAP_SESSION_ERROR)
 
     def signal_map_consent(self) -> None:
         """User granted MAP access on iPhone; retry MAP session creation."""
+        with self._lock:
+            if self._done:
+                return
         _log.info("PairingOrchestrator: user signalled MAP consent — retrying")
         self._try_map_session(first_attempt=False)
