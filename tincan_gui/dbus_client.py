@@ -29,6 +29,42 @@ _IFACE_MESSAGES = "im.tincan.Messages"
 # QDBusArgument demarshalling helpers
 # ---------------------------------------------------------------------------
 
+def _read_dbus_value(arg: QDBusArgument):
+    """Read the current value from a QDBusArgument, recursing for complex types.
+
+    PySide6's asVariant() returns VoidPtr/None for nested complex types (e.g.
+    a{sb} inside an a{sv} variant slot).  Check currentType() first and
+    navigate MapType / ArrayType explicitly instead of letting asVariant()
+    attempt the conversion.
+    """
+    t = arg.currentType()
+    if t == QDBusArgument.ElementType.MapType:
+        inner: dict = {}
+        arg.beginMap()
+        while not arg.atEnd():
+            arg.beginMapEntry()
+            k = arg.asVariant()
+            v = _read_dbus_value(arg)
+            arg.endMapEntry()
+            if k is not None:
+                inner[str(k)] = v
+        arg.endMap()
+        return inner
+    if t == QDBusArgument.ElementType.ArrayType:
+        items: list = []
+        arg.beginArray()
+        while not arg.atEnd():
+            items.append(_read_dbus_value(arg))
+        arg.endArray()
+        return items
+    # VariantType or BasicType: asVariant() works for primitives; if it
+    # returns a QDBusArgument (complex inner type) recurse once more.
+    v = arg.asVariant()
+    if isinstance(v, QDBusArgument):
+        return _read_dbus_value(v)
+    return v
+
+
 def _demarshal_map(value) -> dict:
     """Demarshal a{sv} QDBusArgument (or plain dict) into a Python dict."""
     if isinstance(value, dict):
@@ -36,14 +72,18 @@ def _demarshal_map(value) -> dict:
     if not isinstance(value, QDBusArgument):
         return {}
     result: dict = {}
-    value.beginMap()
-    while not value.atEnd():
-        value.beginMapEntry()
-        k = value.asVariant()
-        v = value.asVariant()
-        value.endMapEntry()
-        result[str(k)] = v
-    value.endMap()
+    try:
+        value.beginMap()
+        while not value.atEnd():
+            value.beginMapEntry()
+            k = value.asVariant()
+            v = _read_dbus_value(value)
+            value.endMapEntry()
+            if k is not None:
+                result[str(k)] = v
+        value.endMap()
+    except Exception as exc:
+        _log.debug("_demarshal_map error: %s", exc)
     return result
 
 
@@ -54,10 +94,13 @@ def _demarshal_list_of_maps(value) -> list[dict]:
     if not isinstance(value, QDBusArgument):
         return []
     result: list[dict] = []
-    value.beginArray()
-    while not value.atEnd():
-        result.append(_demarshal_map(value))
-    value.endArray()
+    try:
+        value.beginArray()
+        while not value.atEnd():
+            result.append(_demarshal_map(value))
+        value.endArray()
+    except Exception as exc:
+        _log.debug("_demarshal_list_of_maps error: %s", exc)
     return result
 
 
