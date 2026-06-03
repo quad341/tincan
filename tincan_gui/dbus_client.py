@@ -173,6 +173,7 @@ class TincandClient(QObject):
     message_received = Signal(dict)        # message a{sv} → dict
     message_sent = Signal(str)             # message_id
     conversation_updated = Signal(dict)    # conversation a{sv} → dict
+    contact_photo_received = Signal(str, bytes)  # (conv_id, photo_bytes)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -201,11 +202,13 @@ class TincandClient(QObject):
                       self, "1_on_message_sent(QString)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, "ConversationUpdated",
                       self, "1_on_conversation_updated(QVariantMap)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, "ContactPhotoReceived",
+                      self, "1_on_contact_photo_received(QString,QByteArray)"),
         ]
         if not all(_ok):
             _log.warning("tincan D-Bus: some signal subscriptions failed: %s", _ok)
         else:
-            _log.debug("tincan D-Bus: all 6 signal subscriptions registered")
+            _log.debug("tincan D-Bus: all 7 signal subscriptions registered")
 
     # ------------------------------------------------------------------
     # D-Bus signal → Qt signal bridges
@@ -358,3 +361,19 @@ class TincandClient(QObject):
             _log.warning("SendMessage failed: %s", reply.error().message())
             return ""
         return str(reply.value() or "")
+
+    def fetch_contact_photo(self, conv_id: str) -> None:
+        """Call FetchContactPhoto on the daemon (fire-and-forget)."""
+        if not self._bus.isConnected():
+            return
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
+        if iface.isValid():
+            iface.call("FetchContactPhoto", str(conv_id))
+
+    def _on_contact_photo_received(self, conv_id, photo) -> None:
+        _log.debug("tincand: ContactPhotoReceived(%s)", conv_id)
+        try:
+            photo_bytes = bytes(photo) if photo else b""
+        except (TypeError, ValueError):
+            photo_bytes = b""
+        self.contact_photo_received.emit(str(conv_id), photo_bytes)

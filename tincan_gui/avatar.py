@@ -92,3 +92,4 @@ class AvatarWidget(QLabel):
             self._show_initials()
         else:
             self.setPixmap(px)
+        self.setAccessibleName(f"Contact photo for {self._name}")
