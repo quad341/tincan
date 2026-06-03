@@ -2,7 +2,7 @@
 Bead: tincan-fnf  (tincan-mgc D-Bus signal wiring coverage)
 
 Coverage:
-  - _on_daemon_connected: title bar connected, banner_a hidden, compose enabled.
+  - _on_daemon_connected: title bar connected, banner_a hidden, compose unchanged (enabled only after conversation selected).
   - _on_daemon_disconnected: title bar disconnected, banner_a shown, banner_b/c hidden,
     compose disabled.
   - _on_capability_changed('messages', False/True): banner_b visibility + compose state.
@@ -53,7 +53,7 @@ def _has_empty_label(view: ThreadView) -> bool:
 # ---------------------------------------------------------------------------
 
 class TestDaemonConnected:
-    """_on_daemon_connected updates title bar, hides banner_a, enables compose."""
+    """_on_daemon_connected updates title bar, hides banner_a; compose stays disabled until conversation selected."""
 
     @pytest.fixture(autouse=True)
     def _no_live_daemon(self, monkeypatch):
@@ -92,13 +92,23 @@ class TestDaemonConnected:
 
         assert not window._banner_a.isVisible()
 
-    def test_compose_is_enabled(self, qtbot):
+    def test_compose_stays_disabled_after_daemon_connect_no_conversation(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        window._compose.set_compose_enabled(False, "not connected")
 
         window._on_daemon_connected("device")
+
+        assert not window._compose._send_btn.isEnabled()
+
+    def test_compose_enabled_when_conversation_selected_after_connect(self, qtbot, monkeypatch):
+        monkeypatch.setattr(TincandClient, "get_messages", lambda self, cid: [])
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+        window._on_daemon_connected("device")
+
+        window._on_conversation_selected("conv-1")
 
         assert window._compose._send_btn.isEnabled()
 
@@ -213,7 +223,7 @@ class TestCapabilityChanged:
 
         assert not window._compose._send_btn.isEnabled()
 
-    def test_messages_true_enables_compose(self, qtbot):
+    def test_messages_capability_does_not_enable_compose_without_conversation(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
@@ -221,7 +231,7 @@ class TestCapabilityChanged:
 
         window._on_capability_changed("messages", True)
 
-        assert window._compose._send_btn.isEnabled()
+        assert not window._compose._send_btn.isEnabled()
 
     # --- ancs capability ---
 
@@ -251,8 +261,8 @@ class TestCapabilityChanged:
 
         window._on_capability_changed("ancs", False)
 
-        # ancs has no effect on compose panel state
-        assert window._compose._send_btn.isEnabled()
+        # ancs has no effect on compose — stays disabled without a conversation selected
+        assert not window._compose._send_btn.isEnabled()
 
     def test_unknown_feature_is_silently_ignored(self, qtbot):
         window = MainWindow()
