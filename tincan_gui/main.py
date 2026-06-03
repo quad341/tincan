@@ -235,6 +235,7 @@ class MainWindow(QMainWindow):
         c.capability_changed.connect(self._on_capability_changed)
         c.message_received.connect(self._on_message_received)
         c.conversation_updated.connect(self._on_conversation_updated)
+        c.contact_photo_received.connect(self._on_contact_photo_received)
         self.refresh_requested.connect(self._load_conversations)
 
     def _sync_daemon_state(self) -> None:
@@ -324,6 +325,7 @@ class MainWindow(QMainWindow):
         self._thread_view.load_thread(name, conv_id, messages, "SMS")
         self._sync_compose_state()
         self._tray.reset_unread()
+        self._dbus_client.fetch_contact_photo(conv_id)
 
     def _on_daemon_connected(self, device_address: str) -> None:
         status = self._dbus_client.get_status()
@@ -418,6 +420,10 @@ class MainWindow(QMainWindow):
             preview_direction=str(conversation.get("last_message_direction", "")),
         )
         self._conv_list.update_item(conv_id, data)
+
+    def _on_contact_photo_received(self, conv_id: str, photo: bytes) -> None:
+        if photo:
+            self._conv_list.set_conversation_photo(conv_id, photo)
 
     def _on_notification_clicked(self, conversation_id: str) -> None:
         """Raise window and select conversation when user clicks a notification."""

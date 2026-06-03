@@ -532,6 +532,13 @@ class ConversationListWidget(QWidget):
         self._refresh_btn.setEnabled(not loading)
         self._refresh_btn.setText("⌛" if loading else "↻")
 
+    def set_conversation_photo(self, conv_id: str, photo: bytes) -> None:
+        """Route a contact photo to the matching ConversationItem."""
+        for item in self._items:
+            if item.conversation_id == conv_id:
+                item.set_photo(photo)
+                break
+
 
 # ---------------------------------------------------------------------------
 # Accessible role factory — ConversationItem → ListItem
