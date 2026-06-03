@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import sys
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -121,6 +122,29 @@ class TitleBar(QWidget):
         self._status_chip.setAccessibleName("Connection status: Disconnected")
 
 
+class _SendWorker(QObject):
+    """Worker that calls SendMessage on a background thread to avoid freezing the GUI."""
+
+    done = Signal(str, str, str)  # (phone, text, message_id_or_empty)
+
+    def __init__(self, phone: str, text: str, parent=None) -> None:
+        super().__init__(parent)
+        self._phone = phone
+        self._text = text
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            import dbus as _dbus
+            bus = _dbus.SessionBus()
+            obj = bus.get_object("im.tincan.Daemon", "/im/tincan")
+            iface = _dbus.Interface(obj, "im.tincan.Messages")
+            result = str(iface.SendMessage(self._phone, self._text))
+        except Exception:
+            result = ""
+        self.done.emit(self._phone, self._text, result)
+
+
 class MainWindow(QMainWindow):
     """Top-level window: title bar + QSplitter(left 300px, right pane)."""
 
@@ -138,6 +162,7 @@ class MainWindow(QMainWindow):
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._conversations_by_id: dict[str, ConversationData] = {}
+        self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
@@ -379,6 +404,8 @@ class MainWindow(QMainWindow):
             caps = {"messages": True, "contacts": True, "ancs": True}
             caps[feature] = available
         self._apply_capabilities(caps)
+        if feature == "contacts" and available:
+            self._load_conversations()
 
     def _on_message_received(self, message: dict) -> None:
         self._notifier.dispatch(message)
@@ -393,6 +420,9 @@ class MainWindow(QMainWindow):
             return  # message is for a different conversation; notification already sent
         direction = str(message.get("direction", "inbound"))
         body = str(message.get("body", ""))
+        # Suppress daemon echo for messages already shown as optimistic bubbles.
+        if direction == "outbound" and (conv_id, body) in self._pending_sends:
+            return
         sender = str(message.get("sender", "") or message.get("from", ""))
         timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM
 
@@ -484,7 +514,24 @@ class MainWindow(QMainWindow):
     def _on_send(self, text: str) -> None:
         self.message_send_requested.emit(text)
         self._compose.hide_send_error()
-        message_id = self._dbus_client.send_message(self._current_phone, text)
+        if not self._current_phone:
+            return
+        phone = self._current_phone
+        ts = datetime.now(tz=timezone.utc).strftime("%H:%M")
+        self._thread_view.append_message(MessageData(BubbleType.OUTBOUND, text, "", ts))
+        self._pending_sends.add((phone, text))
+        worker = _SendWorker(phone, text)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.done.connect(self._on_send_done)
+        worker.done.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+        worker.done.connect(worker.deleteLater)
+        thread.start()
+
+    def _on_send_done(self, phone: str, text: str, message_id: str) -> None:
+        self._pending_sends.discard((phone, text))
         if not message_id:
             self._compose.show_send_error(text)
 

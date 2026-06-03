@@ -392,13 +392,13 @@ class TestNormPhone:
     """_norm_phone returns last 10 digits for ≥7-digit strings, raw string otherwise."""
 
     def test_e164_with_country_code_strips_to_10_digits(self):
-        assert _norm_phone("+15555550123") == "5555550123"
+        assert _norm_phone("+15550101234") == "5550101234"
 
     def test_10_digit_number_is_passthrough(self):
-        assert _norm_phone("5555550123") == "5555550123"
+        assert _norm_phone("5550101234") == "5550101234"
 
     def test_formatted_number_strips_punctuation_and_country_code(self):
-        assert _norm_phone("+1 (555) 555-0123") == "5555550123"
+        assert _norm_phone("+1 (555) 010-1234") == "5550101234"
 
     def test_display_name_returned_unchanged(self):
         assert _norm_phone("Alice") == "Alice"

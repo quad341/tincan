@@ -18,7 +18,7 @@ Coverage:
 """
 from __future__ import annotations
 
-import re
+import os
 from unittest.mock import MagicMock, patch
 
 import dbus
@@ -26,14 +26,15 @@ import dbus.service
 import pytest
 
 from tincand.backends.bluez_map import MapBackend, build_bmsg
+from tincand.contact_store import normalize_phone
 from tincand.dbus_service import Conversation, TincanService
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_PHONE = "+15555550123"   # normalizes to "5555550123"
-_NORM  = "5555550123"
+_PHONE = os.environ.get("TINCAN_TEST_NUMBER", "+15550101234")
+_NORM  = normalize_phone(_PHONE)
 _BODY  = "Hello from test"
 
 

@@ -59,5 +59,13 @@ class ContactStore:
         contact = self.get(phone)
         return contact.name if contact else None
 
+    def lookup_by_name(self, name: str) -> str | None:
+        """Return the normalized_phone for the first contact matching *name* (case-insensitive)."""
+        name_lower = name.lower()
+        for contact in self._contacts.values():
+            if contact.name.lower() == name_lower:
+                return contact.normalized_phone
+        return None
+
     def clear(self) -> None:
         self._contacts.clear()
