@@ -51,8 +51,8 @@ class ConversationItem(QWidget):
 
     activated = Signal(str)   # emits conversation id
 
-    _SELECTED_BG = "#dbeafe"
-    _SELECTED_BORDER = "#bfdbfe"
+    _SELECTED_BG = "#bfdbfe"
+    _SELECTED_BORDER = "#93c5fd"
     _UNREAD_DOT_COLOR = "#1d4ed8"
     _SELECTED_NAME_COLOR = "#1e40af"        # blue-800, 4.7:1 on #dbeafe — WCAG AA
     _SELECTED_MUTED_COLOR = "#374151"       # gray-700, 5.4:1 on #dbeafe — WCAG AA
@@ -237,6 +237,7 @@ class ConversationItem(QWidget):
             self.setStyleSheet(
                 f"ConversationItem {{"
                 f" background-color: {sel_bg}; border: 1px solid {sel_border};"
+                " border-radius: 8px; margin: 4px 6px;"
                 " } QLabel { background: transparent; }"
             )
             self._name_label.setStyleSheet(f"color: {sel_name};")

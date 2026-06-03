@@ -182,11 +182,17 @@ class TestTincandClientFallbackWhenReplyInvalid:
     """send_message returns empty string when tincand is reachable but reply is invalid.
 
     QDBusInterface is patched while send_message() runs so we control its return values
-    without needing a live tincand process.  The bus itself stays real.
+    without touching the live daemon.  The bus is faked as connected so the code
+    reaches the QDBusInterface path (bus.isConnected() check passes).
     """
 
+    @pytest.fixture(autouse=True)
+    def _connected_bus(self, _hermetic_dbus):
+        """Override the conftest disconnected-bus default with a connected mock bus."""
+        _hermetic_dbus.isConnected.return_value = True
+
     def test_send_message_returns_empty_string_on_invalid_reply(self):
-        client = TincandClient()  # real bus, natural tincand-absent state
+        client = TincandClient()
 
         mock_iface = MagicMock()
         mock_iface.isValid.return_value = True
