@@ -9,6 +9,7 @@ Coverage:
   - _apply_unread_style: unread_count=1 → dot shown, name bold, badge hidden
   - _apply_unread_style: unread_count=10 → dot shown, name bold, badge shows '9+'
   - update_data: updates timestamp, preview text, dot/badge, accessible state in-place
+  - set_read: dot hidden and name weight regular after call; _on_item_activated triggers it
   - ConversationListWidget.update_item: multiple calls within 200ms coalesce to one flush
   - Accessible description: unread_count=1 → 'Unread: 1'; count=10 → 'Unread: 9+'; count=0 → ''
 """
@@ -196,7 +197,39 @@ class TestUpdateData:
 
 
 # ---------------------------------------------------------------------------
-# §5 Accessible description — unread_count formatting
+# §5 set_read — clears unread state immediately
+# ---------------------------------------------------------------------------
+
+class TestSetRead:
+    """set_read() hides dot and drops bold; _on_item_activated() triggers it on the item."""
+
+    def test_set_read_hides_unread_dot(self, qtbot):
+        item = ConversationItem(_make_data(unread_count=1))
+        qtbot.addWidget(item)
+        assert item._dot.isVisible()
+        item.set_read()
+        assert not item._dot.isVisible()
+
+    def test_set_read_clears_bold_name(self, qtbot):
+        item = ConversationItem(_make_data(unread_count=1))
+        qtbot.addWidget(item)
+        assert item._name_label.font().bold()
+        item.set_read()
+        assert not item._name_label.font().bold()
+
+    def test_on_item_activated_triggers_set_read(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+        w.load_conversations([_make_data(id="c1", unread_count=2)])
+        assert w._items[0]._dot.isVisible()
+        assert w._items[0]._name_label.font().bold()
+        w._on_item_activated("c1")
+        assert not w._items[0]._dot.isVisible()
+        assert not w._items[0]._name_label.font().bold()
+
+
+# ---------------------------------------------------------------------------
+# §6 Accessible description — unread_count formatting
 # ---------------------------------------------------------------------------
 
 class TestAccessibleDescription:
@@ -219,7 +252,7 @@ class TestAccessibleDescription:
 
 
 # ---------------------------------------------------------------------------
-# §6 ConversationListWidget.update_item — 200ms debounce
+# §7 ConversationListWidget.update_item — 200ms debounce
 # ---------------------------------------------------------------------------
 
 class TestConversationListUpdateItem:
