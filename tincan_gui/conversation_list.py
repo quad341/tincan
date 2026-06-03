@@ -234,13 +234,15 @@ class ConversationItem(QWidget):
                 self._SELECTED_MUTED_COLOR_DARK if self._dark else self._SELECTED_MUTED_COLOR
             )
             self.setStyleSheet(
-                f"background-color: {sel_bg}; border: 1px solid {sel_border};"
+                f"ConversationItem {{"
+                f" background-color: {sel_bg}; border: 1px solid {sel_border};"
+                " } QLabel { background: transparent; }"
             )
             self._name_label.setStyleSheet(f"color: {sel_name};")
             self._ts_label.setStyleSheet(f"color: {sel_muted};")
             self._apply_preview()
         else:
-            self.setStyleSheet("")
+            self.setStyleSheet("QLabel { background: transparent; }")
             self._name_label.setStyleSheet(
                 "color: #f4f4f5;" if self._dark else "color: #111827;"
             )
