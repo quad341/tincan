@@ -156,3 +156,68 @@ class PBAPContactSync:
 
         _log.info("PBAP PullAll: %d phone-name mappings loaded", count)
         self._service.set_capability("contacts", True)
+
+    def fetch_photo(self, phone: str) -> None:
+        """Fetch a contact photo for *phone* via PBAP Pull; fire-and-forget.
+
+        Guarded by photo_fetched flag — no OBEX call if photo already fetched.
+        """
+        normalized = normalize_phone(phone)
+        contact = self._store.get(normalized)
+        if contact is not None and contact.photo_fetched:
+            return  # already fetched (or fetch attempted)
+
+        if self.session_path is None:
+            return
+
+        try:
+            bus = dbus.SessionBus()
+            phonebook = dbus.Interface(
+                bus.get_object(_OBEX_CLIENT, self.session_path),
+                _PBAP_ACCESS_IFACE,
+            )
+            handles = phonebook.List(
+                {"SearchValue": dbus.String(phone), "SearchAttribute": dbus.String("number")}
+            )
+            if not handles:
+                self._service.deliver_contact_photo(phone, None)
+                return
+            handle = str(handles[0][0])
+
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".vcf", delete=True, encoding="utf-8"
+            )
+            tmp_path = tmp.name
+            tmp.close()
+
+            result = phonebook.Pull(
+                handle, tmp_path, {"Fields": dbus.Array(["PHOTO"], "s")}
+            )
+            transfer_path = str(result[0]) if isinstance(result, (list, tuple)) else str(result)
+            self._wait_transfer(
+                transfer_path,
+                lambda error=False: self._parse_photo(phone, tmp_path, error),
+            )
+        except dbus.exceptions.DBusException as exc:
+            _log.debug("PBAP fetch_photo failed for %s: %s", phone, exc)
+            self._service.deliver_contact_photo(phone, None)
+
+    def _parse_photo(self, phone: str, tmp_path: str, error: bool = False) -> None:
+        """Parse the fetched vCard for a PHOTO field and deliver to service."""
+        if error:
+            self._service.deliver_contact_photo(phone, None)
+            return
+        try:
+            with open(tmp_path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            photo_bytes: bytes | None = None
+            for vcard in vobject.readComponents(content):
+                photos = vcard.contents.get("photo", [])
+                if photos:
+                    raw = photos[0].value
+                    photo_bytes = raw if isinstance(raw, bytes) else raw.encode("latin-1")
+                    break
+            self._service.deliver_contact_photo(phone, photo_bytes)
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("PBAP photo parse error for %s: %s", phone, exc)
+            self._service.deliver_contact_photo(phone, None)
