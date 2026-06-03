@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui.avatar import AvatarWidget
+from tincan_gui.theme import is_dark_theme
 
 
 class _SearchLineEdit(QLineEdit):
@@ -59,6 +60,7 @@ class ConversationItem(QWidget):
         super().__init__(parent)
         self._data = data
         self._selected = False
+        self._dark = is_dark_theme()
         self.setFixedHeight(72)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -95,14 +97,18 @@ class ConversationItem(QWidget):
         name_font.setPointSize(14)
         name_font.setBold(True)
         self._name_label.setFont(name_font)
-        self._name_label.setStyleSheet("color: #111827;")
+        self._name_label.setStyleSheet(
+            "color: #f4f4f5;" if self._dark else "color: #111827;"
+        )
         top_row.addWidget(self._name_label, stretch=1)
 
         self._ts_label = QLabel(self._data.timestamp)
         ts_font = QFont()
         ts_font.setPointSize(11)
         self._ts_label.setFont(ts_font)
-        self._ts_label.setStyleSheet("color: #6b7280;")
+        self._ts_label.setStyleSheet(
+            "color: #a1a1aa;" if self._dark else "color: #6b7280;"
+        )
         top_row.addWidget(self._ts_label)
 
         text_col.addLayout(top_row)
@@ -220,8 +226,12 @@ class ConversationItem(QWidget):
             self._apply_preview()
         else:
             self.setStyleSheet("")
-            self._name_label.setStyleSheet("color: #111827;")
-            self._ts_label.setStyleSheet("color: #6b7280;")
+            self._name_label.setStyleSheet(
+                "color: #f4f4f5;" if self._dark else "color: #111827;"
+            )
+            self._ts_label.setStyleSheet(
+                "color: #a1a1aa;" if self._dark else "color: #6b7280;"
+            )
             self._apply_preview()
 
     def mousePressEvent(self, event) -> None:
@@ -278,7 +288,11 @@ class ConversationListWidget(QWidget):
         # Header
         header = QWidget()
         header.setFixedHeight(40)
-        header.setStyleSheet("background: #f9fafb; border-bottom: 1px solid #e5e7eb;")
+        _dark = is_dark_theme()
+        header.setStyleSheet(
+            "background: #27272a; border-bottom: 1px solid #3f3f46;" if _dark
+            else "background: #f9fafb; border-bottom: 1px solid #e5e7eb;"
+        )
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 0, 8, 0)
 
@@ -286,7 +300,9 @@ class ConversationListWidget(QWidget):
         conv_font = QFont()
         conv_font.setPointSize(13)
         conversations_label.setFont(conv_font)
-        conversations_label.setStyleSheet("color: #374151;")
+        conversations_label.setStyleSheet(
+            "color: #f4f4f5;" if _dark else "color: #374151;"
+        )
         header_layout.addWidget(conversations_label, stretch=1)
 
         self._compose_btn = QToolButton()
@@ -294,10 +310,12 @@ class ConversationListWidget(QWidget):
         self._compose_btn.setFixedSize(28, 28)
         self._compose_btn.setToolTip("New conversation")
         self._compose_btn.setAccessibleName("New conversation")
+        _btn_hover = "#3f3f46" if _dark else "#e5e7eb"
+        _btn_color = "#f4f4f5" if _dark else "#374151"
         self._compose_btn.setStyleSheet(
-            "QToolButton { font-size: 18px; font-weight: bold; color: #374151;"
+            f"QToolButton {{ font-size: 18px; font-weight: bold; color: {_btn_color};"
             " border: none; background: transparent; border-radius: 4px; }"
-            " QToolButton:hover { background: #e5e7eb; }"
+            f" QToolButton:hover {{ background: {_btn_hover}; }}"
         )
         self._compose_btn.clicked.connect(self.compose_new_requested.emit)
         header_layout.addWidget(self._compose_btn)
@@ -309,10 +327,16 @@ class ConversationListWidget(QWidget):
         self._search.setFixedHeight(32)
         self._search.setPlaceholderText("Filter conversations…")
         self._search.setAccessibleName("Filter conversations")
-        self._search.setStyleSheet(
-            "QLineEdit { border: none; border-bottom: 1px solid #e5e7eb;"
-            " padding: 0 12px; background: #f9fafb; }"
-        )
+        if _dark:
+            self._search.setStyleSheet(
+                "QLineEdit { border: none; border-bottom: 1px solid #3f3f46;"
+                " padding: 0 12px; background: #27272a; color: #f4f4f5; }"
+            )
+        else:
+            self._search.setStyleSheet(
+                "QLineEdit { border: none; border-bottom: 1px solid #e5e7eb;"
+                " padding: 0 12px; background: #f9fafb; }"
+            )
         self._search.textChanged.connect(self._on_filter_changed)
         layout.addWidget(self._search)
 
@@ -321,7 +345,9 @@ class ConversationListWidget(QWidget):
         nr_font = QFont()
         nr_font.setPointSize(12)
         self._no_results.setFont(nr_font)
-        self._no_results.setStyleSheet("color: #9ca3af; padding: 12px;")
+        self._no_results.setStyleSheet(
+            "color: #71717a; padding: 12px;" if _dark else "color: #9ca3af; padding: 12px;"
+        )
         self._no_results.setAlignment(Qt.AlignCenter)
         self._no_results.setVisible(False)
         layout.addWidget(self._no_results)
@@ -346,10 +372,16 @@ class ConversationListWidget(QWidget):
         footer_font = QFont()
         footer_font.setPointSize(10)
         footer.setFont(footer_font)
-        footer.setStyleSheet(
-            "color: #9ca3af; background: #f9fafb; "
-            "border-top: 1px solid #e5e7eb; padding: 4px 12px;"
-        )
+        if _dark:
+            footer.setStyleSheet(
+                "color: #a1a1aa; background: #27272a; "
+                "border-top: 1px solid #3f3f46; padding: 4px 12px;"
+            )
+        else:
+            footer.setStyleSheet(
+                "color: #9ca3af; background: #f9fafb; "
+                "border-top: 1px solid #e5e7eb; padding: 4px 12px;"
+            )
         footer.setAlignment(Qt.AlignCenter)
         layout.addWidget(footer)
 

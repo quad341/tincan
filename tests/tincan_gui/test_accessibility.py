@@ -95,11 +95,12 @@ class TestMetadataColorOnWidgets:
             id="c1", name="Alice", phone="+1 555-0100",
             preview="See you tomorrow", timestamp="10:32", unread=False,
         )
-        item = ConversationItem(data)
+        with patch("tincan_gui.conversation_list.is_dark_theme", return_value=False):
+            item = ConversationItem(data)
         qtbot.addWidget(item)
         color = item.timestamp_label_color()
         assert color.lower() == "#6b7280", (
-            f"Expected #6b7280 for AA compliance, got {color!r}"
+            f"Expected #6b7280 for AA compliance in light mode, got {color!r}"
         )
 
     def test_conversation_item_timestamp_color_is_not_9ca3af(self, qtbot):
