@@ -16,7 +16,8 @@ jobs:
       - name: Install system packages (PyGObject, dbus-python, GLib typelib)
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-gi python3-dbus gir1.2-glib-2.0 python3-venv
+          sudo apt-get install -y python3-gi python3-dbus gir1.2-glib-2.0 python3-venv \
+                                   libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
 
       - name: Create venv (system gi/dbus visible) and install pip deps
         run: |
