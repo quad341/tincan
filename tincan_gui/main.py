@@ -6,7 +6,7 @@ import warnings
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(600, 400)
         self._current_phone: str = ""     # phone for the open conversation
         self._connected_device: str = ""  # human-readable name or address of connected BT device
+        self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
@@ -200,7 +201,6 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self._thread_view, stretch=1)
 
         self._compose = ComposePanel()
-        self._compose.set_compose_enabled(False, "no conversation selected")
         right_layout.addWidget(self._compose)
 
         splitter.addWidget(right_pane)
@@ -251,15 +251,26 @@ class MainWindow(QMainWindow):
         else:
             self._title_bar.set_disconnected()
 
+    def _sync_compose_state(self) -> None:
+        """Gate the send button on messaging availability AND conversation selection.
+
+        Only the send button is toggled; the input widget and the internal
+        _enabled flag are left as-is so keyboard navigation always works.
+        Full input+button disable is reserved for daemon disconnect via
+        set_compose_enabled(False, "not connected").
+        """
+        if self._messages_ok and self._current_phone:
+            self._compose.set_compose_enabled(True)
+        else:
+            self._compose._send_btn.setEnabled(False)
+
     def _apply_capabilities(self, caps: dict) -> None:
         # tincan-40c/tincan-5mze: all keys always present; default False (not
         # capable) when a key is absent so degradation banners show conservatively.
         messages_ok = bool(caps.get("messages", False))
+        self._messages_ok = messages_ok
         self._banner_b.setVisible(not messages_ok)
-        if messages_ok:
-            self._compose.set_compose_enabled(True)
-        else:
-            self._compose.set_compose_enabled(False, "messaging unavailable")
+        self._sync_compose_state()
         ancs_ok = bool(caps.get("ancs", False))
         ancs_needs_repair = bool(caps.get("ancs_needs_repair", False))
         self._update_ancs_repair_banner(ancs_needs_repair)
@@ -310,7 +321,7 @@ class MainWindow(QMainWindow):
         raw_msgs = self._dbus_client.get_messages(conv_id)
         messages = [self._msg_dict_to_data(m) for m in raw_msgs]
         self._thread_view.load_thread(name, conv_id, messages, "SMS")
-        self._compose.set_compose_enabled(True)
+        self._sync_compose_state()
         self._tray.reset_unread()
 
     def _on_daemon_connected(self, device_address: str) -> None:
@@ -332,6 +343,7 @@ class MainWindow(QMainWindow):
 
     def _on_daemon_disconnected(self) -> None:
         self._connected_device = ""
+        self._messages_ok = False
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
@@ -449,7 +461,7 @@ class MainWindow(QMainWindow):
         phone = phone.strip()
         self._current_phone = phone
         self._thread_view.load_thread(phone, phone, [], "SMS")
-        self._compose.set_compose_enabled(True)
+        self._sync_compose_state()
         self._compose._input.setFocus()
 
     def _on_send(self, text: str) -> None:
@@ -519,7 +531,8 @@ class MainWindow(QMainWindow):
             self._conversations_by_id[data.id] = data
         self._conv_list.load_conversations(conversations)
         if conversations and not self._current_phone:
-            self._conv_list.select_conversation(conversations[0].id)
+            first_id = conversations[0].id
+            QTimer.singleShot(0, lambda: self._conv_list.select_conversation(first_id))
 
     def _msg_dict_to_data(self, msg: dict) -> MessageData:
         direction = str(msg.get("direction", "inbound"))

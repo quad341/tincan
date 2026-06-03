@@ -127,6 +127,7 @@ class MessageBubble(QWidget):
             body_label.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextBrowserInteraction
             )
+            body_label.setCursor(Qt.CursorShape.IBeamCursor)
             body_label.setText(_linkify(self._data.body))
         bubble_layout.addWidget(body_label)
 
