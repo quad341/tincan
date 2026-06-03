@@ -55,7 +55,8 @@ class TitleBar(QWidget):
         icon_label.setFixedSize(32, 32)
         icon_label.setAccessibleName("")
         icon_label.setStyleSheet("border: none; background: transparent;")
-        dpr = QApplication.primaryScreen().devicePixelRatio() if QApplication.primaryScreen() else 1.0
+        screen = QApplication.primaryScreen()
+        dpr = screen.devicePixelRatio() if screen else 1.0
         px = QPixmap(str(_ASSETS / "tincan-icon.png")).scaled(
             int(32 * dpr), int(32 * dpr), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )

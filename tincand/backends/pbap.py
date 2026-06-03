@@ -157,7 +157,10 @@ class PBAPContactSync:
                             self._service.update_contact(normalized, name)
                             count += 1
             except Exception as exc:  # noqa: BLE001
-                _log.warning("PBAP PullAll: vCard parse error (partial load %d contacts): %s", count, exc)
+                _log.warning(
+                    "PBAP PullAll: vCard parse error (partial load %d contacts): %s",
+                    count, exc,
+                )
 
             _log.info("PBAP PullAll: %d phone-name mappings loaded", count)
             self._service.set_capability("contacts", True)

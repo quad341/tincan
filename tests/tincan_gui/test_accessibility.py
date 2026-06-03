@@ -48,7 +48,6 @@ from tincan_gui.main import MainWindow, TitleBar
 from tincan_gui.capability_banner import CapabilityBanner   ← new module
 """
 
-import pytest
 from unittest.mock import patch
 
 from PySide6.QtCore import Qt

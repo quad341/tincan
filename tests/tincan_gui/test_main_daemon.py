@@ -2,7 +2,8 @@
 Bead: tincan-fnf  (tincan-mgc D-Bus signal wiring coverage)
 
 Coverage:
-  - _on_daemon_connected: title bar connected, banner_a hidden, compose unchanged (enabled only after conversation selected).
+  - _on_daemon_connected: title bar connected, banner_a hidden,
+    compose unchanged (enabled only after conversation selected).
   - _on_daemon_disconnected: title bar disconnected, banner_a shown, banner_b/c hidden,
     compose disabled.
   - _on_capability_changed('messages', False/True): banner_b visibility + compose state.
@@ -53,7 +54,8 @@ def _has_empty_label(view: ThreadView) -> bool:
 # ---------------------------------------------------------------------------
 
 class TestDaemonConnected:
-    """_on_daemon_connected updates title bar, hides banner_a; compose stays disabled until conversation selected."""
+    """_on_daemon_connected updates title bar, hides banner_a;
+    compose stays disabled until conversation selected."""
 
     @pytest.fixture(autouse=True)
     def _no_live_daemon(self, monkeypatch):

@@ -19,12 +19,7 @@ from __future__ import annotations
 
 import struct
 
-import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
-
 from tincan_gui.avatar import AvatarWidget, _initials
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -108,7 +108,8 @@ class TestShouldNotify:
     def test_inbound_status_new_returns_true(self):
         notifier = DesktopNotifier()
         with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
-            assert notifier._should_notify({**_INBOUND_NEW, "status": "new", "is_new": False}) is True
+            msg = {**_INBOUND_NEW, "status": "new", "is_new": False}
+            assert notifier._should_notify(msg) is True
 
     def test_inbound_is_new_without_status_returns_true(self):
         notifier = DesktopNotifier()

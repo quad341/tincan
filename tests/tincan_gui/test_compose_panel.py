@@ -17,15 +17,10 @@ Coverage:
 """
 from __future__ import annotations
 
-from unittest.mock import patch
-
-import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QAccessible
-from PySide6.QtWidgets import QPushButton, QToolButton
+from PySide6.QtWidgets import QToolButton
 
 from tincan_gui.compose_panel import ComposePanel
-
 
 # ---------------------------------------------------------------------------
 # §3 Send failure: error bar shown

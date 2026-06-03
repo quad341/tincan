@@ -5,10 +5,12 @@ Coverage:
   §1 MockBackend.connect() — loads canned conversations, calls service.Connect(), requires service
   §2 MockBackend.disconnect() — removes GLib timer, calls service.Disconnect(), safe when idle
   §3 MockBackend stub returns — poll_inbox/get_message/send_message return correct stub values
-  §4 MapBackend.connect() — successful session stored; Forbidden → ConsentRequired; other exc re-raised
+  §4 MapBackend.connect() — successful session stored; Forbidden → ConsentRequired;
+     other exc re-raised
   §5 MapBackend.disconnect() — no-op when no session; removes session; clears state; logs on error
   §6-§8 pending tincan-4u26 (GetMessage API not yet landed on main)
-  §9 MapBackend._resolve_device_name — returns BlueZ Alias; fallback to addr on empty/miss/DBusException
+  §9 MapBackend._resolve_device_name — returns BlueZ Alias;
+     fallback to addr on empty/miss/DBusException
   §10 MapBackend.connect() — set_capability('messages', True) and set_device_name called on service
   §11 MapBackend.poll_inbox — direction='inbound' for inbox, 'outbound' for sent
   §12 MapBackend.poll_inbox — sent folder DBusException swallowed; inbox messages still returned
@@ -18,17 +20,14 @@ Run with: python -m pytest tests/tincand/test_backends.py -v
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
+import dbus
 import dbus.exceptions
 import pytest
 
-import dbus
-
-from tincand.backends.base import BackendInterface
-from tincand.backends.mock import MockBackend
 from tincand.backends.bluez_map import ConsentRequired, MapBackend
-
+from tincand.backends.mock import MockBackend
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -180,7 +179,7 @@ class TestMapBackendConnect:
         else:
             mock_client.CreateSession.return_value = session_path
 
-        with patch("tincand.backends.bluez_map.dbus.SessionBus") as mock_bus_cls, \
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
              patch("tincand.backends.bluez_map.dbus.Interface") as mock_iface:
             mock_iface.return_value = mock_client
             backend.connect(device_addr)
@@ -358,7 +357,8 @@ class TestMapBackendResolveDeviceName:
         if dbus_exception is not None:
             mock_mgr.GetManagedObjects.side_effect = dbus_exception
         else:
-            mock_mgr.GetManagedObjects.return_value = managed_objects if managed_objects is not None else {}
+            result = managed_objects if managed_objects is not None else {}
+            mock_mgr.GetManagedObjects.return_value = result
 
         with patch("tincand.backends.bluez_map.dbus.SystemBus"), \
              patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_mgr):
