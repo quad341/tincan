@@ -101,6 +101,13 @@ def main() -> None:
     backend_name = args.backend or os.environ.get("TINCAN_BACKEND", "")
     _log.info("tincand starting with backend=%s device=%s", backend_name, device)
     backend.connect(device)
+
+    if backend_name == "map" and device:
+        from tincand.backends.pbap import PBAPContactSync
+        pbap = PBAPContactSync(service)
+        service._pbap = pbap
+        GLib.idle_add(lambda: pbap.connect(device) or False)
+
     _log.info("tincand started")
     try:
         loop.run()
