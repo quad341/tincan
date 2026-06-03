@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import sys
 import warnings
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -32,6 +33,8 @@ from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
 
+_ASSETS = Path(__file__).parent / "assets"
+
 
 class TitleBar(QWidget):
     """Title bar (h=48, navy #1e3a5f): wordmark + gear button + connection status chip."""
@@ -44,6 +47,17 @@ class TitleBar(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
+
+        icon_label = QLabel()
+        icon_label.setFixedSize(32, 32)
+        icon_label.setAccessibleName("")
+        icon_label.setPixmap(
+            QPixmap(str(_ASSETS / "tincan-icon.png")).scaled(
+                32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        )
+        layout.addWidget(icon_label)
+        layout.addSpacing(8)
 
         wordmark = QLabel("tincan")
         wm_font = QFont()

@@ -51,6 +51,8 @@ class ConversationItem(QWidget):
     _SELECTED_BG = "#dbeafe"
     _SELECTED_BORDER = "#bfdbfe"
     _UNREAD_DOT_COLOR = "#1d4ed8"
+    _SELECTED_NAME_COLOR = "#1e40af"   # blue-800, 4.7:1 on #dbeafe — WCAG AA
+    _SELECTED_MUTED_COLOR = "#374151"  # gray-700, 5.4:1 on #dbeafe — WCAG AA
 
     def __init__(self, data: ConversationData, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -92,6 +94,7 @@ class ConversationItem(QWidget):
         name_font.setPointSize(14)
         name_font.setBold(True)
         self._name_label.setFont(name_font)
+        self._name_label.setStyleSheet("color: #111827;")
         top_row.addWidget(self._name_label, stretch=1)
 
         self._ts_label = QLabel(self._data.timestamp)
@@ -149,6 +152,8 @@ class ConversationItem(QWidget):
 
     def _apply_preview(self) -> None:
         raw = self._data.preview
+        preview_color = self._SELECTED_MUTED_COLOR if self._selected else "#6b7280"
+        no_preview_color = self._SELECTED_MUTED_COLOR if self._selected else "#9ca3af"
         if raw:
             direction = getattr(self._data, "preview_direction", "")
             if direction == "outbound":
@@ -157,14 +162,14 @@ class ConversationItem(QWidget):
             else:
                 display = raw[:36] + "…" if len(raw) > 36 else raw
             self._preview_label.setText(display)
-            self._preview_label.setStyleSheet("color: #6b7280;")
+            self._preview_label.setStyleSheet(f"color: {preview_color};")
             f = self._preview_label.font()
             f.setItalic(False)
             self._preview_label.setFont(f)
             self._preview_label.setAccessibleName(raw)
         else:
             self._preview_label.setText("—")
-            self._preview_label.setStyleSheet("color: #9ca3af;")
+            self._preview_label.setStyleSheet(f"color: {no_preview_color};")
             f = self._preview_label.font()
             f.setItalic(True)
             self._preview_label.setFont(f)
@@ -209,8 +214,14 @@ class ConversationItem(QWidget):
                 f"background-color: {self._SELECTED_BG}; "
                 f"border: 1px solid {self._SELECTED_BORDER};"
             )
+            self._name_label.setStyleSheet(f"color: {self._SELECTED_NAME_COLOR};")
+            self._ts_label.setStyleSheet(f"color: {self._SELECTED_MUTED_COLOR};")
+            self._apply_preview()
         else:
             self.setStyleSheet("")
+            self._name_label.setStyleSheet("color: #111827;")
+            self._ts_label.setStyleSheet("color: #6b7280;")
+            self._apply_preview()
 
     def mousePressEvent(self, event) -> None:
         self.activated.emit(self._data.id)
