@@ -1180,20 +1180,12 @@ class TestActiveHealthCheckPass:
 class TestActiveToHealing:
     """30 s health check: either char Notifying=False → HEALING entered."""
 
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "Passes locally (20/20) but intermittently fails in clean CI runner. "
-            "Code path confirmed correct via debug trace; likely GLib mock ordering "
-            "diff in CI's dbus/Python version. See tincan-nz7d, tincan-r23."
-        ),
-    )
     def test_health_check_fail_calls_set_capability_ancs_false(self, lc):
         backend, mock_service, _, _, timers, notifying = lc
-        timers[1]()           # → ACTIVE
+        timers[1]()           # → ACTIVE (registers health-check timer)
         notifying[_NOTIF_SRC_PATH] = False
         mock_service.reset_mock()
-        timers[2]()           # health check fails
+        backend._health_check()   # tick explicitly — no GLib timer-ID ordering
         mock_service.set_capability.assert_called_with("ancs", False)
 
     def test_health_check_fail_returns_source_remove(self, lc):
