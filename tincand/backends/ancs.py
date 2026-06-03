@@ -590,12 +590,24 @@ class ANCSBackend(BackendInterface):
         _log.warning("ANCSBackend: HEALING — max 3 attempts at 5 s each")
 
     def _attempt_le_rearm(self) -> bool:
-        """HEALING body — SPIKE-TBD: no autonomous LE rearm strategy confirmed yet.
+        """HEALING body — check if Notifying was externally restored; else try again.
 
-        Spike results (tincan-jr96): iOS does not open LE for already-bonded devices.
-        ConnectProfile(ANCS) and Disconnect+Reconnect both failed to produce Notifying=True.
-        Body is intentionally left as a stub until mayor reports spike results.
+        Active rearm strategy is SPIKE-TBD (tincan-jr96). This method detects
+        when iOS independently restores Notifying=True (e.g., user re-opened the
+        app) and transitions back to ACTIVE without needing an explicit rearm call.
         """
+        if (self._heal_timer_id is not None and
+                self._notif_src_path and self._data_src_path and
+                self._verify_notifying(self._notif_src_path) and
+                self._verify_notifying(self._data_src_path)):
+            _log.info("ANCSBackend: HEALING → ACTIVE (Notifying restored)")
+            self._heal_timer_id = None
+            self._heal_attempts = 0
+            if self._service is not None:
+                self._service.set_capability("ancs_needs_repair", False)
+                self._service.set_capability("ancs", True)
+            return GLib.SOURCE_REMOVE
+
         # SPIKE-TBD: insert hardware-validated rearm strategy here when spike is complete
         self._heal_attempts += 1
         _log.warning(

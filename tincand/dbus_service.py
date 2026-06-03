@@ -256,6 +256,34 @@ class TincanService(dbus.service.Object):
             signature="sv",
         )
 
+    @staticmethod
+    def _resolve_to_phone(
+        to: str,
+        conversations: dict,
+        contact_store: ContactStore,
+    ) -> str:
+        """Return a canonical phone number for *to*, which may be a display name.
+
+        Resolution order:
+        1. normalize_phone(to) has 7+ digits → it is a phone; return it.
+        2. contact_store.lookup_by_name(to) → PBAP-populated reverse lookup.
+        3. Scan conversations for display_name match with a phone-shaped id.
+        4. Fall back to *to* unchanged (MAP send will fail; caller logs/raises).
+        """
+        normalized = normalize_phone(to)
+        if len(normalized) >= 7:
+            return normalized
+        by_name = contact_store.lookup_by_name(to)
+        if by_name:
+            return by_name
+        to_lower = to.lower()
+        for conv in conversations.values():
+            if conv.display_name.lower() == to_lower:
+                cid_norm = normalize_phone(conv.id)
+                if len(cid_norm) >= 7:
+                    return cid_norm
+        return to
+
     @dbus.service.method(IFACE_MESSAGES, in_signature="ss", out_signature="s")
     def SendMessage(self, to: str, body: str) -> str:
         if not to or not body:
@@ -273,15 +301,16 @@ class TincanService(dbus.service.Object):
                 "No backend registered",
                 name="im.tincan.Error.SendFailed",
             )
+        phone_to = self._resolve_to_phone(str(to), self._conversations, self._contact_store)
         try:
-            handle = self._backend.send_message(str(to), str(body))  # type: ignore[attr-defined]
+            handle = self._backend.send_message(phone_to, str(body))  # type: ignore[attr-defined]
         except Exception as exc:
             raise dbus.exceptions.DBusException(
                 str(exc),
                 name="im.tincan.Error.SendFailed",
             ) from exc
         now_iso = datetime.now(tz=timezone.utc).strftime("%H:%M")
-        normalized_to = normalize_phone(str(to))
+        normalized_to = normalize_phone(phone_to)
         self.on_message_received({
             "id": str(handle),
             "conversation_id": normalized_to,
@@ -381,7 +410,7 @@ class TincanService(dbus.service.Object):
             self.ConversationUpdated(updated_conv)
 
     def update_contact(self, phone: str, name: str) -> None:
-        """Store a resolved contact name and update any matching conversations."""
+        """Store a resolved contact name, update phone-keyed convs, and merge name-keyed ones."""
         normalized = normalize_phone(phone)
         self._contact_store.upsert(normalized, name)
         for conv in list(self._conversations.values()):
@@ -389,6 +418,41 @@ class TincanService(dbus.service.Object):
                 conv.display_name = name
                 self.upsert_conversation(conv)
                 self.ConversationUpdated(conv.to_dbus())
+
+        # Merge any conversation keyed by display name into the phone-keyed slot.
+        name_lower = name.lower()
+        for old_id in [cid for cid in list(self._conversations) if cid.lower() == name_lower]:
+            old_conv = self._conversations.pop(old_id)
+
+            # Migrate messages and re-key dedup set.
+            old_msgs = self._messages.pop(old_id, [])
+            for msg in old_msgs:
+                msg["conversation_id"] = normalized
+            self._messages.setdefault(normalized, []).extend(old_msgs)
+            stale = {k for k in self._message_keys if k[0] == old_id}
+            self._message_keys -= stale
+            self._message_keys.update((normalized, k[1], k[2]) for k in stale)
+
+            if normalized in self._conversations:
+                existing = self._conversations[normalized]
+                if old_conv.last_message_at > existing.last_message_at:
+                    existing.last_message_at = old_conv.last_message_at
+                    existing.last_message_preview = old_conv.last_message_preview
+                    existing.last_message_direction = old_conv.last_message_direction
+                existing.unread_count += old_conv.unread_count
+                self.ConversationUpdated(existing.to_dbus())
+            else:
+                new_conv = Conversation(
+                    id=normalized,
+                    display_name=name,
+                    participants=[normalized],
+                    last_message_at=old_conv.last_message_at,
+                    last_message_preview=old_conv.last_message_preview,
+                    last_message_direction=old_conv.last_message_direction,
+                    unread_count=old_conv.unread_count,
+                )
+                self.upsert_conversation(new_conv)
+                self.ConversationUpdated(new_conv.to_dbus())
 
     def deliver_contact_photo(self, phone: str, photo: bytes | None) -> None:
         """Store a contact photo and emit ContactPhotoReceived for matching conversations."""

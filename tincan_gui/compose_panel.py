@@ -89,7 +89,7 @@ class ComposePanel(QWidget):
         # Error bar (hidden until a send failure occurs)
         _dark = is_dark_theme()
         self._error_bar = _ErrorBar()
-        self._error_bar.setFixedHeight(32)
+        self._error_bar.setMinimumHeight(32)
         self._error_bar.setAccessibleName("Send error notification")
         self._error_bar.setAccessibleDescription("Message failed to send")
         if _dark:
@@ -110,6 +110,7 @@ class ComposePanel(QWidget):
 
         self._error_text = QLabel("Failed to send")
         self._error_text.setStyleSheet("color: #fca5a5;" if _dark else "color: #991b1b;")
+        self._error_text.setWordWrap(True)
         err_font = QFont()
         err_font.setPointSize(11)
         self._error_text.setFont(err_font)
