@@ -7,6 +7,7 @@ Connected/Disconnected events, exercising all three GUI degradation banners.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from gi.repository import GLib
 
@@ -86,8 +87,8 @@ class MockBackend(BackendInterface):
         if self._service is None:
             raise RuntimeError("register_service() must be called before connect()")
         self._device_addr = device_addr
-        self._load_conversations()
         self._service.Connect(device_addr)  # type: ignore[attr-defined]
+        self._load_conversations()
         self._source_id = GLib.timeout_add_seconds(3, self._on_tick)
         _log.info("MockBackend connected as %s", device_addr)
 
@@ -114,7 +115,7 @@ class MockBackend(BackendInterface):
 
     def _load_conversations(self) -> None:
         for conv in _CANNED_CONVERSATIONS:
-            self._service.upsert_conversation(conv)  # type: ignore[attr-defined]
+            self._service.upsert_conversation(replace(conv))  # type: ignore[attr-defined]
 
     def _on_tick(self) -> bool:
         svc = self._service
@@ -132,7 +133,7 @@ class MockBackend(BackendInterface):
         elif event_type == "disconnect":
             svc.Disconnect()
         elif event_type == "connect":
-            self._load_conversations()
             svc.Connect(self._device_addr or "AA:BB:CC:DD:EE:FF")
+            self._load_conversations()
 
         return GLib.SOURCE_CONTINUE

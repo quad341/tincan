@@ -1,10 +1,11 @@
 """System tray icon: connected/disconnected state + unread badge (OQ-UI-6)."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from tincan_gui._settings import app_settings
@@ -14,25 +15,17 @@ if TYPE_CHECKING:
 
 _ICON_SIZE = 22
 _BADGE_SIZE = 9  # diameter of the red unread dot
+_ASSETS = Path(__file__).parent / "assets"
 
 
 def _make_base_pixmap(connected: bool) -> QPixmap:
-    """Draw a 22×22 'T' lettermark in a circle — blue (connected) or grey."""
-    px = QPixmap(_ICON_SIZE, _ICON_SIZE)
-    px.fill(Qt.transparent)
-    p = QPainter(px)
-    p.setRenderHint(QPainter.Antialiasing)
-    bg = QColor("#1d4ed8") if connected else QColor("#9ca3af")
-    p.setBrush(bg)
-    p.setPen(Qt.NoPen)
-    p.drawEllipse(0, 0, _ICON_SIZE, _ICON_SIZE)
-    font = QFont()
-    font.setPixelSize(13)
-    font.setBold(True)
-    p.setFont(font)
-    p.setPen(QColor("#ffffff"))
-    p.drawText(px.rect(), Qt.AlignCenter, "T")
-    p.end()
+    """Load tincan-icon.png scaled to 22×22; greyscale when disconnected."""
+    px = QPixmap(str(_ASSETS / "tincan-icon.png")).scaled(
+        _ICON_SIZE, _ICON_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation
+    )
+    if not connected:
+        img = px.toImage().convertToFormat(QImage.Format_Grayscale8)
+        px = QPixmap.fromImage(img)
     return px
 
 

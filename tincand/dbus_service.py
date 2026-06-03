@@ -69,6 +69,9 @@ class TincanService(dbus.service.Object):
             "ancs_needs_repair": False,
         }
         self._conversations: dict[str, Conversation] = {}
+        self._messages: dict[str, list[dict]] = {}
+        self._message_keys: set[tuple] = set()
+        self._backend: object | None = None
 
     # ------------------------------------------------------------------
     # im.tincan.Daemon — lifecycle and status
@@ -89,6 +92,8 @@ class TincanService(dbus.service.Object):
         # tincan-bxs: reset unread_count for all conversations on connect.
         for conv in self._conversations.values():
             conv.unread_count = 0
+        self._messages.clear()
+        self._message_keys.clear()
         _log.info("Connected to %s", device_address)
         self.Connected(str(device_address))
 
@@ -156,6 +161,10 @@ class TincanService(dbus.service.Object):
         _log.debug("Capability %s → %s", feature, available)
         self.CapabilityChanged(str(feature), bool(available))
 
+    def register_backend(self, backend: object) -> None:
+        """Wire the backend so SendMessage/GetMessage delegate to it."""
+        self._backend = backend
+
     # ------------------------------------------------------------------
     # im.tincan.Messages — SMS/iMessage send and receive
     # ------------------------------------------------------------------
@@ -179,6 +188,26 @@ class TincanService(dbus.service.Object):
         )
         return [c.to_dbus() for c in conversations]
 
+    @dbus.service.method(IFACE_MESSAGES, in_signature="s", out_signature="aa{sv}")
+    def GetMessages(self, conv_id: str) -> list:  # noqa: A002
+        """Return stored messages for *conv_id*, oldest first.
+
+        Raises NotConnected if no session.  Returns [] for unknown conv_id.
+        """
+        if not self._connected:
+            raise dbus.exceptions.DBusException(
+                "No active Bluetooth session",
+                name="im.tincan.Error.NotConnected",
+            )
+        msgs = self._messages.get(str(conv_id), [])
+        return [
+            dbus.Dictionary(
+                {k: dbus.String(str(v)) for k, v in msg.items()},
+                signature="sv",
+            )
+            for msg in msgs
+        ]
+
     @dbus.service.method(IFACE_MESSAGES, in_signature="s", out_signature="a{sv}")
     def GetMessage(self, id: str) -> dbus.Dictionary:  # noqa: A002
         if not self._connected:
@@ -186,9 +215,27 @@ class TincanService(dbus.service.Object):
                 "No active Bluetooth session",
                 name="im.tincan.Error.NotConnected",
             )
-        raise dbus.exceptions.DBusException(
-            "Message handle not found or session expired",
-            name="im.tincan.Error.MessageNotFound",
+        if self._backend is None:
+            raise dbus.exceptions.DBusException(
+                "Message handle not found or session expired",
+                name="im.tincan.Error.MessageNotFound",
+            )
+        body = self._backend.get_message(str(id))  # type: ignore[attr-defined]
+        if body is None:
+            raise dbus.exceptions.DBusException(
+                "Message handle not found or session expired",
+                name="im.tincan.Error.MessageNotFound",
+            )
+        return dbus.Dictionary(
+            {
+                "id": dbus.String(str(id)),
+                "body": dbus.String(str(body)),
+                "direction": dbus.String("inbound"),
+                "status": dbus.String("read"),
+                "timestamp": dbus.String(""),
+                "conversation_id": dbus.String(""),
+            },
+            signature="sv",
         )
 
     @dbus.service.method(IFACE_MESSAGES, in_signature="ss", out_signature="s")
@@ -203,10 +250,20 @@ class TincanService(dbus.service.Object):
                 "No active Bluetooth session",
                 name="im.tincan.Error.NotConnected",
             )
-        raise dbus.exceptions.DBusException(
-            "OBEX transfer not yet implemented",
-            name="im.tincan.Error.SendFailed",
-        )
+        if self._backend is None:
+            raise dbus.exceptions.DBusException(
+                "No backend registered",
+                name="im.tincan.Error.SendFailed",
+            )
+        try:
+            handle = self._backend.send_message(str(to), str(body))  # type: ignore[attr-defined]
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc),
+                name="im.tincan.Error.SendFailed",
+            ) from exc
+        self.MessageSent(str(handle))
+        return str(handle)
 
     @dbus.service.signal(IFACE_MESSAGES, signature="a{sv}")
     def MessageReceived(self, message: dbus.Dictionary) -> None:  # noqa: N802
@@ -242,6 +299,20 @@ class TincanService(dbus.service.Object):
         timestamp = str(message.get("timestamp", ""))
         direction = str(message.get("direction", ""))
         status = str(message.get("status", ""))
+
+        # Store message for GetMessages; deduplicate by (conv_id, timestamp, body).
+        msg_key = (conv_id, timestamp, body)
+        if conv_id and msg_key not in self._message_keys:
+            self._message_keys.add(msg_key)
+            self._messages.setdefault(conv_id, []).append({
+                "id": f"{conv_id}:{timestamp}",
+                "conversation_id": conv_id,
+                "body": body,
+                "timestamp": timestamp,
+                "direction": direction,
+                "status": status,
+                "from": str(message.get("from", conv_id)),
+            })
 
         if conv_id in self._conversations:
             conv = self._conversations[conv_id]

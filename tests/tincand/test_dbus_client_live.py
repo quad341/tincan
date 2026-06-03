@@ -46,12 +46,34 @@ try:
 except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
     _TINCAND_AVAILABLE = False
 
+_PYSIDE6_AVAILABLE: bool = False
+try:
+    _check = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from PySide6.QtCore import QCoreApplication; "
+            "from PySide6.QtDBus import QDBusConnection; "
+            "from PySide6.QtWidgets import QApplication; print('ok')",
+        ],
+        capture_output=True,
+        timeout=5,
+        env=os.environ,
+    )
+    _PYSIDE6_AVAILABLE = _check.returncode == 0
+except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+    _PYSIDE6_AVAILABLE = False
+
 pytestmark = pytest.mark.skipif(
-    _DBUS_RUN_SESSION is None or not _TINCAND_AVAILABLE,
+    _DBUS_RUN_SESSION is None or not _TINCAND_AVAILABLE or not _PYSIDE6_AVAILABLE,
     reason=(
         "dbus-run-session not installed (install dbus-tools or dbus-x11)"
         if _DBUS_RUN_SESSION is None
-        else "tincand entry point unavailable"
+        else (
+            "tincand entry point unavailable"
+            if not _TINCAND_AVAILABLE
+            else "PySide6 QtCore/QtDBus/QtWidgets unavailable"
+        )
     ),
 )
 
@@ -91,12 +113,9 @@ _DAEMON_PREAMBLE = """
 import os, sys, subprocess, time
 
 def _start_daemon():
-    # Use TINCAN_BACKEND env var — works with both --mock (legacy) and
-    # --backend (new) versions of the tincand entry point.
     env = dict(os.environ)
-    env['TINCAN_BACKEND'] = 'mock'
     proc = subprocess.Popen(
-        [sys.executable, '-m', 'tincand'],
+        [sys.executable, '-m', 'tincand', '--mock'],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -380,5 +399,81 @@ finally:
 """, timeout=25)
         assert result.returncode == 0, (
             f"CapabilityChanged signal not received.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_daemon_gui_receives_required_signals_and_updates_model(self):
+        """Live daemon + GUI client receives core signals and updates conversation state."""
+        result = _run_in_session(f"""
+{_DAEMON_PREAMBLE}
+import time
+
+daemon = _start_daemon()
+try:
+    from PySide6.QtWidgets import QApplication
+    from tincan_gui.main import MainWindow
+
+    app = QApplication([])
+    window = MainWindow()
+
+    received = {{
+        'connected': False,
+        'message': False,
+        'capability': False,
+        'conversation': False,
+    }}
+    client = window._dbus_client
+    client.connected.connect(lambda _addr: received.__setitem__('connected', True))
+    client.message_received.connect(lambda _msg: received.__setitem__('message', True))
+    client.capability_changed.connect(
+        lambda _feature, _available: received.__setitem__('capability', True)
+    )
+    client.conversation_updated.connect(
+        lambda _conv: received.__setitem__('conversation', True)
+    )
+
+    # MockBackend already emitted Connected at daemon startup — must
+    # Disconnect then Connect to guarantee a fresh Connected signal reaches
+    # our handler (same pattern as test_connected_signal_received_within_5s).
+    from PySide6.QtDBus import QDBusInterface
+    iface = QDBusInterface(
+        'im.tincan.Daemon', '/im/tincan', 'im.tincan.Daemon',
+        window._dbus_client._bus
+    )
+    iface.call('Disconnect')
+    time.sleep(0.05)
+    iface.call('Connect', '')
+
+    deadline = time.time() + 10
+    model_updated = False
+    while time.time() < deadline:
+        app.processEvents()
+        items = window.conversation_list._items
+        model_updated = bool(items) and any(
+            getattr(item, '_data').preview == 'Still on for dinner?'
+            for item in items
+        )
+        if all(received.values()) and model_updated:
+            break
+        time.sleep(0.05)
+
+    if not all(received.values()):
+        print(f"FAIL: missing signal(s): {{received}}", file=sys.stderr)
+        sys.exit(1)
+    if not model_updated:
+        previews = [
+            getattr(item, '_data').preview
+            for item in window.conversation_list._items
+        ]
+        print(f"FAIL: conversation model did not update: {{previews}}", file=sys.stderr)
+        sys.exit(1)
+    print("OK: live daemon signals updated GUI conversation model")
+finally:
+    daemon.terminate()
+    daemon.wait(3)
+""", timeout=25)
+        assert result.returncode == 0, (
+            "Live daemon + GUI integration did not receive required signals "
+            "or update model.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )

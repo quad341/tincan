@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import sys
 import warnings
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -32,6 +33,8 @@ from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
 
+_ASSETS = Path(__file__).parent / "assets"
+
 
 class TitleBar(QWidget):
     """Title bar (h=48, navy #1e3a5f): wordmark + gear button + connection status chip."""
@@ -44,6 +47,17 @@ class TitleBar(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
+
+        icon_label = QLabel()
+        icon_label.setFixedSize(32, 32)
+        icon_label.setAccessibleName("")
+        icon_label.setPixmap(
+            QPixmap(str(_ASSETS / "tincan-icon.png")).scaled(
+                32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        )
+        layout.addWidget(icon_label)
+        layout.addSpacing(8)
 
         wordmark = QLabel("tincan")
         wm_font = QFont()
@@ -119,10 +133,10 @@ class MainWindow(QMainWindow):
         self._current_phone: str = ""     # phone for the open conversation
         self._connected_device: str = ""  # address of the connected BT device
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
+        self._conversations_by_id: dict[str, ConversationData] = {}
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
-        self._load_stub_data()
         self._dbus_client = TincandClient(self)
         self._tray = TrayIcon(self)
         self._wire_dbus()
@@ -214,6 +228,7 @@ class MainWindow(QMainWindow):
         c.conversation_updated.connect(self._on_conversation_updated)
         # Tray: badge on incoming message, reset on focus / conversation open
         c.message_received.connect(lambda _: self._tray.increment_unread())
+        self.refresh_requested.connect(self._load_conversations)
 
     def _sync_daemon_state(self) -> None:
         """Query tincand at startup and sync UI to current daemon state."""
@@ -226,6 +241,7 @@ class MainWindow(QMainWindow):
             self._banner_a.hide()
             caps = status.get("capabilities") or {}
             self._apply_capabilities(caps)
+            self._load_conversations()
         else:
             self._title_bar.set_disconnected()
 
@@ -282,20 +298,12 @@ class MainWindow(QMainWindow):
 
     def _on_conversation_selected(self, conv_id: str) -> None:
         self.conversation_opened.emit(conv_id)
-        self._current_phone = conv_id  # conv_id is the normalized phone / address key
-        status = self._dbus_client.get_status()
-        if status and status.get("connected"):
-            # Daemon running — load real thread (not yet implemented: requires GetMessages)
-            # Fall through to stub load so the UI is not blank
-            pass
-        sample_messages = [
-            MessageData(BubbleType.INBOUND, "Hey, are you around later?", "Alice", "10:14"),
-            MessageData(BubbleType.OUTBOUND, "Yeah, free after 6", "", "10:15"),
-            MessageData(BubbleType.INBOUND, "Great, see you then!", "Alice", "10:15"),
-            MessageData(BubbleType.BODY_UNAVAILABLE, "", "Bob", "10:20"),
-            MessageData(BubbleType.GROUP_UNKNOWN_SENDER, "Can everyone make it?", "?", "10:22"),
-        ]
-        self._thread_view.load_thread("Alice", "+1 555-0100", sample_messages, "SMS")
+        self._current_phone = conv_id
+        conv_data = self._conversations_by_id.get(conv_id)
+        name = conv_data.name if conv_data else conv_id
+        raw_msgs = self._dbus_client.get_messages(conv_id)
+        messages = [self._msg_dict_to_data(m) for m in raw_msgs]
+        self._thread_view.load_thread(name, conv_id, messages, "SMS")
         self._compose.set_compose_enabled(True)
         self._tray.reset_unread()
 
@@ -312,6 +320,7 @@ class MainWindow(QMainWindow):
             caps = {"messages": True, "contacts": True, "ancs": True}
         self._apply_capabilities(caps)
         self._tray.set_connected(True)
+        self._load_conversations()
 
     def _on_daemon_disconnected(self) -> None:
         self._connected_device = ""
@@ -445,36 +454,39 @@ class MainWindow(QMainWindow):
     def _on_refresh(self) -> None:
         self.refresh_requested.emit()
 
-    def _load_stub_data(self) -> None:
-        """Populate with placeholder data so the UI is visible on first launch."""
-        conversations = [
-            ConversationData(
-                id="c1",
-                name="Alice",
-                phone="+1 555-0100",
-                preview="Yeah, free after 6",
-                timestamp="10:15",
-                unread=False,
-            ),
-            ConversationData(
-                id="c2",
-                name="Bob",
-                phone="+1 555-0101",
-                preview="Don't forget the meeting",
-                timestamp="Yesterday",
-                unread=True,
-            ),
-            ConversationData(
-                id="c3",
-                name="Family",
-                phone="+1 555-0102",
-                preview="Can everyone make it?",
-                timestamp="Mon",
-                unread=True,
-                participant_count=4,
-            ),
-        ]
+    def _load_conversations(self) -> None:
+        """Load conversation list from daemon; show empty state when unavailable."""
+        raw = self._dbus_client.list_conversations()
+        conversations = []
+        self._conversations_by_id = {}
+        for c in raw:
+            ts = str(c.get("last_message_at", ""))[:5]
+            unread = int(c.get("unread_count", 0))
+            data = ConversationData(
+                id=str(c.get("id", "")),
+                name=str(c.get("display_name", c.get("id", ""))),
+                phone=str(c.get("id", "")),
+                preview=str(c.get("last_message_preview", "")),
+                timestamp=ts,
+                unread=unread > 0,
+                unread_count=unread,
+            )
+            conversations.append(data)
+            self._conversations_by_id[data.id] = data
         self._conv_list.load_conversations(conversations)
+
+    def _msg_dict_to_data(self, msg: dict) -> MessageData:
+        direction = str(msg.get("direction", "inbound"))
+        body = str(msg.get("body", ""))
+        sender = str(msg.get("from", ""))
+        ts = str(msg.get("timestamp", ""))[:5]
+        if direction == "outbound":
+            btype = BubbleType.OUTBOUND
+        elif body:
+            btype = BubbleType.INBOUND
+        else:
+            btype = BubbleType.BODY_UNAVAILABLE
+        return MessageData(btype, body, sender, ts)
 
 
 def main() -> None:

@@ -30,7 +30,8 @@ sudo dnf install python3-dbus python3-gobject bluez bluez-obexd
 |---|---|
 | Run the tests | PySide6, pytest, pytest-qt |
 | See the GUI (mock data) | PySide6, dbus-python |
-| Run the daemon | dbus-python |
+| Run the daemon entry point (`python -m tincand`) | dbus-python, PyGObject |
+| Run live daemon-GUI integration tests | PySide6, dbus-python, PyGObject, dbus-run-session |
 | Run the spikes | dbus-python, PyGObject, bluetoothd, obexd, (ancs4linux), **a paired iPhone** |
 
 ---
@@ -73,10 +74,18 @@ that emits canned conversations and cycles through `Connected` / `CapabilityChan
 ```bash
 cd ~/projects/tincan
 # Terminal 1: start the daemon with mock backend
-python -m tincand --backend mock --device test
+python -m tincand --mock
 
 # Terminal 2: launch the GUI
 python -m tincan_gui
+```
+
+Headless integration test:
+
+```bash
+cd ~/projects/tincan
+QT_QPA_PLATFORM=offscreen dbus-run-session -- \
+  python -m pytest tests/tincand/test_dbus_client_live.py -v
 ```
 
 What to verify:

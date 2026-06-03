@@ -9,6 +9,7 @@ what prompts iOS to show the 'Show Notifications' toggle.  We surface a
 ConsentRequired exception so the caller can display a retry prompt rather than
 treating the first attempt as fatal.
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ import tempfile
 import time
 
 import dbus
+from gi.repository import GLib
 
 from tincand.backends.base import BackendInterface
 from tincand.dbus_service import Conversation
@@ -40,6 +42,7 @@ _TRANSIENT_ERRORS = {"org.bluez.obex.Error.Failed"}
 _TRANSFER_TIMEOUT = 15.0
 _RETRY_MAX = 3
 _RETRY_BACKOFF = 0.5
+_POLL_INTERVAL_SECONDS = 30
 
 
 class ConsentRequired(Exception):
@@ -95,6 +98,7 @@ class MapBackend(BackendInterface):
         self._service: object | None = None
         self._session_path: str | None = None
         self._msg_access: object | None = None
+        self._poll_source_id: int | None = None
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -140,8 +144,13 @@ class MapBackend(BackendInterface):
         if self._service is not None:
             self._service.Connect(device_addr)  # type: ignore[attr-defined]
 
+        self._poll_source_id = GLib.timeout_add_seconds(_POLL_INTERVAL_SECONDS, self._poll_tick)
+
     def disconnect(self) -> None:
         """Remove the obexd MAP session; silently no-ops if not connected."""
+        if self._poll_source_id is not None:
+            GLib.source_remove(self._poll_source_id)
+            self._poll_source_id = None
         if self._session_path is None:
             return
         try:
@@ -163,28 +172,44 @@ class MapBackend(BackendInterface):
     def poll_inbox(self) -> list:
         """Poll MAP inbox and emit D-Bus signals for new messages.
 
-        Calls UpdateInbox, ListMessages, and GetMessage (for full bodies).
-        Groups messages by Sender into Conversation objects and drives the
-        TincanService accordingly.
+        Navigates to telecom/msg (iOS inbox path), calls UpdateInbox and
+        ListMessages, reads message body from the Text property (no GetMessage
+        transfer needed — ListMessages already includes body text on iOS).
         """
         if self._msg_access is None:
             return []
 
         self._retry(self._msg_access.UpdateInbox)
+
+        # iOS inbox lives at telecom/msg/inbox.  Navigate there from whatever
+        # the current folder is: ascend twice (silently ignore errors at root),
+        # then descend to telecom/msg before listing.
+        for _ in range(2):
+            try:
+                self._msg_access.SetFolder("")
+            except dbus.exceptions.DBusException:
+                pass
+        self._retry(self._msg_access.SetFolder, "telecom")
+        self._retry(self._msg_access.SetFolder, "msg")
+
         messages_raw = self._retry(self._msg_access.ListMessages, "inbox", {})
 
         parsed: list[dict] = []
         for msg_path, props in messages_raw.items():
-            body = self._fetch_full_body(str(msg_path))
-            if body is None:
-                continue
-            parsed.append({
-                "path": str(msg_path),
-                "sender": str(props.get("Sender", "")),
-                "timestamp": str(props.get("Datetime", "")),
-                "read": bool(props.get("Read", False)),
-                "body": body,
-            })
+            body = (
+                str(props.get("Text", "")).strip()
+                or str(props.get("Subject", "")).strip()
+                or "New message"
+            )
+            parsed.append(
+                {
+                    "path": str(msg_path),
+                    "sender": str(props.get("Sender", "")),
+                    "timestamp": str(props.get("Datetime", "")),
+                    "read": bool(props.get("Read", False)),
+                    "body": body,
+                }
+            )
 
         if parsed and self._service is not None:
             self._emit_messages(parsed)
@@ -213,9 +238,7 @@ class MapBackend(BackendInterface):
                 f.write(bmsg_content)
                 tmp_path = f.name
 
-            transfer_path = self._retry(
-                self._msg_access.PushMessage, tmp_path, "outbox", {}
-            )
+            transfer_path = self._retry(self._msg_access.PushMessage, tmp_path, "outbox", {})
             self._wait_transfer_send(str(transfer_path))
             _log.info("MAP send complete: to=%s transfer=%s", to, transfer_path)
             return str(transfer_path)
@@ -230,16 +253,21 @@ class MapBackend(BackendInterface):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _poll_tick(self) -> bool:
+        """GLib timer callback — poll inbox and return SOURCE_CONTINUE."""
+        try:
+            self.poll_inbox()
+        except Exception as exc:
+            _log.warning("poll_inbox error: %s", exc)
+        return GLib.SOURCE_CONTINUE
+
     def _retry(self, fn: object, *args: object) -> object:
         """Call *fn(*args)*, retrying on transient obexd errors."""
         for attempt in range(_RETRY_MAX):
             try:
                 return fn(*args)  # type: ignore[operator]
             except dbus.exceptions.DBusException as exc:
-                if (
-                    exc.get_dbus_name() in _TRANSIENT_ERRORS
-                    and attempt < _RETRY_MAX - 1
-                ):
+                if exc.get_dbus_name() in _TRANSIENT_ERRORS and attempt < _RETRY_MAX - 1:
                     _log.debug("Transient obexd error (attempt %d): %s", attempt + 1, exc)
                     time.sleep(_RETRY_BACKOFF)
                     continue
@@ -254,6 +282,7 @@ class MapBackend(BackendInterface):
             result = self._retry(
                 self._msg_access.GetMessage,
                 msg_path,
+                "",  # targetfile: empty = obexd picks temp location
                 {"Attachment": dbus.Boolean(False)},
             )
             if result is None:
@@ -305,8 +334,7 @@ class MapBackend(BackendInterface):
                 return
             if status not in ("queued", "active"):
                 raise SendFailed(
-                    f"PushMessage transfer ended in unexpected state {status!r}: "
-                    f"{transfer_path}"
+                    f"PushMessage transfer ended in unexpected state {status!r}: {transfer_path}"
                 )
             time.sleep(0.05)
         raise SendFailed(f"PushMessage transfer timed out: {transfer_path}")
@@ -334,11 +362,13 @@ class MapBackend(BackendInterface):
             )
             svc.upsert_conversation(conv)  # type: ignore[attr-defined]
             for msg in msgs:
-                svc.on_message_received({  # type: ignore[attr-defined]
-                    "conversation_id": sender,
-                    "body": msg["body"],
-                    "timestamp": msg["timestamp"],
-                    "direction": "inbound",
-                    "status": "unread" if not msg["read"] else "read",
-                    "from": sender,
-                })
+                svc.on_message_received(
+                    {  # type: ignore[attr-defined]
+                        "conversation_id": sender,
+                        "body": msg["body"],
+                        "timestamp": msg["timestamp"],
+                        "direction": "inbound",
+                        "status": "unread" if not msg["read"] else "read",
+                        "from": sender,
+                    }
+                )
