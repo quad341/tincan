@@ -317,6 +317,33 @@ class TincandClient(QObject):
             return []
         return _demarshal_list_of_maps(reply.value())
 
+    def get_messages(self, conv_id: str) -> list[dict]:
+        """Call GetMessages(conv_id).  Returns [] when daemon is absent."""
+        if not self._bus.isConnected():
+            return []
+        result = self._dbus_call(_IFACE_MESSAGES, "GetMessages", str(conv_id))
+        if result is not None:
+            return [
+                {str(k): v for k, v in msg.items()}
+                for msg in result
+                if hasattr(msg, "items")
+            ]
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
+        if not iface.isValid():
+            return []
+        raw = iface.call("GetMessages", str(conv_id))
+        if isinstance(raw, QDBusMessage):
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.debug("GetMessages failed: %s", raw.errorMessage())
+                return []
+            args = raw.arguments()
+            return _demarshal_list_of_maps(args[0] if args else [])
+        reply = _wrap_reply(raw)
+        if not reply.isValid():
+            _log.debug("GetMessages failed: %s", reply.error().message())
+            return []
+        return _demarshal_list_of_maps(reply.value())
+
     def send_message(self, to: str, body: str) -> str:
         """Call SendMessage.  Returns the new message_id or '' on error."""
         if not self._bus.isConnected():
