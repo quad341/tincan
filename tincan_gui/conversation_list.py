@@ -290,6 +290,7 @@ class ConversationListWidget(QWidget):
     conversation_selected = Signal(str)    # conversation id
     focus_thread_requested = Signal()
     compose_new_requested = Signal()       # user clicked "+" compose-new button
+    refresh_requested = Signal()           # user clicked the ↻ refresh button
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -328,18 +329,30 @@ class ConversationListWidget(QWidget):
         )
         header_layout.addWidget(conversations_label, stretch=1)
 
+        _btn_hover = "#3f3f46" if _dark else "#e5e7eb"
+        _btn_color = "#f4f4f5" if _dark else "#374151"
+        _btn_style = (
+            f"QToolButton {{ font-size: 18px; font-weight: bold; color: {_btn_color};"
+            " border: none; background: transparent; border-radius: 4px; }"
+            f" QToolButton:hover {{ background: {_btn_hover}; }}"
+            " QToolButton:disabled { opacity: 0.4; }"
+        )
+
+        self._refresh_btn = QToolButton()
+        self._refresh_btn.setText("↻")
+        self._refresh_btn.setFixedSize(28, 28)
+        self._refresh_btn.setToolTip("Refresh conversations")
+        self._refresh_btn.setAccessibleName("Refresh conversations")
+        self._refresh_btn.setStyleSheet(_btn_style)
+        self._refresh_btn.clicked.connect(self.refresh_requested.emit)
+        header_layout.addWidget(self._refresh_btn)
+
         self._compose_btn = QToolButton()
         self._compose_btn.setText("+")
         self._compose_btn.setFixedSize(28, 28)
         self._compose_btn.setToolTip("New conversation")
         self._compose_btn.setAccessibleName("New conversation")
-        _btn_hover = "#3f3f46" if _dark else "#e5e7eb"
-        _btn_color = "#f4f4f5" if _dark else "#374151"
-        self._compose_btn.setStyleSheet(
-            f"QToolButton {{ font-size: 18px; font-weight: bold; color: {_btn_color};"
-            " border: none; background: transparent; border-radius: 4px; }"
-            f" QToolButton:hover {{ background: {_btn_hover}; }}"
-        )
+        self._compose_btn.setStyleSheet(_btn_style)
         self._compose_btn.clicked.connect(self.compose_new_requested.emit)
         header_layout.addWidget(self._compose_btn)
 
@@ -510,6 +523,11 @@ class ConversationListWidget(QWidget):
     def current_index(self) -> int:
         """Public API for tests: return the currently selected index."""
         return self._selected_index
+
+    def set_refresh_loading(self, loading: bool) -> None:
+        """Disable/re-enable the refresh button and show ↻/⌛ text."""
+        self._refresh_btn.setEnabled(not loading)
+        self._refresh_btn.setText("⌛" if loading else "↻")
 
 
 # ---------------------------------------------------------------------------
