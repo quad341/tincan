@@ -206,7 +206,10 @@ class TincanService(dbus.service.Object):
                 "No active Bluetooth session",
                 name="im.tincan.Error.NotConnected",
             )
-        msgs = self._messages.get(str(conv_id), [])
+        msgs = sorted(
+            self._messages.get(str(conv_id), []),
+            key=lambda m: m.get("timestamp", "") or "",
+        )
         return [
             dbus.Dictionary(
                 {k: dbus.String(str(v)) for k, v in msg.items()},

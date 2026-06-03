@@ -56,7 +56,7 @@ class ComposePanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("composePanel")
-        self.setFixedHeight(100)
+        self.setFixedHeight(80)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         if is_dark_theme():
             self.setStyleSheet("background: #27272a; border-top: 1px solid #3f3f46;")
@@ -70,14 +70,6 @@ class ComposePanel(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 6, 8, 6)
         outer.setSpacing(4)
-
-        # Routing hint
-        self._routing_hint = QLabel("Sending as SMS · may upgrade to iMessage on delivery")
-        hint_font = QFont()
-        hint_font.setPointSize(11)
-        self._routing_hint.setFont(hint_font)
-        self._routing_hint.setStyleSheet("color: #6b7280;")
-        outer.addWidget(self._routing_hint)
 
         # Input row
         input_row = QHBoxLayout()

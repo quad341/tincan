@@ -232,8 +232,6 @@ class MainWindow(QMainWindow):
         c.capability_changed.connect(self._on_capability_changed)
         c.message_received.connect(self._on_message_received)
         c.conversation_updated.connect(self._on_conversation_updated)
-        # Tray: badge on incoming message, reset on focus / conversation open
-        c.message_received.connect(lambda _: self._tray.increment_unread())
         self.refresh_requested.connect(self._load_conversations)
 
     def _sync_daemon_state(self) -> None:
@@ -358,12 +356,16 @@ class MainWindow(QMainWindow):
 
     def _on_message_received(self, message: dict) -> None:
         self._notifier.dispatch(message)
+        # Tray badge: only for genuinely-new inbound unread (not historical replay)
+        if (str(message.get("direction", "")) == "inbound"
+                and str(message.get("status", "")) in ("unread", "new")):
+            self._tray.increment_unread()
         conv_id = str(message.get("conversation_id", ""))
         if self._current_phone and conv_id and conv_id != self._current_phone:
             return  # message is for a different conversation; notification already sent
         direction = str(message.get("direction", "inbound"))
         body = str(message.get("body", ""))
-        sender = str(message.get("sender", ""))
+        sender = str(message.get("sender", "") or message.get("from", ""))
         timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM
 
         if not body:
@@ -471,6 +473,14 @@ class MainWindow(QMainWindow):
             self.refresh_requested.emit()
         else:
             super().keyPressEvent(event)
+
+    def closeEvent(self, event) -> None:
+        """Hide to tray on window close; only quit via tray menu or QApplication.quit."""
+        if hasattr(self, "_tray") and self._tray.isSystemTrayAvailable():
+            event.ignore()
+            self.hide()
+        else:
+            super().closeEvent(event)
 
     def changeEvent(self, event) -> None:
         super().changeEvent(event)

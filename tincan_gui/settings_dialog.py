@@ -108,7 +108,9 @@ class SettingsDialog(QDialog):
         self._desktop_cb.toggled.connect(self._on_toggled)
 
     def _on_toggled(self, checked: bool) -> None:
-        app_settings().setValue("notifications/desktop_enabled", checked)
+        s = app_settings()
+        s.setValue("notifications/desktop_enabled", checked)
+        s.sync()  # flush immediately so the notifier's next read sees the change
         self.notifications_toggled.emit(checked)
 
     @property

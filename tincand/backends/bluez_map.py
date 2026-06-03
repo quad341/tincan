@@ -121,6 +121,8 @@ class MapBackend(BackendInterface):
         self._msg_access: object | None = None
         self._poll_source_id: int | None = None
         self._device_name: str = ""
+        self._seen_handles: set[str] = set()  # handles seen on initial poll — skip notifications
+        self._initial_poll_done: bool = False
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -164,6 +166,8 @@ class MapBackend(BackendInterface):
         _log.info("MAP session established: %s → %s", device_addr, self._session_path)
 
         self._device_name = self._resolve_device_name(device_addr)
+        self._seen_handles.clear()
+        self._initial_poll_done = False
 
         if self._service is not None:
             self._service.Connect(device_addr)  # type: ignore[attr-defined]
@@ -262,7 +266,20 @@ class MapBackend(BackendInterface):
             _log.debug("sent folder unavailable: %s", exc)
 
         if parsed and self._service is not None:
-            self._emit_messages(parsed)
+            if not self._initial_poll_done:
+                # Seed the seen-handles baseline so historical messages don't replay
+                # as notifications or inflate the unread badge.
+                for msg in parsed:
+                    self._seen_handles.add(msg["path"])
+                self._initial_poll_done = True
+                # Still upsert conversations for list display, but skip signals.
+                self._emit_messages(parsed, notify=False)
+            else:
+                new_msgs = [m for m in parsed if m["path"] not in self._seen_handles]
+                for msg in new_msgs:
+                    self._seen_handles.add(msg["path"])
+                if new_msgs:
+                    self._emit_messages(new_msgs, notify=True)
 
         return parsed
 
@@ -288,7 +305,8 @@ class MapBackend(BackendInterface):
                 f.write(bmsg_content)
                 tmp_path = f.name
 
-            transfer_path = self._retry(self._msg_access.PushMessage, tmp_path, "outbox", {})
+            result = self._retry(self._msg_access.PushMessage, tmp_path, "outbox", {})
+            transfer_path, _ = result  # PushMessage returns (object_path, properties)
             self._wait_transfer_send(str(transfer_path))
             _log.info("MAP send complete: to=%s transfer=%s", to, transfer_path)
             return str(transfer_path)
@@ -350,7 +368,7 @@ class MapBackend(BackendInterface):
                 self._msg_access.GetMessage,
                 msg_path,
                 "",  # targetfile: empty = obexd picks temp location
-                {"Attachment": dbus.Boolean(False)},
+                dbus.Dictionary({"Attachment": dbus.Boolean(False)}, signature="sv"),
             )
             if result is None:
                 return None
@@ -406,8 +424,13 @@ class MapBackend(BackendInterface):
             time.sleep(0.05)
         raise SendFailed(f"PushMessage transfer timed out: {transfer_path}")
 
-    def _emit_messages(self, messages: list[dict]) -> None:
-        """Group *messages* by sender (phone number) and drive TincanService callbacks."""
+    def _emit_messages(self, messages: list[dict], *, notify: bool = True) -> None:
+        """Group *messages* by sender (phone number) and drive TincanService callbacks.
+
+        When notify=False (initial-poll baseline), messages are stored and conversations
+        upserted but status is forced to 'read' so no unread count increment or desktop
+        notification fires.
+        """
         svc = self._service
         if svc is None:
             return
@@ -417,8 +440,8 @@ class MapBackend(BackendInterface):
             by_sender.setdefault(msg["sender"], []).append(msg)
 
         for sender, msgs in by_sender.items():
-            unread = sum(1 for m in msgs if not m["read"])
-            latest = max(msgs, key=lambda m: m["timestamp"])
+            unread = sum(1 for m in msgs if not m["read"]) if notify else 0
+            latest = max(msgs, key=lambda m: m["timestamp"] or "")
             display_name = latest.get("display_name", sender) or sender
             conv = Conversation(
                 id=sender,
@@ -436,7 +459,7 @@ class MapBackend(BackendInterface):
                         "body": msg["body"],
                         "timestamp": msg["timestamp"],
                         "direction": msg["direction"],
-                        "status": "unread" if not msg["read"] else "read",
+                        "status": "read" if (not notify or msg["read"]) else "unread",
                         "from": sender,
                     }
                 )
