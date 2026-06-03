@@ -60,6 +60,19 @@ from tincan_gui.conversation_list import (
 from tincan_gui.main import MainWindow, TitleBar
 from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData
 
+
+def _stub_conversations() -> list[ConversationData]:
+    """Three stub conversations for keyboard-nav tests (no daemon required)."""
+    return [
+        ConversationData(id="c1", name="Alice", phone="+1 555-0100",
+                         preview="Hey!", timestamp="10:00", unread=False),
+        ConversationData(id="c2", name="Bob", phone="+1 555-0101",
+                         preview="Tomorrow?", timestamp="09:30", unread=True),
+        ConversationData(id="c3", name="Family", phone="+1 555-0102",
+                         preview="Sunday dinner", timestamp="08:15", unread=False),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # §4.1 Metadata color applied on widget instances
 # ---------------------------------------------------------------------------
@@ -389,7 +402,7 @@ class TestKeyboardNavigation:
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        # MainWindow._load_stub_data loads 3 conversations; select first
+        window.conversation_list.load_conversations(_stub_conversations())
         window.conversation_list.select_index(0)
         assert window.conversation_list.current_index() == 0
         qtbot.keyClick(window.conversation_list, Qt.Key.Key_Down)
@@ -399,6 +412,7 @@ class TestKeyboardNavigation:
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
+        window.conversation_list.load_conversations(_stub_conversations())
         window.conversation_list.select_index(1)
         qtbot.keyClick(window.conversation_list, Qt.Key.Key_Up)
         assert window.conversation_list.current_index() == 0
@@ -407,6 +421,7 @@ class TestKeyboardNavigation:
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
+        window.conversation_list.load_conversations(_stub_conversations())
         window.conversation_list.select_index(0)
 
         opened = []
@@ -418,6 +433,7 @@ class TestKeyboardNavigation:
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
+        window.conversation_list.load_conversations(_stub_conversations())
         window.conversation_list.select_index(0)
 
         opened = []
