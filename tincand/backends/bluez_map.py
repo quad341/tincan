@@ -74,10 +74,16 @@ def build_bmsg(to_number: str, body: str) -> str:
         "VERSION:1.0\r\n"
         "STATUS:UNREAD\r\n"
         "TYPE:SMS_GSM\r\n"
+        "FOLDER:telecom/msg/outbox\r\n"
+        "BEGIN:VCARD\r\n"
+        "VERSION:2.1\r\n"
+        "N:;\r\n"
+        "TEL:\r\n"
+        "END:VCARD\r\n"
         "BEGIN:BENV\r\n"
         "BEGIN:VCARD\r\n"
-        "VERSION:3.0\r\n"
-        f"TEL;TYPE=CELL:{to_number}\r\n"
+        "VERSION:2.1\r\n"
+        f"TEL:{to_number}\r\n"
         "END:VCARD\r\n"
         "BEGIN:BBODY\r\n"
         "CHARSET:UTF-8\r\n"
@@ -347,6 +353,8 @@ class MapBackend(BackendInterface):
                 f.write(bmsg_content)
                 tmp_path = f.name
 
+            self._retry(self._msg_access.SetFolder, "telecom")
+            self._retry(self._msg_access.SetFolder, "msg")
             result = self._retry(self._msg_access.PushMessage, tmp_path, "outbox", {})
             transfer_path, _ = result  # PushMessage returns (object_path, properties)
             self._wait_transfer_send(str(transfer_path))
