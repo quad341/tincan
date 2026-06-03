@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
         self._conv_list.conversation_selected.connect(self._on_conversation_selected)
         self._conv_list.focus_thread_requested.connect(self._compose._input.setFocus)
         self._conv_list.compose_new_requested.connect(self._on_compose_new)
+        self._conv_list.refresh_requested.connect(self.refresh_requested.emit)
         self._compose.send_requested.connect(self._on_send)
         self._title_bar.gear_button.clicked.connect(self._open_settings)
         self._banner_ancs_repair.reconnect_clicked.connect(self._open_pairing_wizard)
@@ -512,6 +513,7 @@ class MainWindow(QMainWindow):
 
     def _load_conversations(self) -> None:
         """Load conversation list from daemon; show empty state when unavailable."""
+        self._conv_list.set_refresh_loading(True)
         raw = self._dbus_client.list_conversations()
         conversations = []
         self._conversations_by_id = {}
@@ -530,6 +532,7 @@ class MainWindow(QMainWindow):
             conversations.append(data)
             self._conversations_by_id[data.id] = data
         self._conv_list.load_conversations(conversations)
+        self._conv_list.set_refresh_loading(False)
         if conversations and not self._current_phone:
             first_id = conversations[0].id
             QTimer.singleShot(0, lambda: self._conv_list.select_conversation(first_id))

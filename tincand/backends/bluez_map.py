@@ -448,7 +448,16 @@ class MapBackend(BackendInterface):
         return None
 
     def _wait_transfer_send(self, transfer_path: str) -> None:
-        """Poll Transfer1.Status for a PushMessage transfer; raise SendFailed on error."""
+        """Poll Transfer1.Status for a PushMessage transfer; raise SendFailed on error.
+
+        obexd removes the transfer object immediately after completion, so an
+        UnknownObject/ServiceUnknown DBusException after seeing 'queued'/'active'
+        is treated as complete rather than an error.
+        """
+        _OBJECT_GONE = {
+            "org.freedesktop.DBus.Error.UnknownObject",
+            "org.freedesktop.DBus.Error.ServiceUnknown",
+        }
         bus = dbus.SessionBus()
         props = dbus.Interface(
             bus.get_object(_OBEX_CLIENT, transfer_path),
@@ -456,7 +465,14 @@ class MapBackend(BackendInterface):
         )
         deadline = time.monotonic() + _TRANSFER_TIMEOUT
         while time.monotonic() < deadline:
-            status = str(props.Get(_TRANSFER_IFACE, "Status"))
+            try:
+                status = str(props.Get(_TRANSFER_IFACE, "Status"))
+            except dbus.exceptions.DBusException as exc:
+                if exc.get_dbus_name() in _OBJECT_GONE:
+                    _log.debug("MAP send transfer vanished (completed): %s", transfer_path)
+                    return
+                raise SendFailed(f"Transfer status query failed: {exc}") from exc
+            _log.debug("MAP send transfer %s: status=%s", transfer_path, status)
             if status == "complete":
                 return
             if status not in ("queued", "active"):
