@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # gi (PyGObject) and dbus (dbus-python) are system packages, not pip wheels.
+      # Install the prebuilt apt versions instead of building them from source.
+      - name: Install system packages (PyGObject, dbus-python, GLib typelib)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi python3-dbus gir1.2-glib-2.0 python3-venv
+
+      - name: Create venv (system gi/dbus visible) and install pip deps
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt pytest pytest-qt ruff
+
+      - name: Lint (ruff)
+        continue-on-error: true
+        run: .venv/bin/ruff check tincand tincan_gui tests
+
+      - name: Test (pytest, headless — conftest forces offscreen Qt)
+        run: .venv/bin/python -m pytest
