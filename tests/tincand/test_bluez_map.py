@@ -39,6 +39,7 @@ No D-Bus infrastructure needed — all inputs are plain Python dicts.
 from __future__ import annotations
 
 import re
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -49,6 +50,7 @@ from tests.tincand.fixtures.map_inbox_10msg import (
     EXPECTED_SENDER_COUNT,
     MAP_INBOX_10MSG,
 )
+from tincand.backends.bluez_map import MapBackend, _norm_phone
 from tincand.bluez_map import (
     build_bmessage,
     map_messages_to_conversations,
@@ -380,3 +382,71 @@ class TestMapMessagesToConversations:
         # Carol has 3 messages, all read → unread_count must be 0, not 3
         assert conversations["Carol"]["unread_count"] == 0
         assert len(conversations["Carol"]["messages"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# §5 _norm_phone — canonical phone key derivation
+# ---------------------------------------------------------------------------
+
+class TestNormPhone:
+    """_norm_phone returns last 10 digits for ≥7-digit strings, raw string otherwise."""
+
+    def test_e164_with_country_code_strips_to_10_digits(self):
+        assert _norm_phone("+15555550123") == "5555550123"
+
+    def test_10_digit_number_is_passthrough(self):
+        assert _norm_phone("5555550123") == "5555550123"
+
+    def test_formatted_number_strips_punctuation_and_country_code(self):
+        assert _norm_phone("+1 (555) 555-0123") == "5555550123"
+
+    def test_display_name_returned_unchanged(self):
+        assert _norm_phone("Alice") == "Alice"
+
+    def test_7_digit_number_no_truncation(self):
+        assert _norm_phone("1234567") == "1234567"
+
+    def test_sub_7_digit_raw_passthrough(self):
+        assert _norm_phone("12345") == "12345"
+
+
+# ---------------------------------------------------------------------------
+# §6 MapBackend.poll_inbox — Datetime/DateTime/Date or-chain fallback
+# ---------------------------------------------------------------------------
+
+class TestMapBackendDatetimeKeyFallback:
+    """poll_inbox reads date via props['Datetime'] or ['DateTime'] or ['Date']."""
+
+    def _poll_timestamp(self, **props):
+        """Run poll_inbox with a single inbox message carrying *props*; return timestamp."""
+        backend = MapBackend()
+        mock_access = MagicMock(name="MessageAccess1")
+        backend._msg_access = mock_access
+        mock_access.GetMessage.return_value = None
+        mock_access.ListMessages.return_value = {
+            "/msg/1": {"Sender": "A", "Read": False, "Subject": "hi", **props}
+        }
+        result = backend.poll_inbox()
+        return result[0]["timestamp"] if result else None
+
+    def test_datetime_key_yields_correct_timestamp(self):
+        assert self._poll_timestamp(Datetime="20260101T100000") == "10:00"
+
+    def test_datetime_camel_key_fallback_yields_correct_timestamp(self):
+        assert self._poll_timestamp(DateTime="20260601T093000") == "09:30"
+
+    def test_date_key_second_fallback_yields_correct_timestamp(self):
+        assert self._poll_timestamp(Date="20260601T183000") == "18:30"
+
+    def test_datetime_wins_over_datetime_camel_when_both_present(self):
+        assert self._poll_timestamp(
+            Datetime="20260101T100000", DateTime="20260101T200000"
+        ) == "10:00"
+
+    def test_datetime_camel_wins_over_date_when_datetime_absent(self):
+        assert self._poll_timestamp(
+            DateTime="20260101T100000", Date="20260101T200000"
+        ) == "10:00"
+
+    def test_no_datetime_key_present_yields_empty_timestamp(self):
+        assert self._poll_timestamp() == ""
