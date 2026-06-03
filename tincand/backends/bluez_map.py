@@ -81,9 +81,9 @@ def build_bmsg(to_number: str, body: str) -> str:
         "TEL:\r\n"
         "END:VCARD\r\n"
         "BEGIN:BENV\r\n"
-        # Recipient vCard MUST carry an N: property — iOS MAP-MSE accepts the
-        # OBEX upload but silently drops the bMessage (no SMS sent) when the
-        # vCard lacks N:. Proven against the delivering spike (map_send2.py).
+        # Recipient vCard carries N: for vCard 2.1 correctness. (Live testing
+        # showed iOS delivers with or without it — the real send blocker was a
+        # missing MAP folder reset in send_message, not the bMessage format.)
         "BEGIN:VCARD\r\n"
         "VERSION:2.1\r\n"
         f"N:;{to_number}\r\n"
@@ -357,6 +357,16 @@ class MapBackend(BackendInterface):
                 f.write(bmsg_content)
                 tmp_path = f.name
 
+            # Reset to the MAP root before navigating. A prior poll or send may
+            # have left the current folder at telecom/msg; without this reset the
+            # relative SetFolder("telecom") fails with obexd Error.Failed
+            # ("Internal Server Error") and the send aborts. poll_inbox resets the
+            # same way — sends were failing intermittently right after a poll.
+            for _ in range(2):
+                try:
+                    self._msg_access.SetFolder("")
+                except dbus.exceptions.DBusException:
+                    pass
             self._retry(self._msg_access.SetFolder, "telecom")
             self._retry(self._msg_access.SetFolder, "msg")
             result = self._retry(self._msg_access.PushMessage, tmp_path, "outbox", {})
