@@ -138,7 +138,7 @@ class MessageBubble(QWidget):
         meta_font = QFont()
         meta_font.setPointSize(10)
         meta.setFont(meta_font)
-        self._meta_color = "#6b7280"
+        self._meta_color = "#a1a1aa" if dark else "#6b7280"
         meta.setStyleSheet(f"color: {self._meta_color};")
         meta.setAlignment(meta_align)
         bubble_layout.addWidget(meta)
