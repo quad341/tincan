@@ -534,7 +534,8 @@ class MapBackend(BackendInterface):
             latest = max(msgs, key=lambda m: m["timestamp"] or "")
             display_name = latest.get("display_name", sender) or sender
             is_phone_key = len(_NON_DIGIT_RE.sub("", sender)) >= 7
-            send_target = sender if is_phone_key else phone_by_display.get(display_name.lower(), "")
+            dn_lower = display_name.lower()
+            send_target = sender if is_phone_key else phone_by_display.get(dn_lower, "")
             conv = Conversation(
                 id=sender,
                 display_name=display_name,
