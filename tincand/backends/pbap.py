@@ -6,6 +6,7 @@ TincanService.update_contact() for every contact with a name and number.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from typing import TYPE_CHECKING, Callable
 
@@ -57,7 +58,7 @@ class PBAPContactSync:
             pbap.Select("int", "pb")
 
             tmp = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".vcf", delete=True, encoding="utf-8"
+                mode="w", suffix=".vcf", delete=False, encoding="utf-8"
             )
             tmp_path = tmp.name
             tmp.close()
@@ -123,39 +124,48 @@ class PBAPContactSync:
 
     def _on_pullall_complete(self, tmp_path: str, error: bool = False) -> None:
         """Parse the downloaded vCard file and update the service contact store."""
-        if error:
-            _log.warning("PBAP PullAll transfer failed — contacts not updated")
-            return
         try:
-            with open(tmp_path, encoding="utf-8") as f:
-                content = f.read()
-        except OSError as exc:
-            _log.warning("PBAP: could not read vCard file: %s", exc)
+            if error:
+                _log.warning("PBAP PullAll transfer failed — contacts not updated")
+                return
+            try:
+                with open(tmp_path, encoding="utf-8") as f:
+                    content = f.read()
+            except OSError as exc:
+                _log.warning("PBAP: could not read vCard file: %s", exc)
+                self._service.set_capability("contacts", True)
+                return
+
+            count = 0
+            try:
+                for vcard in vobject.readComponents(content):
+                    fn = getattr(vcard, "fn", None)
+                    if fn is None:
+                        continue
+                    name = fn.value.strip()
+                    if not name:
+                        continue
+                    tels = vcard.contents.get("tel", [])
+                    if not tels:
+                        continue
+                    for tel_obj in tels:
+                        number = "".join(tel_obj.value.split())  # strip whitespace
+                        if not number:
+                            continue
+                        normalized = normalize_phone(number)
+                        if normalized:
+                            self._service.update_contact(normalized, name)
+                            count += 1
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("PBAP PullAll: vCard parse error (partial load %d contacts): %s", count, exc)
+
+            _log.info("PBAP PullAll: %d phone-name mappings loaded", count)
             self._service.set_capability("contacts", True)
-            return
-
-        count = 0
-        for vcard in vobject.readComponents(content):
-            fn = getattr(vcard, "fn", None)
-            if fn is None:
-                continue
-            name = fn.value.strip()
-            if not name:
-                continue
-            tels = vcard.contents.get("tel", [])
-            if not tels:
-                continue
-            for tel_obj in tels:
-                number = "".join(tel_obj.value.split())  # strip whitespace
-                if not number:
-                    continue
-                normalized = normalize_phone(number)
-                if normalized:
-                    self._service.update_contact(normalized, name)
-                    count += 1
-
-        _log.info("PBAP PullAll: %d phone-name mappings loaded", count)
-        self._service.set_capability("contacts", True)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     def fetch_photo(self, phone: str) -> None:
         """Fetch a contact photo for *phone* via PBAP Pull; fire-and-forget.
@@ -185,7 +195,7 @@ class PBAPContactSync:
             handle = str(handles[0][0])
 
             tmp = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".vcf", delete=True, encoding="utf-8"
+                mode="w", suffix=".vcf", delete=False, encoding="utf-8"
             )
             tmp_path = tmp.name
             tmp.close()
@@ -204,20 +214,26 @@ class PBAPContactSync:
 
     def _parse_photo(self, phone: str, tmp_path: str, error: bool = False) -> None:
         """Parse the fetched vCard for a PHOTO field and deliver to service."""
-        if error:
-            self._service.deliver_contact_photo(phone, None)
-            return
         try:
-            with open(tmp_path, encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            photo_bytes: bytes | None = None
-            for vcard in vobject.readComponents(content):
-                photos = vcard.contents.get("photo", [])
-                if photos:
-                    raw = photos[0].value
-                    photo_bytes = raw if isinstance(raw, bytes) else raw.encode("latin-1")
-                    break
-            self._service.deliver_contact_photo(phone, photo_bytes)
-        except Exception as exc:  # noqa: BLE001
-            _log.debug("PBAP photo parse error for %s: %s", phone, exc)
-            self._service.deliver_contact_photo(phone, None)
+            if error:
+                self._service.deliver_contact_photo(phone, None)
+                return
+            try:
+                with open(tmp_path, encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                photo_bytes: bytes | None = None
+                for vcard in vobject.readComponents(content):
+                    photos = vcard.contents.get("photo", [])
+                    if photos:
+                        raw = photos[0].value
+                        photo_bytes = raw if isinstance(raw, bytes) else raw.encode("latin-1")
+                        break
+                self._service.deliver_contact_photo(phone, photo_bytes)
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("PBAP photo parse error for %s: %s", phone, exc)
+                self._service.deliver_contact_photo(phone, None)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
