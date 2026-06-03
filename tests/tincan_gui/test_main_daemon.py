@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
 
+from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
 from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData, ThreadView
 
@@ -53,6 +54,12 @@ def _has_empty_label(view: ThreadView) -> bool:
 
 class TestDaemonConnected:
     """_on_daemon_connected updates title bar, hides banner_a, enables compose."""
+
+    @pytest.fixture(autouse=True)
+    def _no_live_daemon(self, monkeypatch):
+        # _on_daemon_connected calls get_status(); patch to {} so device_address arg
+        # is used as-is and live-daemon state doesn't leak into assertions.
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {})
 
     def test_title_bar_shows_connected_text(self, qtbot):
         window = MainWindow()
@@ -169,6 +176,12 @@ class TestDaemonDisconnected:
 
 class TestCapabilityChanged:
     """_on_capability_changed toggles banner_b/c and compose state per feature."""
+
+    @pytest.fixture(autouse=True)
+    def _no_live_daemon(self, monkeypatch):
+        # _on_capability_changed calls get_status(); patch to {} so the fallback
+        # dict (defaults-True + reported feature) is used instead of live state.
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {})
 
     # --- messages capability ---
 
@@ -422,6 +435,12 @@ class TestThreadViewAppendMessage:
 
 class TestDBusWiring:
     """Emitting TincandClient signals must trigger the corresponding MainWindow handlers."""
+
+    @pytest.fixture(autouse=True)
+    def _no_live_daemon(self, monkeypatch):
+        # capability_changed signal → _on_capability_changed → get_status(); patch so
+        # live-daemon state doesn't override the emitted feature value.
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {})
 
     def test_connected_signal_triggers_title_bar_update(self, qtbot):
         window = MainWindow()

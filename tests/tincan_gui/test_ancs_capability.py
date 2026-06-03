@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import dbus
 import dbus.service
+import pytest
 
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
@@ -111,6 +112,12 @@ class TestSetCapabilityAncs:
 class TestApplyCapabilitiesColdStart:
     """State C banner reflects ancs value from GetStatus() at startup."""
 
+    @pytest.fixture(autouse=True)
+    def _no_live_daemon(self, monkeypatch):
+        # Default patch → daemon absent; individual tests override with patch.object
+        # for specific connected/capability states.
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {})
+
     def test_state_c_banner_hidden_when_ancs_true_on_startup(self, qtbot):
         with patch.object(TincandClient, "get_status", return_value={
             "connected": True,
@@ -147,6 +154,12 @@ class TestApplyCapabilitiesColdStart:
 
 class TestCapabilityChangedAncsRuntime:
     """_on_capability_changed re-fetches GetStatus() and calls _apply_capabilities."""
+
+    @pytest.fixture(autouse=True)
+    def _no_live_daemon(self, monkeypatch):
+        # _on_capability_changed calls get_status(); patch to {} so the fallback
+        # dict (defaults-True + reported feature) is used instead of live state.
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {})
 
     def test_capability_changed_ancs_false_re_fetches_get_status(self, qtbot):
         window = MainWindow()

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tincan_gui.dbus_client import TincandClient
 
 # ---------------------------------------------------------------------------
@@ -151,9 +153,17 @@ class TestTincandClientFallbacksWhenBusDisconnected:
 class TestTincandClientFallbacksWhenIfaceInvalid:
     """get_status / list_conversations / send_message return empty when interface is invalid.
 
-    In the test environment the session bus is present but tincand is not running,
-    so QDBusInterface.isValid() is naturally False — no mocking required.
+    Isolation: _dbus_call is patched to return None (simulates dbus-python miss) and
+    QDBusInterface is patched to be invalid (simulates tincand absent), so a live
+    tincand daemon on the session bus doesn't pollute the test.
     """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_from_daemon(self, monkeypatch):
+        monkeypatch.setattr(TincandClient, "_dbus_call", lambda self, *a: None)
+        mock_iface = MagicMock()
+        mock_iface.isValid.return_value = False
+        monkeypatch.setattr("tincan_gui.dbus_client.QDBusInterface", lambda *a: mock_iface)
 
     def test_get_status_returns_empty_dict(self):
         client = _make_real_client()
