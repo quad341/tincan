@@ -415,6 +415,7 @@ class MainWindow(QMainWindow):
             timestamp=str(conversation.get("last_message_at", ""))[:5],
             unread=unread_count > 0,
             unread_count=unread_count,
+            preview_direction=str(conversation.get("last_message_direction", "")),
         )
         self._conv_list.update_item(conv_id, data)
 
@@ -528,6 +529,7 @@ class MainWindow(QMainWindow):
                 timestamp=ts,
                 unread=unread > 0,
                 unread_count=unread,
+                preview_direction=str(c.get("last_message_direction", "")),
             )
             conversations.append(data)
             self._conversations_by_id[data.id] = data

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import dbus
 import dbus.exceptions
@@ -36,6 +37,7 @@ class Conversation:
     participants: list[str] = field(default_factory=list)
     last_message_at: str = ""
     last_message_preview: str = ""
+    last_message_direction: str = ""
     unread_count: int = 0
 
     def to_dbus(self) -> dbus.Dictionary:
@@ -48,6 +50,7 @@ class Conversation:
                 ),
                 "last_message_at": dbus.String(self.last_message_at),
                 "last_message_preview": dbus.String(self.last_message_preview),
+                "last_message_direction": dbus.String(self.last_message_direction),
                 "unread_count": dbus.UInt32(self.unread_count),
             },
             signature="sv",
@@ -277,6 +280,17 @@ class TincanService(dbus.service.Object):
                 str(exc),
                 name="im.tincan.Error.SendFailed",
             ) from exc
+        now_iso = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        normalized_to = normalize_phone(str(to))
+        self.on_message_received({
+            "id": str(handle),
+            "conversation_id": normalized_to,
+            "direction": "outbound",
+            "status": "read",
+            "body": str(body),
+            "from": "",
+            "timestamp": now_iso,
+        })
         self.MessageSent(str(handle))
         return str(handle)
 
@@ -345,6 +359,7 @@ class TincanService(dbus.service.Object):
             if not conv.last_message_at or timestamp >= conv.last_message_at:
                 conv.last_message_at = timestamp
                 conv.last_message_preview = body  # GUI owns truncation
+                conv.last_message_direction = direction
             if direction == "inbound" and status == "unread":
                 conv.unread_count += 1
             updated_conv = conv.to_dbus()

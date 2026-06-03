@@ -43,6 +43,7 @@ class ConversationData:
     unread: bool = False
     participant_count: int = 1
     unread_count: int = 0  # tincan-bxs: from daemon Conversation dict
+    preview_direction: str = ""  # 'outbound' → show 'You: …' prefix in preview
 
 
 class ConversationItem(QWidget):
