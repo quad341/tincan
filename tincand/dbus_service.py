@@ -19,6 +19,8 @@ import dbus
 import dbus.exceptions
 import dbus.service
 
+from tincand.contact_store import ContactStore, normalize_phone
+
 _log = logging.getLogger(__name__)
 
 BUS_NAME = "im.tincan.Daemon"
@@ -73,6 +75,8 @@ class TincanService(dbus.service.Object):
         self._messages: dict[str, list[dict]] = {}
         self._message_keys: set[tuple] = set()
         self._backend: object | None = None
+        self._contact_store = ContactStore()
+        self._pbap: object | None = None  # set by __main__ after construction
 
     # ------------------------------------------------------------------
     # im.tincan.Daemon — lifecycle and status
@@ -111,6 +115,7 @@ class TincanService(dbus.service.Object):
             "ancs": False,
             "ancs_needs_repair": False,
         }
+        self._contact_store.clear()
         _log.info("Disconnected")
         self.Disconnected()
 
@@ -287,6 +292,17 @@ class TincanService(dbus.service.Object):
     def ConversationUpdated(self, conversation: dbus.Dictionary) -> None:  # noqa: N802
         pass
 
+    @dbus.service.signal(IFACE_MESSAGES, signature="say")
+    def ContactPhotoReceived(  # noqa: N802
+        self, conversation_id: str, photo: dbus.Array
+    ) -> None:
+        pass
+
+    @dbus.service.method(IFACE_MESSAGES, in_signature="s", out_signature="")
+    def FetchContactPhoto(self, conversation_id: str) -> None:  # noqa: N802
+        if self._pbap is not None:
+            self._pbap.fetch_photo(str(conversation_id))
+
     # ------------------------------------------------------------------
     # Internal helpers called by Bluetooth adapters
     # ------------------------------------------------------------------
@@ -348,3 +364,21 @@ class TincanService(dbus.service.Object):
         self.MessageReceived(msg_dbus)
         if updated_conv is not None:
             self.ConversationUpdated(updated_conv)
+
+    def update_contact(self, phone: str, name: str) -> None:
+        """Store a resolved contact name and update any matching conversations."""
+        normalized = normalize_phone(phone)
+        self._contact_store.upsert(normalized, name)
+        for conv in list(self._conversations.values()):
+            if normalize_phone(conv.id) == normalized:
+                conv.display_name = name
+                self.upsert_conversation(conv)
+
+    def deliver_contact_photo(self, phone: str, photo: bytes | None) -> None:
+        """Store a contact photo and emit ContactPhotoReceived for matching conversations."""
+        normalized = normalize_phone(phone)
+        self._contact_store.set_photo(normalized, photo)
+        photo_bytes = dbus.Array(photo or b"", signature="y")
+        for conv in self._conversations.values():
+            if normalize_phone(conv.id) == normalized:
+                self.ContactPhotoReceived(conv.id, photo_bytes)
