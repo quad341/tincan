@@ -39,6 +39,7 @@ class Conversation:
     last_message_preview: str = ""
     last_message_direction: str = ""
     unread_count: int = 0
+    send_target: str = ""  # canonical phone for reply (may differ from id when id is name-keyed)
 
     def to_dbus(self) -> dbus.Dictionary:
         return dbus.Dictionary(
@@ -52,6 +53,7 @@ class Conversation:
                 "last_message_preview": dbus.String(self.last_message_preview),
                 "last_message_direction": dbus.String(self.last_message_direction),
                 "unread_count": dbus.UInt32(self.unread_count),
+                "send_target": dbus.String(self.send_target),
             },
             signature="sv",
         )
@@ -279,6 +281,8 @@ class TincanService(dbus.service.Object):
         to_lower = to.lower()
         for conv in conversations.values():
             if conv.display_name.lower() == to_lower:
+                if conv.send_target:
+                    return conv.send_target
                 cid_norm = normalize_phone(conv.id)
                 if len(cid_norm) >= 7:
                     return cid_norm

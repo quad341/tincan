@@ -520,10 +520,21 @@ class MapBackend(BackendInterface):
             key = _norm_phone(msg["sender"])
             by_sender.setdefault(key, []).append(msg)
 
+        # Build phone → display_name for phone-keyed groups so name-keyed groups
+        # (SenderAddressing absent/non-numeric) can resolve a send_target.
+        phone_by_display: dict[str, str] = {}
+        for key, msgs in by_sender.items():
+            if len(_NON_DIGIT_RE.sub("", key)) >= 7:
+                latest_dn = (max(msgs, key=lambda m: m["timestamp"] or "")
+                             .get("display_name", key) or key)
+                phone_by_display[latest_dn.lower()] = key
+
         for sender, msgs in by_sender.items():
             unread = sum(1 for m in msgs if not m["read"]) if notify else 0
             latest = max(msgs, key=lambda m: m["timestamp"] or "")
             display_name = latest.get("display_name", sender) or sender
+            is_phone_key = len(_NON_DIGIT_RE.sub("", sender)) >= 7
+            send_target = sender if is_phone_key else phone_by_display.get(display_name.lower(), "")
             conv = Conversation(
                 id=sender,
                 display_name=display_name,
@@ -531,6 +542,7 @@ class MapBackend(BackendInterface):
                 last_message_at=latest["timestamp"],
                 last_message_preview=latest["body"],
                 unread_count=unread,
+                send_target=send_target,
             )
             svc.upsert_conversation(conv)  # type: ignore[attr-defined]
             for msg in msgs:
