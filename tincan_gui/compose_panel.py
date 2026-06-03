@@ -5,8 +5,9 @@ import math
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QKeyEvent
+from PySide6.QtGui import QAccessible, QFont, QKeyEvent
 from PySide6.QtWidgets import (
+    QAccessibleWidget,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -20,6 +21,19 @@ from PySide6.QtWidgets import (
 from tincan_gui.theme import is_dark_theme
 
 _SMS_SINGLE_LIMIT = 160
+
+
+class _ErrorBar(QWidget):
+    """Error bar widget — subclassed so the a11y factory can give it AlertMessage role."""
+
+
+def _error_bar_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
+    if isinstance(obj, _ErrorBar):
+        return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)
+    return None
+
+
+QAccessible.installFactory(_error_bar_factory)
 _SMS_MULTI_LIMIT = 153
 
 
@@ -74,7 +88,7 @@ class ComposePanel(QWidget):
 
         # Error bar (hidden until a send failure occurs)
         _dark = is_dark_theme()
-        self._error_bar = QWidget()
+        self._error_bar = _ErrorBar()
         self._error_bar.setFixedHeight(32)
         self._error_bar.setAccessibleName("Send error notification")
         self._error_bar.setAccessibleDescription("Message failed to send")
@@ -119,6 +133,7 @@ class ComposePanel(QWidget):
         dismiss_btn = QToolButton()
         dismiss_btn.setText("×")
         dismiss_btn.setFixedSize(24, 24)
+        dismiss_btn.setAccessibleName("Dismiss send error")
         dismiss_btn.setStyleSheet(
             "QToolButton { border: none; color: #fca5a5; font-size: 14px; }"
         ) if _dark else dismiss_btn.setStyleSheet(
@@ -236,7 +251,8 @@ class ComposePanel(QWidget):
         self._retry_text = ""
 
     def _on_retry(self) -> None:
+        text = self._retry_text  # save before hide clears it
         self.hide_send_error()
-        if self._retry_text:
-            self._input.setPlainText(self._retry_text)
+        if text:
+            self._input.setPlainText(text)
             self._on_send()
