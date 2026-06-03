@@ -1,5 +1,5 @@
 """Tests: bMessage builder (LENGTH byte count) and MAP-dict mapping (conversation grouping).
-Bead: tincan-0ua, tincan-b7dz
+Bead: tincan-0ua, tincan-b7dz, tincan-efv3
 
 Coverage:
   §1 build_bmessage — LENGTH equals byte count of BEGIN:MSG…END:MSG block
@@ -47,10 +47,17 @@ Coverage:
     - 'Datetime' wins when both 'Datetime' and 'DateTime' present
     - 'DateTime' wins over 'Date' when 'Datetime' absent
     - no datetime key present → empty timestamp
+  §7 _emit_messages — send_target cross-ref logic
+    - phone-keyed sender: send_target == normalized sender (is_phone_key=True path)
+    - name-keyed sender with matching phone group: send_target == resolved phone
+    - phone-keyed conv in mixed call still gets send_target == its own id
+    - name-keyed sender with no matching phone group: send_target == ''
+    - phone_by_display lookup is case-insensitive
 
 §1–§4: no D-Bus infrastructure needed — all inputs are plain Python dicts.
 §5: _norm_phone is a pure function; no D-Bus calls.
 §6: MapBackend._msg_access pre-wired to MagicMock; no real D-Bus.
+§7: MapBackend._service pre-wired to MagicMock; upsert_conversation inspected.
 """
 from __future__ import annotations
 
@@ -469,3 +476,65 @@ class TestMapBackendDatetimeKeyFallback:
 
     def test_no_datetime_key_present_yields_empty_timestamp(self):
         assert self._poll_timestamp() == ""
+
+
+# ---------------------------------------------------------------------------
+# §7 _emit_messages — send_target cross-ref logic
+# ---------------------------------------------------------------------------
+
+class TestEmitMessagesSendTarget:
+    """_emit_messages builds phone_by_display and assigns send_target per is_phone_key."""
+
+    @staticmethod
+    def _msg(sender, *, display_name=None, read=True, timestamp="20260101T100000",
+             body="hi", direction="inbound"):
+        m = {"sender": sender, "read": read, "timestamp": timestamp, "body": body,
+             "direction": direction}
+        if display_name is not None:
+            m["display_name"] = display_name
+        return m
+
+    @staticmethod
+    def _run_emit(messages):
+        """Return {conv.id: conv} from upsert_conversation calls."""
+        backend = MapBackend()
+        backend._service = MagicMock(name="TincanService")
+        backend._emit_messages(messages)
+        return {
+            call.args[0].id: call.args[0]
+            for call in backend._service.upsert_conversation.call_args_list
+        }
+
+    def test_phone_keyed_sender_send_target_equals_sender(self):
+        # is_phone_key=True: send_target should equal the normalised sender key
+        convs = self._run_emit([self._msg("+15551234567", display_name="Alice")])
+        assert convs["5551234567"].send_target == "5551234567"
+
+    def test_name_keyed_sender_with_phone_group_resolves_send_target(self):
+        # phone_by_display built from phone-keyed group; name-keyed group looks it up
+        convs = self._run_emit([
+            self._msg("+15551234567", display_name="Alice", timestamp="20260101T090000"),
+            self._msg("Alice", timestamp="20260101T100000"),
+        ])
+        assert convs["Alice"].send_target == "5551234567"
+
+    def test_phone_keyed_conv_in_mixed_call_still_gets_own_id_as_send_target(self):
+        # Even when a name-keyed group is present, the phone group itself is unaffected
+        convs = self._run_emit([
+            self._msg("+15551234567", display_name="Alice", timestamp="20260101T090000"),
+            self._msg("Alice", timestamp="20260101T100000"),
+        ])
+        assert convs["5551234567"].send_target == "5551234567"
+
+    def test_name_keyed_sender_without_phone_group_send_target_is_empty(self):
+        # is_phone_key=False, no matching phone group → send_target == ""
+        convs = self._run_emit([self._msg("Bot")])
+        assert convs["Bot"].send_target == ""
+
+    def test_phone_by_display_lookup_is_case_insensitive(self):
+        # phone-keyed display_name "ALICE" matches name-keyed sender "alice"
+        convs = self._run_emit([
+            self._msg("+15551234567", display_name="ALICE", timestamp="20260101T090000"),
+            self._msg("alice", timestamp="20260101T100000"),
+        ])
+        assert convs["alice"].send_target == "5551234567"
