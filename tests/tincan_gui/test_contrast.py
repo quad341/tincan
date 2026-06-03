@@ -103,3 +103,8 @@ class TestDarkModeContrastSpec:
         # #93c5fd on #1e3a5f — _SELECTED_NAME_COLOR_DARK on _SELECTED_BG_DARK
         ratio = _contrast_ratio("#93c5fd", "#1e3a5f")
         assert ratio >= 4.5, f"Expected ≥4.5 for AA, got {ratio:.2f}"
+
+    def test_conversation_item_selected_dark_preview_passes_aa(self):
+        # #b4c6e0 on #1e3a5f — _SELECTED_MUTED_COLOR_DARK on _SELECTED_BG_DARK (tincan-nlm6)
+        ratio = _contrast_ratio("#b4c6e0", "#1e3a5f")
+        assert ratio >= 4.5, f"Expected ≥4.5 for AA, got {ratio:.2f}"

@@ -59,7 +59,8 @@ class ConversationItem(QWidget):
     _SELECTED_BG_DARK = "#1e3a5f"
     _SELECTED_BORDER_DARK = "#1d4ed8"
     _SELECTED_NAME_COLOR_DARK = "#93c5fd"   # blue-300 on #1e3a5f — WCAG AA
-    _SELECTED_MUTED_COLOR_DARK = "#a1a1aa"  # zinc-400 on #1e3a5f — WCAG AA
+    _SELECTED_MUTED_COLOR_DARK = "#a1a1aa"   # zinc-400 — timestamp on #1e3a5f
+    _SELECTED_PREVIEW_COLOR_DARK = "#b4c6e0" # blue-200 — preview on #1e3a5f — WCAG AA (6.6:1)
     _CARD_BG = "#ffffff"
     _CARD_BORDER = "#e5e7eb"
     _CARD_BG_DARK = "#18181b"
@@ -184,7 +185,7 @@ class ConversationItem(QWidget):
         raw = self._data.preview
         if self._selected:
             preview_color = (
-                self._SELECTED_MUTED_COLOR_DARK if self._dark else self._SELECTED_MUTED_COLOR
+                self._SELECTED_PREVIEW_COLOR_DARK if self._dark else self._SELECTED_MUTED_COLOR
             )
             no_preview_color = preview_color
         else:
@@ -305,6 +306,14 @@ class ConversationItem(QWidget):
     def timestamp_label_color(self) -> str:
         """Return the hex color applied to the timestamp label (used by a11y tests)."""
         style = self._ts_label.styleSheet()
+        for part in style.split(";"):
+            if "color" in part:
+                return part.split(":")[1].strip()
+        return "#6b7280"
+
+    def preview_label_color(self) -> str:
+        """Return the hex color applied to the preview label (used by a11y tests)."""
+        style = self._preview_label.styleSheet()
         for part in style.split(";"):
             if "color" in part:
                 return part.split(":")[1].strip()

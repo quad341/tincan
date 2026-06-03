@@ -21,7 +21,6 @@ from PySide6.QtCore import Qt
 from tincan_gui.conversation_list import ConversationData, ConversationItem
 from tincan_gui.theme import FOCUS_STYLESHEET
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -182,12 +181,12 @@ class TestSelectionStateDarkMode:
         item.set_selected(True)
         assert item.timestamp_label_color().lower() == "#a1a1aa"
 
-    def test_preview_label_color_is_a1a1aa_when_selected_dark(self, qtbot):
+    def test_preview_label_color_is_b4c6e0_when_selected_dark(self, qtbot):
         with patch("tincan_gui.conversation_list.is_dark_theme", return_value=True):
             item = ConversationItem(_make_data(preview="Hi"))
         qtbot.addWidget(item)
         item.set_selected(True)
-        assert item.preview_label_color().lower() == "#a1a1aa"
+        assert item.preview_label_color().lower() == "#b4c6e0"
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +209,8 @@ class TestSelectionWcagContrast:
         assert _contrast_ratio("#93c5fd", "#1e3a5f") >= 4.5
 
     def test_dark_preview_on_selected_bg_meets_aa(self):
-        # #a1a1aa on #1e3a5f — spec ≥4.9:1
-        assert _contrast_ratio("#a1a1aa", "#1e3a5f") >= 4.5
+        # #b4c6e0 on #1e3a5f — spec ≥5.0:1
+        assert _contrast_ratio("#b4c6e0", "#1e3a5f") >= 4.5
 
     def test_light_name_on_selected_bg_spec_minimum(self):
         ratio = _contrast_ratio("#1e40af", "#bfdbfe")
@@ -222,8 +221,8 @@ class TestSelectionWcagContrast:
         assert ratio >= 5.4, f"Expected ≥5.4 per spec, got {ratio:.2f}"
 
     def test_dark_preview_on_selected_bg_spec_minimum(self):
-        ratio = _contrast_ratio("#a1a1aa", "#1e3a5f")
-        assert ratio >= 4.9, f"Expected ≥4.9 per spec, got {ratio:.2f}"
+        ratio = _contrast_ratio("#b4c6e0", "#1e3a5f")
+        assert ratio >= 5.0, f"Expected ≥5.0 per spec, got {ratio:.2f}"
 
 
 # ---------------------------------------------------------------------------
