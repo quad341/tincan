@@ -93,6 +93,8 @@ class ConversationItem(QWidget):
         frame.setStyleSheet(
             f"QFrame {{ background: {bg}; border: 1px solid {border}; border-radius: 4px; }}"
         )
+        # Pass mouse events through so ConversationItem.mousePressEvent fires on card clicks.
+        frame.setAttribute(Qt.WA_TransparentForMouseEvents)
         frame_layout = QHBoxLayout(frame)
         frame_layout.setContentsMargins(8, 8, 8, 8)
         frame_layout.setSpacing(8)

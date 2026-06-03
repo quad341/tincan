@@ -516,6 +516,7 @@ class MainWindow(QMainWindow):
         self.message_send_requested.emit(text)
         self._compose.hide_send_error()
         if not self._current_phone:
+            self._compose.show_send_error(text)
             return
         phone = self._current_phone
         ts = datetime.now(tz=timezone.utc).strftime("%H:%M")
