@@ -401,7 +401,7 @@ class TestDeviceAddrFilter:
             path = getattr(obj, "_dbus_path", "")
             if iface == "org.freedesktop.DBus.ObjectManager":
                 return obj_mgr_mock
-            if iface == "org.bluez.Device1":
+            if iface in ("org.bluez.Device1", "org.freedesktop.DBus.Properties"):
                 return mock_dev_props
             if iface == "org.bluez.GattCharacteristic1" and path == _CTRL_PT_PATH:
                 return mock_ctrl_pt
@@ -724,7 +724,7 @@ class TestLeBond:
             path = getattr(obj, "_dbus_path", "")
             if iface == "org.freedesktop.DBus.ObjectManager":
                 return obj_mgr_mock
-            if iface == "org.bluez.Device1":
+            if iface in ("org.bluez.Device1", "org.freedesktop.DBus.Properties"):
                 return mock_device
             if iface == "org.bluez.GattCharacteristic1" and path == _CTRL_PT_PATH:
                 return mock_ctrl_pt
