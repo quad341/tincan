@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -56,8 +57,8 @@ class ComposePanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("composePanel")
-        self.setFixedHeight(80)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumHeight(80)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         if is_dark_theme():
             self.setStyleSheet("background: #27272a; border-top: 1px solid #3f3f46;")
         else:
@@ -70,6 +71,66 @@ class ComposePanel(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 6, 8, 6)
         outer.setSpacing(4)
+
+        # Error bar (hidden until a send failure occurs)
+        _dark = is_dark_theme()
+        self._error_bar = QWidget()
+        self._error_bar.setFixedHeight(32)
+        self._error_bar.setAccessibleName("Send error notification")
+        self._error_bar.setAccessibleDescription("Message failed to send")
+        if _dark:
+            self._error_bar.setStyleSheet(
+                "background: #3f1212; border-top: 1px solid #991b1b;"
+            )
+        else:
+            self._error_bar.setStyleSheet(
+                "background: #fef2f2; border-top: 1px solid #fca5a5;"
+            )
+        err_row = QHBoxLayout(self._error_bar)
+        err_row.setContentsMargins(8, 4, 8, 4)
+        err_row.setSpacing(8)
+
+        warn_label = QLabel("⚠")
+        warn_label.setStyleSheet("color: #f87171;" if _dark else "color: #dc2626;")
+        err_row.addWidget(warn_label)
+
+        self._error_text = QLabel("Failed to send")
+        self._error_text.setStyleSheet("color: #fca5a5;" if _dark else "color: #991b1b;")
+        err_font = QFont()
+        err_font.setPointSize(11)
+        self._error_text.setFont(err_font)
+        err_row.addWidget(self._error_text, stretch=1)
+
+        self._retry_btn = QPushButton("Retry")
+        self._retry_btn.setFixedHeight(24)
+        self._retry_btn.setAccessibleName("Retry sending message")
+        self._retry_btn.setStyleSheet(
+            "QPushButton { font-size: 11px; padding: 0 8px; border-radius: 3px;"
+            " background: #dc2626; color: #fff; border: none; }"
+            "QPushButton:hover { background: #b91c1c; }"
+        ) if not _dark else self._retry_btn.setStyleSheet(
+            "QPushButton { font-size: 11px; padding: 0 8px; border-radius: 3px;"
+            " background: #991b1b; color: #fff; border: none; }"
+            "QPushButton:hover { background: #7f1d1d; }"
+        )
+        self._retry_btn.clicked.connect(self._on_retry)
+        err_row.addWidget(self._retry_btn)
+
+        dismiss_btn = QToolButton()
+        dismiss_btn.setText("×")
+        dismiss_btn.setFixedSize(24, 24)
+        dismiss_btn.setStyleSheet(
+            "QToolButton { border: none; color: #fca5a5; font-size: 14px; }"
+        ) if _dark else dismiss_btn.setStyleSheet(
+            "QToolButton { border: none; color: #991b1b; font-size: 14px; }"
+        )
+        dismiss_btn.clicked.connect(self.hide_send_error)
+        err_row.addWidget(dismiss_btn)
+
+        self._error_bar.setVisible(False)
+        outer.addWidget(self._error_bar)
+
+        self._retry_text: str = ""
 
         # Input row
         input_row = QHBoxLayout()
@@ -162,3 +223,20 @@ class ComposePanel(QWidget):
             self._send_btn.setAccessibleName(
                 f"Send unavailable — {reason}" if reason else "Send unavailable"
             )
+
+    def show_send_error(self, failed_text: str) -> None:
+        """Show the send error bar and store text for retry."""
+        self._retry_text = failed_text
+        self._error_bar.setVisible(True)
+        self._retry_btn.setFocus()
+
+    def hide_send_error(self) -> None:
+        """Hide the send error bar."""
+        self._error_bar.setVisible(False)
+        self._retry_text = ""
+
+    def _on_retry(self) -> None:
+        self.hide_send_error()
+        if self._retry_text:
+            self._input.setPlainText(self._retry_text)
+            self._on_send()

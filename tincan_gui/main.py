@@ -468,9 +468,10 @@ class MainWindow(QMainWindow):
 
     def _on_send(self, text: str) -> None:
         self.message_send_requested.emit(text)
+        self._compose.hide_send_error()
         message_id = self._dbus_client.send_message(self._current_phone, text)
         if not message_id:
-            print(f"[stub] send (no daemon): {text!r}")
+            self._compose.show_send_error(text)
 
     def _activate_and_focus(self, widget) -> None:
         with warnings.catch_warnings():
