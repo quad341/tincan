@@ -69,6 +69,7 @@ class TincanService(dbus.service.Object):
             "ancs_needs_repair": False,
         }
         self._conversations: dict[str, Conversation] = {}
+        self._backend: object | None = None
 
     # ------------------------------------------------------------------
     # im.tincan.Daemon — lifecycle and status
@@ -156,6 +157,10 @@ class TincanService(dbus.service.Object):
         _log.debug("Capability %s → %s", feature, available)
         self.CapabilityChanged(str(feature), bool(available))
 
+    def register_backend(self, backend: object) -> None:
+        """Wire the backend so SendMessage/GetMessage delegate to it."""
+        self._backend = backend
+
     # ------------------------------------------------------------------
     # im.tincan.Messages — SMS/iMessage send and receive
     # ------------------------------------------------------------------
@@ -186,9 +191,27 @@ class TincanService(dbus.service.Object):
                 "No active Bluetooth session",
                 name="im.tincan.Error.NotConnected",
             )
-        raise dbus.exceptions.DBusException(
-            "Message handle not found or session expired",
-            name="im.tincan.Error.MessageNotFound",
+        if self._backend is None:
+            raise dbus.exceptions.DBusException(
+                "Message handle not found or session expired",
+                name="im.tincan.Error.MessageNotFound",
+            )
+        body = self._backend.get_message(str(id))  # type: ignore[attr-defined]
+        if body is None:
+            raise dbus.exceptions.DBusException(
+                "Message handle not found or session expired",
+                name="im.tincan.Error.MessageNotFound",
+            )
+        return dbus.Dictionary(
+            {
+                "id": dbus.String(str(id)),
+                "body": dbus.String(str(body)),
+                "direction": dbus.String("inbound"),
+                "status": dbus.String("read"),
+                "timestamp": dbus.String(""),
+                "conversation_id": dbus.String(""),
+            },
+            signature="sv",
         )
 
     @dbus.service.method(IFACE_MESSAGES, in_signature="ss", out_signature="s")
@@ -203,10 +226,20 @@ class TincanService(dbus.service.Object):
                 "No active Bluetooth session",
                 name="im.tincan.Error.NotConnected",
             )
-        raise dbus.exceptions.DBusException(
-            "OBEX transfer not yet implemented",
-            name="im.tincan.Error.SendFailed",
-        )
+        if self._backend is None:
+            raise dbus.exceptions.DBusException(
+                "No backend registered",
+                name="im.tincan.Error.SendFailed",
+            )
+        try:
+            handle = self._backend.send_message(str(to), str(body))  # type: ignore[attr-defined]
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc),
+                name="im.tincan.Error.SendFailed",
+            ) from exc
+        self.MessageSent(str(handle))
+        return str(handle)
 
     @dbus.service.signal(IFACE_MESSAGES, signature="a{sv}")
     def MessageReceived(self, message: dbus.Dictionary) -> None:  # noqa: N802

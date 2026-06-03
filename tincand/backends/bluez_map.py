@@ -19,6 +19,7 @@ import tempfile
 import time
 
 import dbus
+from gi.repository import GLib
 
 from tincand.backends.base import BackendInterface
 from tincand.dbus_service import Conversation
@@ -41,6 +42,7 @@ _TRANSIENT_ERRORS = {"org.bluez.obex.Error.Failed"}
 _TRANSFER_TIMEOUT = 15.0
 _RETRY_MAX = 3
 _RETRY_BACKOFF = 0.5
+_POLL_INTERVAL_SECONDS = 30
 
 
 class ConsentRequired(Exception):
@@ -96,6 +98,7 @@ class MapBackend(BackendInterface):
         self._service: object | None = None
         self._session_path: str | None = None
         self._msg_access: object | None = None
+        self._poll_source_id: int | None = None
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -141,8 +144,13 @@ class MapBackend(BackendInterface):
         if self._service is not None:
             self._service.Connect(device_addr)  # type: ignore[attr-defined]
 
+        self._poll_source_id = GLib.timeout_add_seconds(_POLL_INTERVAL_SECONDS, self._poll_tick)
+
     def disconnect(self) -> None:
         """Remove the obexd MAP session; silently no-ops if not connected."""
+        if self._poll_source_id is not None:
+            GLib.source_remove(self._poll_source_id)
+            self._poll_source_id = None
         if self._session_path is None:
             return
         try:
@@ -244,6 +252,14 @@ class MapBackend(BackendInterface):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _poll_tick(self) -> bool:
+        """GLib timer callback — poll inbox and return SOURCE_CONTINUE."""
+        try:
+            self.poll_inbox()
+        except Exception as exc:
+            _log.warning("poll_inbox error: %s", exc)
+        return GLib.SOURCE_CONTINUE
 
     def _retry(self, fn: object, *args: object) -> object:
         """Call *fn(*args)*, retrying on transient obexd errors."""

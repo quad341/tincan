@@ -11,11 +11,16 @@ from gi.repository import GLib
 
 _log = logging.getLogger(__name__)
 
-_BACKENDS = {"mock", "ancs"}
+_BACKENDS = {"mock", "ancs", "map"}
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="tincand — Bluetooth messaging daemon")
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Use the mock backend (shorthand for --backend mock).",
+    )
     parser.add_argument(
         "--backend",
         choices=sorted(_BACKENDS),
@@ -33,7 +38,12 @@ def _parse_args() -> argparse.Namespace:
             "(default: TINCAN_DEVICE env var)."
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.mock:
+        if args.backend and args.backend != "mock":
+            parser.error("--mock cannot be combined with --backend ancs")
+        args.backend = "mock"
+    return args
 
 
 def _select_backend(args: argparse.Namespace) -> object:
@@ -54,6 +64,10 @@ def _select_backend(args: argparse.Namespace) -> object:
 
         device_addr = args.device or os.environ.get("TINCAN_DEVICE")
         return ANCSBackend(device_addr=device_addr)
+    if name == "map":
+        from tincand.backends.bluez_map import MapBackend
+
+        return MapBackend()
     choices = ", ".join(sorted(_BACKENDS))
     sys.exit(f"Unknown backend {name!r}. Must be one of: {choices}")
 
@@ -73,6 +87,7 @@ def main() -> None:
     bus = dbus.SessionBus()
     service = TincanService(bus)
     backend.register_service(service)
+    service.register_backend(backend)
 
     loop = GLib.MainLoop()
 
