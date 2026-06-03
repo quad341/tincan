@@ -11,6 +11,7 @@ from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QSizePolicy,
@@ -219,6 +220,7 @@ class MainWindow(QMainWindow):
     def _wire(self) -> None:
         self._conv_list.conversation_selected.connect(self._on_conversation_selected)
         self._conv_list.focus_thread_requested.connect(self._compose._input.setFocus)
+        self._conv_list.compose_new_requested.connect(self._on_compose_new)
         self._compose.send_requested.connect(self._on_send)
         self._title_bar.gear_button.clicked.connect(self._open_settings)
         self._banner_ancs_repair.reconnect_clicked.connect(self._open_pairing_wizard)
@@ -356,10 +358,13 @@ class MainWindow(QMainWindow):
 
     def _on_message_received(self, message: dict) -> None:
         self._notifier.dispatch(message)
+        conv_id = str(message.get("conversation_id", ""))
+        if self._current_phone and conv_id and conv_id != self._current_phone:
+            return  # message is for a different conversation; notification already sent
         direction = str(message.get("direction", "inbound"))
         body = str(message.get("body", ""))
         sender = str(message.get("sender", ""))
-        timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM from ISO string
+        timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM
 
         if not body:
             bubble_type = BubbleType.BODY_UNAVAILABLE
@@ -377,6 +382,10 @@ class MainWindow(QMainWindow):
     def _on_conversation_updated(self, conversation: dict) -> None:
         conv_id = str(conversation.get("id", ""))
         if not conv_id:
+            return
+        if conv_id not in self._conversations_by_id:
+            # New conversation arrived — reload the full list from the daemon
+            self._load_conversations()
             return
         unread_count = int(conversation.get("unread_count", 0))
         data = ConversationData(
@@ -421,6 +430,21 @@ class MainWindow(QMainWindow):
             "  Settings → Bluetooth → [your Mac/PC] → Show Notifications\n\n"
             "Toggle it on, then wait a few seconds for tincan to reconnect.",
         )
+
+    def _on_compose_new(self) -> None:
+        """Open a dialog asking for a recipient phone number and start a new thread."""
+        phone, ok = QInputDialog.getText(
+            self,
+            "New Conversation",
+            "Recipient phone number:",
+        )
+        if not ok or not phone.strip():
+            return
+        phone = phone.strip()
+        self._current_phone = phone
+        self._thread_view.load_thread(phone, phone, [], "SMS")
+        self._compose.set_compose_enabled(True)
+        self._compose._input.setFocus()
 
     def _on_send(self, text: str) -> None:
         self.message_send_requested.emit(text)

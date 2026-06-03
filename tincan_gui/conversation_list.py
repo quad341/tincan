@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -255,6 +256,7 @@ class ConversationListWidget(QWidget):
 
     conversation_selected = Signal(str)    # conversation id
     focus_thread_requested = Signal()
+    compose_new_requested = Signal()       # user clicked "+" compose-new button
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -278,7 +280,7 @@ class ConversationListWidget(QWidget):
         header.setFixedHeight(40)
         header.setStyleSheet("background: #f9fafb; border-bottom: 1px solid #e5e7eb;")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 0, 12, 0)
+        header_layout.setContentsMargins(12, 0, 8, 0)
 
         conversations_label = QLabel("Conversations")
         conv_font = QFont()
@@ -286,6 +288,19 @@ class ConversationListWidget(QWidget):
         conversations_label.setFont(conv_font)
         conversations_label.setStyleSheet("color: #374151;")
         header_layout.addWidget(conversations_label, stretch=1)
+
+        self._compose_btn = QToolButton()
+        self._compose_btn.setText("+")
+        self._compose_btn.setFixedSize(28, 28)
+        self._compose_btn.setToolTip("New conversation")
+        self._compose_btn.setAccessibleName("New conversation")
+        self._compose_btn.setStyleSheet(
+            "QToolButton { font-size: 18px; font-weight: bold; color: #374151;"
+            " border: none; background: transparent; border-radius: 4px; }"
+            " QToolButton:hover { background: #e5e7eb; }"
+        )
+        self._compose_btn.clicked.connect(self.compose_new_requested.emit)
+        header_layout.addWidget(self._compose_btn)
 
         layout.addWidget(header)
 

@@ -95,6 +95,23 @@ def _parse_bmsg_body(bmsg: str) -> str:
     return match.group(1) if match else ""
 
 
+def _parse_map_datetime(dt: str) -> str:
+    """Convert MAP Datetime 'YYYYMMDDTHHMMSS[±HHMM]' to 'HH:MM' for GUI display.
+
+    Returns '' when dt is empty or does not contain a time component (e.g. date-only
+    strings from test fixtures, or missing Datetime from the phone's MAP server).
+    """
+    if not dt:
+        return ""
+    t = dt.find("T")
+    if t < 0 or len(dt) < t + 5:
+        return ""
+    time_part = dt[t + 1:]
+    if len(time_part) >= 4:
+        return f"{time_part[:2]}:{time_part[2:4]}"
+    return ""
+
+
 class MapBackend(BackendInterface):
     """MAP backend using obexd org.bluez.obex.Client1."""
 
@@ -216,7 +233,7 @@ class MapBackend(BackendInterface):
                 "path": str(msg_path),
                 "sender": phone,
                 "display_name": display_name,
-                "timestamp": str(props.get("Datetime", "")),
+                "timestamp": _parse_map_datetime(str(props.get("Datetime", ""))),
                 "read": bool(props.get("Read", False)),
                 "body": body,
                 "direction": "inbound",
@@ -236,7 +253,7 @@ class MapBackend(BackendInterface):
                     "path": str(msg_path),
                     "sender": phone,
                     "display_name": display_name,
-                    "timestamp": str(props.get("Datetime", "")),
+                    "timestamp": _parse_map_datetime(str(props.get("Datetime", ""))),
                     "read": True,
                     "body": body,
                     "direction": "outbound",

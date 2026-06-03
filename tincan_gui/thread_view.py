@@ -1,6 +1,8 @@
 """Thread view: ThreadHeader, MessageBubble (4 types), ThreadView."""
 from __future__ import annotations
 
+import html as _html
+import re as _re
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
@@ -19,6 +21,13 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui.theme import is_dark_theme
+
+_URL_RE = _re.compile(r"(https?://[^\s<>\"']+)")
+
+
+def _linkify(text: str) -> str:
+    """HTML-escape text and wrap URLs in clickable <a> tags."""
+    return _URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(text))
 
 
 class BubbleType(Enum):
@@ -104,17 +113,21 @@ class MessageBubble(QWidget):
             bubble_layout.addWidget(warn)
 
         # Body unavailable uses canonical plain-language strings (tincan-063z)
-        if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
-            body_text = "⚠ Message content unavailable"
-        else:
-            body_text = self._data.body
-
-        body_label = QLabel(body_text)
+        body_label = QLabel()
         body_font = QFont()
         body_font.setPointSize(13)
         body_label.setFont(body_font)
         body_label.setWordWrap(True)
         body_label.setStyleSheet(f"color: {fg};")
+        if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
+            body_label.setText("⚠ Message content unavailable")
+        else:
+            body_label.setTextFormat(Qt.TextFormat.RichText)
+            body_label.setOpenExternalLinks(True)
+            body_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextBrowserInteraction
+            )
+            body_label.setText(_linkify(self._data.body))
         bubble_layout.addWidget(body_label)
 
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
@@ -285,8 +298,10 @@ class ThreadView(QWidget):
             w = item.widget()
             if w and w is not self._empty_label:
                 w.deleteLater()
+        self._empty_label.hide()
 
         if not messages:
+            self._empty_label.show()
             self._messages_layout.addStretch()
             self._messages_layout.addWidget(self._empty_label, alignment=Qt.AlignCenter)
             self._messages_layout.addStretch()
@@ -318,6 +333,7 @@ class ThreadView(QWidget):
                 w = item.widget()
                 if w and w is not self._empty_label:
                     w.deleteLater()
+            self._empty_label.hide()
             self._messages_layout.addStretch()
 
         bubble = MessageBubble(msg)
@@ -337,8 +353,10 @@ class ThreadView(QWidget):
     def show_empty(self) -> None:
         while self._messages_layout.count():
             item = self._messages_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w and w is not self._empty_label:
+                w.deleteLater()
+        self._empty_label.show()
         self._messages_layout.addStretch()
         self._messages_layout.addWidget(self._empty_label, alignment=Qt.AlignCenter)
         self._messages_layout.addStretch()
