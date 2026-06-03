@@ -309,3 +309,177 @@ class TestMapBackendDisconnect:
             backend.disconnect()
 
         svc.Disconnect.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Additional helpers
+# ---------------------------------------------------------------------------
+
+def _make_map_backend_with_mock_access():
+    """Create a MapBackend with _msg_access pre-wired to a MagicMock."""
+    backend = MapBackend()
+    mock_access = MagicMock(name="MessageAccess1")
+    backend._msg_access = mock_access
+    return backend, mock_access
+
+
+# ---------------------------------------------------------------------------
+# §6 MapBackend.poll_inbox — SetFolder navigation to telecom/msg
+# ---------------------------------------------------------------------------
+
+class TestMapBackendPollInboxFolderNav:
+    """poll_inbox ascends twice then descends telecom→msg before listing."""
+
+    def _run_poll(self, set_folder_side_effect=None):
+        backend, mock_access = _make_map_backend_with_mock_access()
+        if set_folder_side_effect is not None:
+            mock_access.SetFolder.side_effect = set_folder_side_effect
+        mock_access.ListMessages.return_value = {}
+        backend.poll_inbox()
+        return mock_access
+
+    def test_poll_inbox_returns_empty_when_msg_access_is_none(self):
+        backend = MapBackend()
+        assert backend.poll_inbox() == []
+
+    def test_set_folder_called_four_times_total(self):
+        mock_access = self._run_poll()
+        assert mock_access.SetFolder.call_count == 4
+
+    def test_set_folder_first_two_calls_are_ascend(self):
+        mock_access = self._run_poll()
+        calls = mock_access.SetFolder.call_args_list
+        assert calls[0] == call("") and calls[1] == call("")
+
+    def test_set_folder_third_call_is_telecom(self):
+        mock_access = self._run_poll()
+        calls = mock_access.SetFolder.call_args_list
+        assert calls[2] == call("telecom")
+
+    def test_set_folder_fourth_call_is_msg(self):
+        mock_access = self._run_poll()
+        calls = mock_access.SetFolder.call_args_list
+        assert calls[3] == call("msg")
+
+    def test_set_folder_full_order_is_ascend_ascend_telecom_msg(self):
+        mock_access = self._run_poll()
+        args_seq = [c[0][0] for c in mock_access.SetFolder.call_args_list]
+        assert args_seq == ["", "", "telecom", "msg"]
+
+    def test_dbus_exc_on_ascend_is_swallowed_and_descent_proceeds(self):
+        def _raise_for_empty(arg):
+            if arg == "":
+                raise dbus.exceptions.DBusException(
+                    name="org.bluez.obex.Error.NotFound"
+                )
+
+        mock_access = self._run_poll(set_folder_side_effect=_raise_for_empty)
+        descent_args = [
+            c[0][0] for c in mock_access.SetFolder.call_args_list if c[0][0] != ""
+        ]
+        assert descent_args == ["telecom", "msg"]
+
+    def test_list_messages_called_with_inbox_and_empty_filter(self):
+        mock_access = self._run_poll()
+        mock_access.ListMessages.assert_called_once_with("inbox", {})
+
+
+# ---------------------------------------------------------------------------
+# §7 MapBackend.poll_inbox — body fallback chain Text → Subject → "New message"
+# ---------------------------------------------------------------------------
+
+class TestMapBackendPollInboxBodyFallback:
+    """Body is read from Text, then Subject, then the literal 'New message'."""
+
+    def _poll_body(self, **props):
+        """Run poll_inbox with a single message carrying the given props."""
+        backend, mock_access = _make_map_backend_with_mock_access()
+        mock_access.ListMessages.return_value = {"/msg/1": props}
+        result = backend.poll_inbox()
+        return result[0]["body"] if result else None
+
+    def test_text_present_uses_text(self):
+        assert self._poll_body(Text="Hello text", Subject="subj",
+                               Sender="A", Datetime="", Read=False) == "Hello text"
+
+    def test_text_empty_subject_present_uses_subject(self):
+        assert self._poll_body(Text="", Subject="Hello subject",
+                               Sender="A", Datetime="", Read=False) == "Hello subject"
+
+    def test_text_absent_subject_present_uses_subject(self):
+        assert self._poll_body(Subject="Subject only",
+                               Sender="A", Datetime="", Read=False) == "Subject only"
+
+    def test_text_whitespace_only_falls_through_to_subject(self):
+        assert self._poll_body(Text="   ", Subject="Subj wins",
+                               Sender="A", Datetime="", Read=False) == "Subj wins"
+
+    def test_text_empty_subject_empty_uses_new_message(self):
+        assert self._poll_body(Text="", Subject="",
+                               Sender="A", Datetime="", Read=False) == "New message"
+
+    def test_text_absent_subject_absent_uses_new_message(self):
+        assert self._poll_body(Sender="A", Datetime="", Read=False) == "New message"
+
+    def test_text_whitespace_subject_whitespace_uses_new_message(self):
+        assert self._poll_body(Text="  ", Subject="  ",
+                               Sender="A", Datetime="", Read=False) == "New message"
+
+    def test_text_wins_over_subject_when_both_non_empty(self):
+        assert self._poll_body(Text="Text body", Subject="Subject body",
+                               Sender="A", Datetime="", Read=False) == "Text body"
+
+    def test_text_is_stripped(self):
+        assert self._poll_body(Text="  stripped  ", Subject="subj",
+                               Sender="A", Datetime="", Read=False) == "stripped"
+
+    def test_subject_is_stripped_when_text_absent(self):
+        assert self._poll_body(Text="", Subject="  also stripped  ",
+                               Sender="A", Datetime="", Read=False) == "also stripped"
+
+
+# ---------------------------------------------------------------------------
+# §8 MapBackend._fetch_full_body — GetMessage called with 3 args
+# ---------------------------------------------------------------------------
+
+class TestMapBackendFetchFullBodyGetMessageArgs:
+    """_fetch_full_body passes (handle, '', {Attachment: False}) to GetMessage."""
+
+    def _call_fetch(self, handle="/msg/handle1"):
+        backend, mock_access = _make_map_backend_with_mock_access()
+        mock_access.GetMessage.return_value = None  # triggers early-return path
+        backend._fetch_full_body(handle)
+        return mock_access
+
+    def test_fetch_full_body_returns_none_when_msg_access_is_none(self):
+        backend = MapBackend()
+        assert backend._fetch_full_body("/msg/1") is None
+
+    def test_get_message_called_once(self):
+        mock_access = self._call_fetch()
+        assert mock_access.GetMessage.call_count == 1
+
+    def test_get_message_called_with_three_positional_args(self):
+        mock_access = self._call_fetch()
+        args = mock_access.GetMessage.call_args[0]
+        assert len(args) == 3
+
+    def test_get_message_first_arg_is_handle(self):
+        mock_access = self._call_fetch("/msg/handle1")
+        args = mock_access.GetMessage.call_args[0]
+        assert args[0] == "/msg/handle1"
+
+    def test_get_message_second_arg_is_empty_string(self):
+        mock_access = self._call_fetch()
+        args = mock_access.GetMessage.call_args[0]
+        assert args[1] == ""
+
+    def test_get_message_third_arg_has_attachment_key(self):
+        mock_access = self._call_fetch()
+        args = mock_access.GetMessage.call_args[0]
+        assert "Attachment" in args[2]
+
+    def test_get_message_attachment_value_is_false(self):
+        mock_access = self._call_fetch()
+        args = mock_access.GetMessage.call_args[0]
+        assert not args[2]["Attachment"]
