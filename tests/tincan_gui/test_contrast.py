@@ -65,3 +65,41 @@ class TestContrastRatioSpec:
     def test_status_red_passes_aa(self):
         # #fca5a5 on #1e3a5f (spec §4.1: ~4.3:1 borderline)
         assert _contrast_ratio("#fca5a5", "#1e3a5f") >= 4.5
+
+
+class TestDarkModeContrastSpec:
+    """
+    Verify dark-mode color pairs from tincan-mfel (tincan-120l §SS1-SS5) satisfy WCAG 2.1.
+    Background values: #18181b = QMainWindow dark bg (theme.py); #27272a = header/sidebar
+    dark bg (thread_view.py:218, conversation_list.py:308); #1e3a5f = selection dark bg.
+    """
+
+    def test_thread_header_dark_name_passes_aaa(self):
+        # #f4f4f5 on #27272a — thread_view.py:231, ThreadHeader bg dark
+        ratio = _contrast_ratio("#f4f4f5", "#27272a")
+        assert ratio >= 7.0, f"Expected ≥7.0 for AAA, got {ratio:.2f}"
+
+    def test_thread_header_dark_phone_passes_aa(self):
+        # #a1a1aa on #27272a — thread_view.py:240, ThreadHeader bg dark
+        ratio = _contrast_ratio("#a1a1aa", "#27272a")
+        assert ratio >= 4.5, f"Expected ≥4.5 for AA, got {ratio:.2f}"
+
+    def test_conversation_item_dark_name_passes_aaa(self):
+        # #f4f4f5 on #18181b — conversation_list.py:105, main window dark bg
+        ratio = _contrast_ratio("#f4f4f5", "#18181b")
+        assert ratio >= 7.0, f"Expected ≥7.0 for AAA, got {ratio:.2f}"
+
+    def test_conversation_item_dark_ts_passes_aa(self):
+        # #a1a1aa on #18181b — conversation_list.py:114, main window dark bg
+        ratio = _contrast_ratio("#a1a1aa", "#18181b")
+        assert ratio >= 4.5, f"Expected ≥4.5 for AA, got {ratio:.2f}"
+
+    def test_settings_dialog_dark_checkbox_passes_aa(self):
+        # #f4f4f5 on #18181b — settings_dialog.py:76, main window dark bg
+        ratio = _contrast_ratio("#f4f4f5", "#18181b")
+        assert ratio >= 4.5, f"Expected ≥4.5 for AA, got {ratio:.2f}"
+
+    def test_conversation_item_selected_dark_name_passes_aa(self):
+        # #93c5fd on #1e3a5f — _SELECTED_NAME_COLOR_DARK on _SELECTED_BG_DARK
+        ratio = _contrast_ratio("#93c5fd", "#1e3a5f")
+        assert ratio >= 4.5, f"Expected ≥4.5 for AA, got {ratio:.2f}"

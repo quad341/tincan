@@ -61,7 +61,8 @@ from tincan_gui.conversation_list import (
     ConversationItem,
 )
 from tincan_gui.main import MainWindow, TitleBar
-from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData
+from tincan_gui.settings_dialog import SettingsDialog
+from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData, ThreadHeader
 
 
 def _stub_conversations() -> list[ConversationData]:
@@ -546,3 +547,70 @@ class TestScreenReaderAnnouncements:
         iface = QAccessible.queryAccessibleInterface(banner)
         assert iface is not None
         assert iface.role() == QAccessible.Role.AlertMessage
+
+
+# ---------------------------------------------------------------------------
+# §4.1 Dark-mode contrast — widget-level enforcement (tincan-pj1l)
+# ---------------------------------------------------------------------------
+
+class TestDarkModeContrastOnWidgets:
+    """
+    Verify that dark-mode color ternaries from tincan-mfel are applied on actual
+    widget instances.  Each test mocks is_dark_theme() so the widget initialises
+    with its dark-mode stylesheet.
+
+    Builder must add these accessor methods before the tests below can pass:
+      ConversationItem.name_label_color() → hex color from _name_label stylesheet
+      ThreadHeader.name_label_color()     → hex color from _name_label stylesheet
+      ThreadHeader.phone_label_color()    → hex color from _phone_label stylesheet
+      SettingsDialog.checkbox_label_color() → hex color from _desktop_cb stylesheet
+    """
+
+    def test_conversation_item_name_color_is_f4f4f5_dark(self, qtbot):
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="Hey", timestamp="10:00", unread=False,
+        )
+        with patch("tincan_gui.conversation_list.is_dark_theme", return_value=True):
+            item = ConversationItem(data)
+        qtbot.addWidget(item)
+        assert item.name_label_color().lower() == "#f4f4f5"
+
+    def test_conversation_item_timestamp_color_is_a1a1aa_dark(self, qtbot):
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="Hey", timestamp="10:00", unread=False,
+        )
+        with patch("tincan_gui.conversation_list.is_dark_theme", return_value=True):
+            item = ConversationItem(data)
+        qtbot.addWidget(item)
+        assert item.timestamp_label_color().lower() == "#a1a1aa"
+
+    def test_thread_header_name_color_is_f4f4f5_dark(self, qtbot):
+        with patch("tincan_gui.thread_view.is_dark_theme", return_value=True):
+            header = ThreadHeader()
+        qtbot.addWidget(header)
+        assert header.name_label_color().lower() == "#f4f4f5"
+
+    def test_thread_header_phone_color_is_a1a1aa_dark(self, qtbot):
+        with patch("tincan_gui.thread_view.is_dark_theme", return_value=True):
+            header = ThreadHeader()
+        qtbot.addWidget(header)
+        assert header.phone_label_color().lower() == "#a1a1aa"
+
+    def test_settings_dialog_checkbox_color_is_f4f4f5_dark(self, qtbot):
+        with patch("tincan_gui.settings_dialog.is_dark_theme", return_value=True):
+            dialog = SettingsDialog()
+        qtbot.addWidget(dialog)
+        assert dialog.checkbox_label_color().lower() == "#f4f4f5"
+
+    def test_conversation_item_selected_dark_name_color_is_93c5fd(self, qtbot):
+        data = ConversationData(
+            id="c1", name="Alice", phone="+1 555-0100",
+            preview="Hey", timestamp="10:00", unread=False,
+        )
+        with patch("tincan_gui.conversation_list.is_dark_theme", return_value=True):
+            item = ConversationItem(data)
+        qtbot.addWidget(item)
+        item.set_selected(True)
+        assert item.name_label_color().lower() == "#93c5fd"
