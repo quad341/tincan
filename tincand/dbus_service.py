@@ -280,7 +280,7 @@ class TincanService(dbus.service.Object):
                 str(exc),
                 name="im.tincan.Error.SendFailed",
             ) from exc
-        now_iso = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        now_iso = datetime.now(tz=timezone.utc).strftime("%H:%M")
         normalized_to = normalize_phone(str(to))
         self.on_message_received({
             "id": str(handle),
@@ -388,6 +388,7 @@ class TincanService(dbus.service.Object):
             if normalize_phone(conv.id) == normalized:
                 conv.display_name = name
                 self.upsert_conversation(conv)
+                self.ConversationUpdated(conv.to_dbus())
 
     def deliver_contact_photo(self, phone: str, photo: bytes | None) -> None:
         """Store a contact photo and emit ContactPhotoReceived for matching conversations."""
