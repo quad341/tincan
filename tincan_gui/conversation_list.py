@@ -1,7 +1,7 @@
 """Conversation list sidebar: ConversationItem, ConversationListWidget."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -60,6 +60,10 @@ class ConversationItem(QWidget):
     _SELECTED_BORDER_DARK = "#1d4ed8"
     _SELECTED_NAME_COLOR_DARK = "#93c5fd"   # blue-300 on #1e3a5f — WCAG AA
     _SELECTED_MUTED_COLOR_DARK = "#a1a1aa"  # zinc-400 on #1e3a5f — WCAG AA
+    _CARD_BG = "#ffffff"
+    _CARD_BORDER = "#e5e7eb"
+    _CARD_BG_DARK = "#18181b"
+    _CARD_BORDER_DARK = "#3f3f46"
 
     def __init__(self, data: ConversationData, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -84,10 +88,10 @@ class ConversationItem(QWidget):
 
         # QFrame card wraps avatar + text columns
         frame = QFrame()
+        bg = self._CARD_BG_DARK if self._dark else self._CARD_BG
+        border = self._CARD_BORDER_DARK if self._dark else self._CARD_BORDER
         frame.setStyleSheet(
-            "QFrame { background: #18181b; border: 1px solid #3f3f46; border-radius: 4px; }"
-            if self._dark else
-            "QFrame { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 4px; }"
+            f"QFrame {{ background: {bg}; border: 1px solid {border}; border-radius: 4px; }}"
         )
         frame_layout = QHBoxLayout(frame)
         frame_layout.setContentsMargins(8, 8, 8, 8)
@@ -267,8 +271,7 @@ class ConversationItem(QWidget):
 
     def set_read(self) -> None:
         """Clear unread state immediately when a conversation is opened."""
-        import dataclasses
-        self._data = dataclasses.replace(self._data, unread=False, unread_count=0)
+        self._data = replace(self._data, unread=False, unread_count=0)
         self._apply_unread_style()
 
     def mousePressEvent(self, event) -> None:
