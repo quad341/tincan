@@ -87,15 +87,15 @@ class ConversationItem(QWidget):
         outer.setSpacing(6)
 
         # QFrame card wraps avatar + text columns
-        frame = QFrame()
+        self._frame = QFrame()
         bg = self._CARD_BG_DARK if self._dark else self._CARD_BG
         border = self._CARD_BORDER_DARK if self._dark else self._CARD_BORDER
-        frame.setStyleSheet(
+        self._frame.setStyleSheet(
             f"QFrame {{ background: {bg}; border: 1px solid {border}; border-radius: 4px; }}"
         )
         # Pass mouse events through so ConversationItem.mousePressEvent fires on card clicks.
-        frame.setAttribute(Qt.WA_TransparentForMouseEvents)
-        frame_layout = QHBoxLayout(frame)
+        self._frame.setAttribute(Qt.WA_TransparentForMouseEvents)
+        frame_layout = QHBoxLayout(self._frame)
         frame_layout.setContentsMargins(8, 8, 8, 8)
         frame_layout.setSpacing(8)
 
@@ -143,7 +143,7 @@ class ConversationItem(QWidget):
         text_col.addWidget(self._preview_label)
 
         frame_layout.addLayout(text_col, stretch=1)
-        outer.addWidget(frame, stretch=1)
+        outer.addWidget(self._frame, stretch=1)
 
         # Unread indicator (right side): dot + optional badge (tincan-yq1)
         self._dot = QLabel()
@@ -252,17 +252,21 @@ class ConversationItem(QWidget):
             sel_muted = (
                 self._SELECTED_MUTED_COLOR_DARK if self._dark else self._SELECTED_MUTED_COLOR
             )
-            self.setStyleSheet(
-                f"ConversationItem {{"
-                f" background-color: {sel_bg}; border: 1px solid {sel_border};"
-                " border-radius: 8px; margin: 4px 6px;"
-                " } QLabel { background: transparent; }"
+            self.setStyleSheet("background: transparent; QLabel { background: transparent; }")
+            self._frame.setStyleSheet(
+                f"QFrame {{ background: {sel_bg}; border: 2px solid {sel_border};"
+                " border-radius: 4px; }}"
             )
             self._name_label.setStyleSheet(f"color: {sel_name};")
             self._ts_label.setStyleSheet(f"color: {sel_muted};")
             self._apply_preview()
         else:
             self.setStyleSheet("QLabel { background: transparent; }")
+            bg = self._CARD_BG_DARK if self._dark else self._CARD_BG
+            border = self._CARD_BORDER_DARK if self._dark else self._CARD_BORDER
+            self._frame.setStyleSheet(
+                f"QFrame {{ background: {bg}; border: 1px solid {border}; border-radius: 4px; }}"
+            )
             self._name_label.setStyleSheet(
                 "color: #f4f4f5;" if self._dark else "color: #111827;"
             )

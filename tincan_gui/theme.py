@@ -4,8 +4,13 @@ from __future__ import annotations
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
+FOCUS_STYLESHEET = (
+    "QWidget:focus { outline: 2px dashed #3b82f6; outline-offset: 2px; }"
+)
+
 DARK_STYLESHEET = (
-    "QMainWindow { background-color: #18181b; }"
+    FOCUS_STYLESHEET
+    + " QMainWindow { background-color: #18181b; }"
     " QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget"
     " { background-color: #18181b; }"
     " QListWidget { background-color: #27272a; color: #f4f4f5; border: none; }"
