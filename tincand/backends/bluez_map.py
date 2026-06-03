@@ -46,7 +46,7 @@ _TRANSIENT_ERRORS = {"org.bluez.obex.Error.Failed"}
 _TRANSFER_TIMEOUT = 15.0
 _RETRY_MAX = 3
 _RETRY_BACKOFF = 0.5
-_POLL_INTERVAL_SECONDS = 30
+_POLL_INTERVAL_SECONDS = 5
 
 
 class ConsentRequired(Exception):
@@ -81,8 +81,12 @@ def build_bmsg(to_number: str, body: str) -> str:
         "TEL:\r\n"
         "END:VCARD\r\n"
         "BEGIN:BENV\r\n"
+        # Recipient vCard MUST carry an N: property — iOS MAP-MSE accepts the
+        # OBEX upload but silently drops the bMessage (no SMS sent) when the
+        # vCard lacks N:. Proven against the delivering spike (map_send2.py).
         "BEGIN:VCARD\r\n"
         "VERSION:2.1\r\n"
+        f"N:;{to_number}\r\n"
         f"TEL:{to_number}\r\n"
         "END:VCARD\r\n"
         "BEGIN:BBODY\r\n"
