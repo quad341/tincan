@@ -43,7 +43,7 @@ class _WizardPage(QWizardPage):
         label.setWordWrap(True)
         return label
 
-    def _progress(self, step: int, total: int = 8, color: str = "#1d4ed8") -> QProgressBar:
+    def _progress(self, step: int, total: int = 8, color: str = "#0d9488") -> QProgressBar:
         bar = QProgressBar()
         bar.setMaximum(total)
         bar.setValue(step)
@@ -193,7 +193,7 @@ class MapConsentPage(_WizardPage):
         self.continue_button = QPushButton("Continue →")
         self.continue_button.setAccessibleName("Continue — confirm message access granted")
         self.continue_button.setStyleSheet(
-            "QPushButton { background-color: #1d4ed8; color: white; "
+            "QPushButton { background-color: #0d9488; color: white; "
             "font-size: 14pt; min-height: 44px; border-radius: 4px; }"
         )
         layout.addWidget(self.continue_button)
@@ -286,7 +286,7 @@ class FailurePage(_WizardPage):
         self.retry_button = QPushButton("Try again")
         self.retry_button.setAccessibleName("Try again — restart the setup wizard")
         self.retry_button.setStyleSheet(
-            "QPushButton { background-color: #1d4ed8; color: white; "
+            "QPushButton { background-color: #0d9488; color: white; "
             "font-size: 14pt; min-height: 44px; border-radius: 4px; }"
         )
         layout.addWidget(self.retry_button)

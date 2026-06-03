@@ -91,10 +91,10 @@ class ComposePanel(QWidget):
         self._send_btn = QPushButton("Send")
         self._send_btn.setFixedSize(64, 48)
         self._send_btn.setStyleSheet(
-            "QPushButton { background-color: #1d4ed8; color: #ffffff; "
+            "QPushButton { background-color: #0d9488; color: #ffffff; "
             "border-radius: 6px; font-size: 14px; font-weight: bold; }"
-            "QPushButton:disabled { background-color: #1d4ed8; opacity: 0.4; }"
-            "QPushButton:hover:!disabled { background-color: #1e40af; }"
+            "QPushButton:disabled { background-color: #0d9488; opacity: 0.4; }"
+            "QPushButton:hover:!disabled { background-color: #0f766e; }"
         )
         self._send_btn.setAccessibleName("Send SMS message")
         self._send_btn.clicked.connect(self._on_send)
@@ -144,9 +144,9 @@ class ComposePanel(QWidget):
         if enabled:
             self._input.setStyleSheet("")
             self._send_btn.setStyleSheet(
-                "QPushButton { background-color: #1d4ed8; color: #ffffff; "
+                "QPushButton { background-color: #0d9488; color: #ffffff; "
                 "border-radius: 6px; font-size: 14px; font-weight: bold; }"
-                "QPushButton:hover { background-color: #1e40af; }"
+                "QPushButton:hover { background-color: #0f766e; }"
             )
             self._input.setToolTip("")
             self._send_btn.setToolTip("")
@@ -154,7 +154,7 @@ class ComposePanel(QWidget):
         else:
             self._input.setStyleSheet("opacity: 0.4;")
             self._send_btn.setStyleSheet(
-                "QPushButton { background-color: #1d4ed8; color: #ffffff; "
+                "QPushButton { background-color: #0d9488; color: #ffffff; "
                 "border-radius: 6px; font-size: 14px; opacity: 0.4; }"
             )
             tooltip = f"Sending unavailable — {reason}" if reason else "Sending unavailable"

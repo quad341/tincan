@@ -46,7 +46,7 @@ class MessageBubble(QWidget):
             "margin_right": 80,
         },
         BubbleType.OUTBOUND: {
-            "bg": "#1d4ed8",
+            "bg": "#0d9488",
             "fg": "#ffffff",
             "align": Qt.AlignRight,
             "margin_left": 80,

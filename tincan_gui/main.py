@@ -37,13 +37,13 @@ _ASSETS = Path(__file__).parent / "assets"
 
 
 class TitleBar(QWidget):
-    """Title bar (h=48, navy #1e3a5f): wordmark + gear button + connection status chip."""
+    """Title bar (h=48, forest teal #0f4c3a): wordmark + gear button + connection status chip."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(48)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setStyleSheet("background-color: #1e3a5f;")
+        self.setStyleSheet("background-color: #0f4c3a;")
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
@@ -64,7 +64,7 @@ class TitleBar(QWidget):
         wm_font.setPointSize(22)
         wm_font.setBold(True)
         wordmark.setFont(wm_font)
-        wordmark.setStyleSheet("color: #ffffff;")
+        wordmark.setStyleSheet("color: #ccfbf1;")
         layout.addWidget(wordmark)
 
         layout.addStretch()
@@ -75,7 +75,7 @@ class TitleBar(QWidget):
         self._gear_btn.setToolTip("Settings")
         self._gear_btn.setAccessibleName("Settings")
         self._gear_btn.setStyleSheet(
-            "QToolButton { color: #ffffff; font-size: 16px; border: none;"
+            "QToolButton { color: #ccfbf1; font-size: 16px; border: none;"
             " background: transparent; }"
             " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
         )
