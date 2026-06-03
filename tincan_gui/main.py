@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self.resize(1024, 700)
         self.setMinimumSize(600, 400)
         self._current_phone: str = ""     # phone for the open conversation
-        self._connected_device: str = ""  # address of the connected BT device
+        self._connected_device: str = ""  # human-readable name or address of the connected BT device
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
@@ -236,7 +236,7 @@ class MainWindow(QMainWindow):
         if not status:
             return  # daemon not running — UI stays in default disconnected state
         if status.get("connected"):
-            addr = str(status.get("device_address") or "")
+            addr = str(status.get("device_name") or status.get("device_address") or "")
             self._title_bar.set_connected(addr)
             self._banner_a.hide()
             caps = status.get("capabilities") or {}
@@ -308,16 +308,18 @@ class MainWindow(QMainWindow):
         self._tray.reset_unread()
 
     def _on_daemon_connected(self, device_address: str) -> None:
-        self._connected_device = str(device_address)
-        self._title_bar.set_connected(device_address)
-        self._banner_a.hide()
         status = self._dbus_client.get_status()
         if status:
             caps = status.get("capabilities") or {}
+            name = str(status.get("device_name") or device_address)
         else:
             # Daemon just connected but GetStatus() is transiently unavailable;
             # assume all capabilities OK rather than showing degradation banners.
             caps = {"messages": True, "contacts": True, "ancs": True}
+            name = str(device_address)
+        self._connected_device = name
+        self._title_bar.set_connected(name)
+        self._banner_a.hide()
         self._apply_capabilities(caps)
         self._tray.set_connected(True)
         self._load_conversations()
