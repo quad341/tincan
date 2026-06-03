@@ -76,7 +76,7 @@ class TitleBar(QWidget):
         self._gear_btn.setToolTip("Settings")
         self._gear_btn.setAccessibleName("Settings")
         self._gear_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 16px; border: none;"
+            "QToolButton { color: #ccfbf1; font-size: 22px; border: none;"
             " background: transparent; }"
             " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
         )
