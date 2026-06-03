@@ -49,6 +49,7 @@ from tincan_gui.capability_banner import CapabilityBanner   ← new module
 """
 
 import pytest
+from unittest.mock import patch
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAccessible
 
@@ -98,15 +99,29 @@ class TestMetadataColorOnWidgets:
         qtbot.addWidget(item)
         assert item.timestamp_label_color().lower() != "#9ca3af"
 
-    def test_message_bubble_metadata_color_is_6b7280(self, qtbot):
+    def test_message_bubble_metadata_color_is_6b7280_light(self, qtbot):
         data = MessageData(BubbleType.INBOUND, "Hi", "Alice", "10:32")
-        bubble = MessageBubble(data)
+        with patch("tincan_gui.thread_view.is_dark_theme", return_value=False):
+            bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
-        assert bubble.metadata_label_color().lower() == "#6b7280"
+        assert bubble.metadata_label_color().lower() == "#6b7280", (
+            f"Expected #6b7280 (zinc-500) in light mode, got {bubble.metadata_label_color()!r}"
+        )
+
+    def test_message_bubble_metadata_color_is_a1a1aa_dark(self, qtbot):
+        # zinc-400 (#a1a1aa) has better contrast on the dark bubble bg (#3f3f46)
+        data = MessageData(BubbleType.INBOUND, "Hi", "Alice", "10:32")
+        with patch("tincan_gui.thread_view.is_dark_theme", return_value=True):
+            bubble = MessageBubble(data)
+        qtbot.addWidget(bubble)
+        assert bubble.metadata_label_color().lower() == "#a1a1aa", (
+            f"Expected #a1a1aa (zinc-400) in dark mode, got {bubble.metadata_label_color()!r}"
+        )
 
     def test_message_bubble_metadata_color_is_not_9ca3af(self, qtbot):
         data = MessageData(BubbleType.INBOUND, "Hi", "Alice", "10:32")
-        bubble = MessageBubble(data)
+        with patch("tincan_gui.thread_view.is_dark_theme", return_value=False):
+            bubble = MessageBubble(data)
         qtbot.addWidget(bubble)
         assert bubble.metadata_label_color().lower() != "#9ca3af"
 
