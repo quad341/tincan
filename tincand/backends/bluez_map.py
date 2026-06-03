@@ -225,7 +225,14 @@ class MapBackend(BackendInterface):
         parsed: list[dict] = []
 
         inbox_raw = self._retry(self._msg_access.ListMessages, "inbox", {})
+        _first_inbox = True
         for msg_path, props in inbox_raw.items():
+            if _first_inbox:
+                _log.debug(
+                    "MAP inbox props (first message) — raw keys: %s",
+                    {str(k): str(v) for k, v in props.items()},
+                )
+                _first_inbox = False
             body = (
                 self._fetch_full_body(str(msg_path))
                 or str(props.get("Subject", "")).strip()
@@ -233,11 +240,16 @@ class MapBackend(BackendInterface):
             )
             phone = str(props.get("SenderAddressing", props.get("Sender", "")))
             display_name = str(props.get("Sender", phone))
+            raw_dt = str(
+                props.get("Datetime", "")
+                or props.get("DateTime", "")
+                or props.get("Date", "")
+            )
             parsed.append({
                 "path": str(msg_path),
                 "sender": phone,
                 "display_name": display_name,
-                "timestamp": _parse_map_datetime(str(props.get("Datetime", ""))),
+                "timestamp": _parse_map_datetime(raw_dt),
                 "read": bool(props.get("Read", False)),
                 "body": body,
                 "direction": "inbound",
@@ -245,7 +257,14 @@ class MapBackend(BackendInterface):
 
         try:
             sent_raw = self._retry(self._msg_access.ListMessages, "sent", {})
+            _first_sent = True
             for msg_path, props in sent_raw.items():
+                if _first_sent:
+                    _log.debug(
+                        "MAP sent props (first message) — raw keys: %s",
+                        {str(k): str(v) for k, v in props.items()},
+                    )
+                    _first_sent = False
                 body = (
                     self._fetch_full_body(str(msg_path))
                     or str(props.get("Subject", "")).strip()
@@ -253,11 +272,16 @@ class MapBackend(BackendInterface):
                 )
                 phone = str(props.get("RecipientAddressing", props.get("Recipient", "")))
                 display_name = str(props.get("Recipient", phone))
+                raw_dt = str(
+                    props.get("Datetime", "")
+                    or props.get("DateTime", "")
+                    or props.get("Date", "")
+                )
                 parsed.append({
                     "path": str(msg_path),
                     "sender": phone,
                     "display_name": display_name,
-                    "timestamp": _parse_map_datetime(str(props.get("Datetime", ""))),
+                    "timestamp": _parse_map_datetime(raw_dt),
                     "read": True,
                     "body": body,
                     "direction": "outbound",
