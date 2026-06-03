@@ -95,6 +95,24 @@ def _parse_bmsg_body(bmsg: str) -> str:
     return match.group(1) if match else ""
 
 
+_NON_DIGIT_RE = re.compile(r"\D")
+
+
+def _norm_phone(s: str) -> str:
+    """Return a canonical conversation key from *s*.
+
+    Strips formatting characters and returns the last 10 digits when *s*
+    looks like a phone number (≥7 digits after stripping). Falls back to *s*
+    unchanged when the digit count is too low (e.g. a contact display name).
+    This merges threads that differ only by country-code prefix or formatting
+    ("+15555550123" == "5555550123" == "(555) 555-0123").
+    """
+    digits = _NON_DIGIT_RE.sub("", s)
+    if len(digits) >= 7:
+        return digits[-10:] if len(digits) > 10 else digits
+    return s
+
+
 def _parse_map_datetime(dt: str) -> str:
     """Convert MAP Datetime 'YYYYMMDDTHHMMSS[±HHMM]' to 'HH:MM' for GUI display.
 
@@ -461,7 +479,8 @@ class MapBackend(BackendInterface):
 
         by_sender: dict[str, list[dict]] = {}
         for msg in messages:
-            by_sender.setdefault(msg["sender"], []).append(msg)
+            key = _norm_phone(msg["sender"])
+            by_sender.setdefault(key, []).append(msg)
 
         for sender, msgs in by_sender.items():
             unread = sum(1 for m in msgs if not m["read"]) if notify else 0
