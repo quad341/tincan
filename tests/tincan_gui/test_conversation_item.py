@@ -14,6 +14,8 @@ Coverage:
 """
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from tincan_gui.conversation_list import ConversationData, ConversationItem, ConversationListWidget
 
 # ---------------------------------------------------------------------------
@@ -52,7 +54,8 @@ class TestApplyPreviewEmpty:
         assert item._preview_label.font().italic()
 
     def test_color_is_9ca3af(self, qtbot):
-        item = ConversationItem(_make_data(preview=""))
+        with patch("tincan_gui.conversation_list.is_dark_theme", return_value=False):
+            item = ConversationItem(_make_data(preview=""))
         qtbot.addWidget(item)
         assert "#9ca3af" in item._preview_label.styleSheet()
 

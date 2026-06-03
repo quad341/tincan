@@ -53,9 +53,10 @@ class TitleBar(QWidget):
         icon_label = QLabel()
         icon_label.setFixedSize(32, 32)
         icon_label.setAccessibleName("")
+        icon_label.setStyleSheet("border: none; background: transparent;")
         icon_label.setPixmap(
             QPixmap(str(_ASSETS / "tincan-icon.png")).scaled(
-                32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                32, 32, Qt.KeepAspectRatio, Qt.FastTransformation
             )
         )
         layout.addWidget(icon_label)

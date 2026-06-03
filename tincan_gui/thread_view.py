@@ -222,18 +222,23 @@ class ThreadHeader(QWidget):
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(2)
 
+        _dark = is_dark_theme()
         self._name_label = QLabel("")
         name_font = QFont()
         name_font.setPointSize(18)
         self._name_label.setFont(name_font)
-        self._name_label.setStyleSheet("color: #111827;")
+        self._name_label.setStyleSheet(
+            "color: #f4f4f5;" if _dark else "color: #111827;"
+        )
         layout.addWidget(self._name_label)
 
         self._phone_label = QLabel("")
         phone_font = QFont()
         phone_font.setPointSize(12)
         self._phone_label.setFont(phone_font)
-        self._phone_label.setStyleSheet("color: #6b7280;")
+        self._phone_label.setStyleSheet(
+            "color: #a1a1aa;" if _dark else "color: #6b7280;"
+        )
         layout.addWidget(self._phone_label)
 
     def update_contact(self, name: str, phone: str, message_type: str = "SMS") -> None:

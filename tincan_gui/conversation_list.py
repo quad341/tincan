@@ -53,8 +53,12 @@ class ConversationItem(QWidget):
     _SELECTED_BG = "#dbeafe"
     _SELECTED_BORDER = "#bfdbfe"
     _UNREAD_DOT_COLOR = "#1d4ed8"
-    _SELECTED_NAME_COLOR = "#1e40af"   # blue-800, 4.7:1 on #dbeafe — WCAG AA
-    _SELECTED_MUTED_COLOR = "#374151"  # gray-700, 5.4:1 on #dbeafe — WCAG AA
+    _SELECTED_NAME_COLOR = "#1e40af"        # blue-800, 4.7:1 on #dbeafe — WCAG AA
+    _SELECTED_MUTED_COLOR = "#374151"       # gray-700, 5.4:1 on #dbeafe — WCAG AA
+    _SELECTED_BG_DARK = "#1e3a5f"
+    _SELECTED_BORDER_DARK = "#1d4ed8"
+    _SELECTED_NAME_COLOR_DARK = "#93c5fd"   # blue-300 on #1e3a5f — WCAG AA
+    _SELECTED_MUTED_COLOR_DARK = "#a1a1aa"  # zinc-400 on #1e3a5f — WCAG AA
 
     def __init__(self, data: ConversationData, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -159,8 +163,14 @@ class ConversationItem(QWidget):
 
     def _apply_preview(self) -> None:
         raw = self._data.preview
-        preview_color = self._SELECTED_MUTED_COLOR if self._selected else "#6b7280"
-        no_preview_color = self._SELECTED_MUTED_COLOR if self._selected else "#9ca3af"
+        if self._selected:
+            preview_color = (
+                self._SELECTED_MUTED_COLOR_DARK if self._dark else self._SELECTED_MUTED_COLOR
+            )
+            no_preview_color = preview_color
+        else:
+            preview_color = "#a1a1aa" if self._dark else "#6b7280"
+            no_preview_color = "#71717a" if self._dark else "#9ca3af"
         if raw:
             direction = getattr(self._data, "preview_direction", "")
             if direction == "outbound":
@@ -217,12 +227,17 @@ class ConversationItem(QWidget):
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
         if selected:
-            self.setStyleSheet(
-                f"background-color: {self._SELECTED_BG}; "
-                f"border: 1px solid {self._SELECTED_BORDER};"
+            sel_bg = self._SELECTED_BG_DARK if self._dark else self._SELECTED_BG
+            sel_border = self._SELECTED_BORDER_DARK if self._dark else self._SELECTED_BORDER
+            sel_name = self._SELECTED_NAME_COLOR_DARK if self._dark else self._SELECTED_NAME_COLOR
+            sel_muted = (
+                self._SELECTED_MUTED_COLOR_DARK if self._dark else self._SELECTED_MUTED_COLOR
             )
-            self._name_label.setStyleSheet(f"color: {self._SELECTED_NAME_COLOR};")
-            self._ts_label.setStyleSheet(f"color: {self._SELECTED_MUTED_COLOR};")
+            self.setStyleSheet(
+                f"background-color: {sel_bg}; border: 1px solid {sel_border};"
+            )
+            self._name_label.setStyleSheet(f"color: {sel_name};")
+            self._ts_label.setStyleSheet(f"color: {sel_muted};")
             self._apply_preview()
         else:
             self.setStyleSheet("")
@@ -301,7 +316,7 @@ class ConversationListWidget(QWidget):
         conv_font.setPointSize(13)
         conversations_label.setFont(conv_font)
         conversations_label.setStyleSheet(
-            "color: #f4f4f5;" if _dark else "color: #374151;"
+            "color: #e4e4e7;" if _dark else "color: #374151;"
         )
         header_layout.addWidget(conversations_label, stretch=1)
 

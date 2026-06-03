@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui._settings import app_settings
+from tincan_gui.theme import is_dark_theme
 
 
 def _section_header(text: str) -> tuple[QLabel, QFrame]:
@@ -25,10 +26,14 @@ def _section_header(text: str) -> tuple[QLabel, QFrame]:
     label.setStyleSheet("color: #9ca3af;")
     label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
 
+    _dark = is_dark_theme()
     sep = QFrame()
     sep.setFrameShape(QFrame.Shape.HLine)
     sep.setFixedHeight(1)
-    sep.setStyleSheet("background-color: #e5e7eb; border: none;")
+    sep.setStyleSheet(
+        "background-color: #3f3f46; border: none;" if _dark
+        else "background-color: #e5e7eb; border: none;"
+    )
 
     return label, sep
 
@@ -61,12 +66,15 @@ class SettingsDialog(QDialog):
         layout.addWidget(notif_hdr)
         layout.addWidget(notif_sep)
 
+        _dark = is_dark_theme()
         self._desktop_cb = QCheckBox("Desktop notifications")
         self._desktop_cb.setAccessibleName("Desktop notifications")
         cb_font = QFont()
         cb_font.setPointSize(11)
         self._desktop_cb.setFont(cb_font)
-        self._desktop_cb.setStyleSheet("color: #111827;")
+        self._desktop_cb.setStyleSheet(
+            "color: #f4f4f5;" if _dark else "color: #111827;"
+        )
 
         settings = app_settings()
         enabled = settings.value("notifications/desktop_enabled", True, type=bool)
@@ -77,7 +85,9 @@ class SettingsDialog(QDialog):
         sl_font = QFont()
         sl_font.setPointSize(11)
         sublabel.setFont(sl_font)
-        sublabel.setStyleSheet("color: #6b7280;")
+        sublabel.setStyleSheet(
+            "color: #a1a1aa;" if _dark else "color: #6b7280;"
+        )
         sublabel.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         layout.addWidget(sublabel)
 
