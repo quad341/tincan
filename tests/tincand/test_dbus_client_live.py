@@ -432,6 +432,18 @@ try:
         lambda _conv: received.__setitem__('conversation', True)
     )
 
+    # MockBackend already emitted Connected at daemon startup — must
+    # Disconnect then Connect to guarantee a fresh Connected signal reaches
+    # our handler (same pattern as test_connected_signal_received_within_5s).
+    from PySide6.QtDBus import QDBusInterface
+    iface = QDBusInterface(
+        'im.tincan.Daemon', '/im/tincan', 'im.tincan.Daemon',
+        window._dbus_client._bus
+    )
+    iface.call('Disconnect')
+    time.sleep(0.05)
+    iface.call('Connect', '')
+
     deadline = time.time() + 10
     model_updated = False
     while time.time() < deadline:
