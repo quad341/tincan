@@ -265,6 +265,43 @@ class ANCSBackend(BackendInterface):
         )
         _log.info("ANCSBackend: started — listening for ANCS device connection")
 
+        # Probe for devices already connected before start() was called
+        # (daemon restart or phone auto-reconnect before daemon starts).
+        self._probe_connected_devices()
+
+    def _probe_connected_devices(self) -> None:
+        """Schedule _on_device_connected for any device already connected at start().
+
+        Uses idle_add so the callback runs after the GLib main loop starts.
+        The double-subscribe guard in _on_device_connected prevents duplicate subscriptions.
+        """
+        if self._bus is None:
+            return
+        try:
+            obj_mgr = dbus.Interface(
+                self._bus.get_object("org.bluez", "/"),
+                _OBJ_MANAGER_IFACE,
+            )
+            objects = obj_mgr.GetManagedObjects()
+        except dbus.exceptions.DBusException as exc:
+            _log.debug("ANCSBackend: _probe_connected_devices failed: %s", exc)
+            return
+
+        for obj_path, ifaces in objects.items():
+            dev = ifaces.get(_DEVICE_IFACE, {})
+            if not bool(dev.get("Connected", False)):
+                continue
+            if not bool(dev.get("ServicesResolved", False)):
+                continue
+            if self._device_addr:
+                if str(dev.get("Address", "")).upper() != self._device_addr.upper():
+                    continue
+            _log.info(
+                "ANCSBackend: already-connected device %s — scheduling subscribe",
+                obj_path,
+            )
+            GLib.idle_add(self._on_device_connected, str(obj_path))
+
     def _on_adv_registered(self) -> None:
         _log.info("ANCSBackend: SolicitUUIDs advertisement registered — soliciting ANCS")
 
@@ -330,12 +367,11 @@ class ANCSBackend(BackendInterface):
         if self._notif_src_path is not None:
             return
 
-        # Get device properties via Device1 interface
+        # Get device interfaces — properties read via DBus.Properties, not Device1
         try:
-            device_iface = dbus.Interface(
-                self._bus.get_object("org.bluez", device_path),
-                _DEVICE_IFACE,
-            )
+            dev_obj = self._bus.get_object("org.bluez", device_path)
+            device_iface = dbus.Interface(dev_obj, _DEVICE_IFACE)
+            props_iface = dbus.Interface(dev_obj, _PROPS_IFACE)
         except dbus.exceptions.DBusException as exc:
             _log.warning("ANCSBackend: cannot get device interface for %s: %s", device_path, exc)
             return
@@ -343,7 +379,7 @@ class ANCSBackend(BackendInterface):
         if self._device_addr:
             # Filter: only handle the configured target device (case-insensitive)
             try:
-                device_addr = str(device_iface.Get(_DEVICE_IFACE, "Address"))
+                device_addr = str(props_iface.Get(_DEVICE_IFACE, "Address"))
             except dbus.exceptions.DBusException as exc:
                 _log.warning("ANCSBackend: cannot read device address: %s", exc)
                 return
@@ -356,7 +392,7 @@ class ANCSBackend(BackendInterface):
 
         # Initiate LE bond (triggers iOS notification access prompt if not bonded)
         try:
-            bonded = bool(device_iface.Get(_DEVICE_IFACE, "Bonded"))
+            bonded = bool(props_iface.Get(_DEVICE_IFACE, "Bonded"))
             if not bonded:
                 _log.info("ANCSBackend: requesting LE bond with %s", device_path)
                 device_iface.Pair()
