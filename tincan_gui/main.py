@@ -145,6 +145,7 @@ class MainWindow(QMainWindow):
         self._tray = TrayIcon(self)
         self._wire_dbus()
         self._sync_daemon_state()
+        self._sync_compose_state()  # ensure button reflects initial state (no daemon)
 
     def _build(self) -> None:
         central = QWidget()
@@ -254,17 +255,25 @@ class MainWindow(QMainWindow):
             self._title_bar.set_disconnected()
 
     def _sync_compose_state(self) -> None:
-        """Gate the send button on messaging availability AND conversation selection.
+        """Gate compose on messaging availability AND conversation selection.
 
-        Only the send button is toggled; the input widget and the internal
-        _enabled flag are left as-is so keyboard navigation always works.
-        Full input+button disable is reserved for daemon disconnect via
-        set_compose_enabled(False, "not connected").
+        Three states:
+        - messaging OK + conversation selected → fully enabled
+        - messaging unavailable + conversation selected → fully disabled
+          (set_compose_enabled so Enter key also blocked; BLOCKER-2)
+        - no conversation selected (regardless of messaging) → button-only
+          disable so keyboard navigation stays accessible (a11y)
         """
         if self._messages_ok and self._current_phone:
             self._compose.set_compose_enabled(True)
+        elif not self._messages_ok and self._current_phone:
+            self._compose.set_compose_enabled(False, "messaging unavailable")
         else:
-            self._compose._send_btn.setEnabled(False)
+            btn = self._compose.send_button
+            btn.setEnabled(False)
+            reason = "no conversation selected"
+            btn.setToolTip(f"Sending unavailable — {reason}")
+            btn.setAccessibleName(f"Send unavailable — {reason}")
 
     def _apply_capabilities(self, caps: dict) -> None:
         # tincan-40c/tincan-5mze: all keys always present; default False (not
