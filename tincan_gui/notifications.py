@@ -8,7 +8,10 @@ the main window and selects the conversation on click.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Callable
+
+_ICON_PATH = str(Path(__file__).parent / "assets" / "tincan-icon.png")
 
 _log = logging.getLogger(__name__)
 
@@ -97,7 +100,7 @@ class DesktopNotifier:
             notif_id = iface.Notify(
                 "Tin Can",
                 dbus.UInt32(0),
-                "tincan",
+                _ICON_PATH,
                 "iPhone notifications unavailable",
                 "The Bluetooth LE link could not be re-armed after 3 attempts.",
                 dbus.Array(
@@ -159,7 +162,7 @@ class DesktopNotifier:
             notif_id = iface.Notify(
                 "tincan",
                 dbus.UInt32(0),
-                "tincan",
+                _ICON_PATH,
                 summary,
                 body,
                 dbus.Array(["default", "Open"], signature="s"),
