@@ -9,8 +9,8 @@ from PySide6.QtWidgets import QLabel, QWidget
 
 _AVATAR_SIZE = 40
 _PALETTE = [
-    "#0ea5e9", "#8b5cf6", "#ec4899", "#f59e0b",
-    "#10b981", "#ef4444", "#6366f1", "#14b8a6",
+    "#0369a1", "#7c3aed", "#db2777", "#b45309",
+    "#047857", "#dc2626", "#4f46e5", "#0f766e",
 ]
 
 
