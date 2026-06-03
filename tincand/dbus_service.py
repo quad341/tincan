@@ -60,6 +60,7 @@ class TincanService(dbus.service.Object):
         super().__init__(bus_name, OBJECT_PATH)
         self._connected = False
         self._device_address = ""
+        self._device_name = ""
         # tincan-40c: all capability keys always present, default False.
         # tincan-5mze: ancs_needs_repair added for FALLBACK state.
         self._capabilities: dict[str, bool] = {
@@ -103,6 +104,7 @@ class TincanService(dbus.service.Object):
             return
         self._connected = False
         self._device_address = ""
+        self._device_name = ""
         self._capabilities = {
             "messages": False,
             "contacts": False,
@@ -124,6 +126,7 @@ class TincanService(dbus.service.Object):
             {
                 "connected": dbus.Boolean(self._connected),
                 "device_address": dbus.String(self._device_address),
+                "device_name": dbus.String(self._device_name),
                 "capabilities": dbus.Dictionary(
                     {k: dbus.Boolean(v) for k, v in self._capabilities.items()},
                     signature="sb",
@@ -160,6 +163,10 @@ class TincanService(dbus.service.Object):
         self._capabilities[feature] = bool(available)
         _log.debug("Capability %s → %s", feature, available)
         self.CapabilityChanged(str(feature), bool(available))
+
+    def set_device_name(self, name: str) -> None:
+        """Set the human-readable Bluetooth device name (e.g. BlueZ Device1.Alias)."""
+        self._device_name = str(name)
 
     def register_backend(self, backend: object) -> None:
         """Wire the backend so SendMessage/GetMessage delegate to it."""

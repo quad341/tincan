@@ -32,6 +32,10 @@ _OBEX_CLIENT_PATH = "/org/bluez/obex"
 _MAP_ACCESS_IFACE = "org.bluez.obex.MessageAccess1"
 _TRANSFER_IFACE = "org.bluez.obex.Transfer1"
 _PROPS_IFACE = "org.freedesktop.DBus.Properties"
+_OBJ_MANAGER_IFACE = "org.freedesktop.DBus.ObjectManager"
+_BLUEZ_SERVICE = "org.bluez"
+_BLUEZ_ROOT = "/"
+_DEVICE_IFACE = "org.bluez.Device1"
 
 _FORBIDDEN_ERRORS = {
     "org.openobex.Error.Forbidden",
@@ -99,6 +103,7 @@ class MapBackend(BackendInterface):
         self._session_path: str | None = None
         self._msg_access: object | None = None
         self._poll_source_id: int | None = None
+        self._device_name: str = ""
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -141,8 +146,12 @@ class MapBackend(BackendInterface):
         )
         _log.info("MAP session established: %s → %s", device_addr, self._session_path)
 
+        self._device_name = self._resolve_device_name(device_addr)
+
         if self._service is not None:
             self._service.Connect(device_addr)  # type: ignore[attr-defined]
+            self._service.set_device_name(self._device_name)  # type: ignore[attr-defined]
+            self._service.set_capability("messages", True)  # type: ignore[attr-defined]
 
         self._poll_source_id = GLib.timeout_add_seconds(_POLL_INTERVAL_SECONDS, self._poll_tick)
 
@@ -166,24 +175,24 @@ class MapBackend(BackendInterface):
         finally:
             self._session_path = None
             self._msg_access = None
+            self._device_name = ""
             if self._service is not None:
+                self._service.set_capability("messages", False)  # type: ignore[attr-defined]
                 self._service.Disconnect()  # type: ignore[attr-defined]
 
     def poll_inbox(self) -> list:
-        """Poll MAP inbox and emit D-Bus signals for new messages.
+        """Poll MAP inbox + sent folders and emit D-Bus signals for messages.
 
-        Navigates to telecom/msg (iOS inbox path), calls UpdateInbox and
-        ListMessages, reads message body from the Text property (no GetMessage
-        transfer needed — ListMessages already includes body text on iOS).
+        Navigates to telecom/msg, then lists inbox (inbound) and sent (outbound).
+        Body is fetched via GetMessage transfer; Subject is used as fallback.
+        Conversation key is SenderAddressing (normalised phone number).
         """
         if self._msg_access is None:
             return []
 
         self._retry(self._msg_access.UpdateInbox)
 
-        # iOS inbox lives at telecom/msg/inbox.  Navigate there from whatever
-        # the current folder is: ascend twice (silently ignore errors at root),
-        # then descend to telecom/msg before listing.
+        # Navigate to telecom/msg from whatever the current folder is.
         for _ in range(2):
             try:
                 self._msg_access.SetFolder("")
@@ -192,24 +201,48 @@ class MapBackend(BackendInterface):
         self._retry(self._msg_access.SetFolder, "telecom")
         self._retry(self._msg_access.SetFolder, "msg")
 
-        messages_raw = self._retry(self._msg_access.ListMessages, "inbox", {})
-
         parsed: list[dict] = []
-        for msg_path, props in messages_raw.items():
+
+        inbox_raw = self._retry(self._msg_access.ListMessages, "inbox", {})
+        for msg_path, props in inbox_raw.items():
             body = (
-                str(props.get("Text", "")).strip()
+                self._fetch_full_body(str(msg_path))
                 or str(props.get("Subject", "")).strip()
                 or "New message"
             )
-            parsed.append(
-                {
+            phone = str(props.get("SenderAddressing", props.get("Sender", "")))
+            display_name = str(props.get("Sender", phone))
+            parsed.append({
+                "path": str(msg_path),
+                "sender": phone,
+                "display_name": display_name,
+                "timestamp": str(props.get("Datetime", "")),
+                "read": bool(props.get("Read", False)),
+                "body": body,
+                "direction": "inbound",
+            })
+
+        try:
+            sent_raw = self._retry(self._msg_access.ListMessages, "sent", {})
+            for msg_path, props in sent_raw.items():
+                body = (
+                    self._fetch_full_body(str(msg_path))
+                    or str(props.get("Subject", "")).strip()
+                    or ""
+                )
+                phone = str(props.get("RecipientAddressing", props.get("Recipient", "")))
+                display_name = str(props.get("Recipient", phone))
+                parsed.append({
                     "path": str(msg_path),
-                    "sender": str(props.get("Sender", "")),
+                    "sender": phone,
+                    "display_name": display_name,
                     "timestamp": str(props.get("Datetime", "")),
-                    "read": bool(props.get("Read", False)),
+                    "read": True,
                     "body": body,
-                }
-            )
+                    "direction": "outbound",
+                })
+        except dbus.exceptions.DBusException as exc:
+            _log.debug("sent folder unavailable: %s", exc)
 
         if parsed and self._service is not None:
             self._emit_messages(parsed)
@@ -252,6 +285,23 @@ class MapBackend(BackendInterface):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _resolve_device_name(self, device_addr: str) -> str:
+        """Return BlueZ Device1.Alias for device_addr, or device_addr if lookup fails."""
+        try:
+            sys_bus = dbus.SystemBus()
+            obj_mgr = dbus.Interface(
+                sys_bus.get_object(_BLUEZ_SERVICE, _BLUEZ_ROOT),
+                _OBJ_MANAGER_IFACE,
+            )
+            for _path, interfaces in obj_mgr.GetManagedObjects().items():
+                dev = interfaces.get(_DEVICE_IFACE, {})
+                if str(dev.get("Address", "")) == device_addr:
+                    alias = str(dev.get("Alias", ""))
+                    return alias if alias else device_addr
+        except dbus.exceptions.DBusException as exc:
+            _log.debug("Could not resolve device name for %s: %s", device_addr, exc)
+        return device_addr
 
     def _poll_tick(self) -> bool:
         """GLib timer callback — poll inbox and return SOURCE_CONTINUE."""
@@ -340,7 +390,7 @@ class MapBackend(BackendInterface):
         raise SendFailed(f"PushMessage transfer timed out: {transfer_path}")
 
     def _emit_messages(self, messages: list[dict]) -> None:
-        """Group *messages* by sender and drive TincanService callbacks."""
+        """Group *messages* by sender (phone number) and drive TincanService callbacks."""
         svc = self._service
         if svc is None:
             return
@@ -351,10 +401,11 @@ class MapBackend(BackendInterface):
 
         for sender, msgs in by_sender.items():
             unread = sum(1 for m in msgs if not m["read"])
-            latest = msgs[-1]
+            latest = max(msgs, key=lambda m: m["timestamp"])
+            display_name = latest.get("display_name", sender) or sender
             conv = Conversation(
                 id=sender,
-                display_name=sender,
+                display_name=display_name,
                 participants=[sender],
                 last_message_at=latest["timestamp"],
                 last_message_preview=latest["body"],
@@ -362,12 +413,12 @@ class MapBackend(BackendInterface):
             )
             svc.upsert_conversation(conv)  # type: ignore[attr-defined]
             for msg in msgs:
-                svc.on_message_received(
-                    {  # type: ignore[attr-defined]
+                svc.on_message_received(  # type: ignore[attr-defined]
+                    {
                         "conversation_id": sender,
                         "body": msg["body"],
                         "timestamp": msg["timestamp"],
-                        "direction": "inbound",
+                        "direction": msg["direction"],
                         "status": "unread" if not msg["read"] else "read",
                         "from": sender,
                     }

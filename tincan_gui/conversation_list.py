@@ -261,7 +261,6 @@ class ConversationListWidget(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self._items: list[ConversationItem] = []
         self._selected_index: int = -1
-        self._badge_dismissed = False
         self._pending_updates: dict[str, ConversationData] = {}
         self._update_timer = QTimer(self)
         self._update_timer.setSingleShot(True)
@@ -287,22 +286,6 @@ class ConversationListWidget(QWidget):
         conversations_label.setFont(conv_font)
         conversations_label.setStyleSheet("color: #374151;")
         header_layout.addWidget(conversations_label, stretch=1)
-
-        self._badge = QLabel("10 max")
-        badge_font = QFont()
-        badge_font.setPointSize(11)
-        self._badge.setFont(badge_font)
-        self._badge.setStyleSheet(
-            "color: #9ca3af; background: #f3f4f6; border-radius: 4px; padding: 0 4px;"
-        )
-        self._badge.setVisible(not self._badge_dismissed)
-        header_layout.addWidget(self._badge)
-
-        self._dismiss_btn = QLabel("×")
-        self._dismiss_btn.setStyleSheet("color: #9ca3af; padding: 0 4px; cursor: pointer;")
-        self._dismiss_btn.setVisible(not self._badge_dismissed)
-        self._dismiss_btn.mousePressEvent = lambda _: self._dismiss_badge()
-        header_layout.addWidget(self._dismiss_btn)
 
         layout.addWidget(header)
 
@@ -354,11 +337,6 @@ class ConversationListWidget(QWidget):
         )
         footer.setAlignment(Qt.AlignCenter)
         layout.addWidget(footer)
-
-    def _dismiss_badge(self) -> None:
-        self._badge_dismissed = True
-        self._badge.setVisible(False)
-        self._dismiss_btn.setVisible(False)
 
     def load_conversations(self, conversations: list[ConversationData]) -> None:
         while self._list_layout.count() > 1:
