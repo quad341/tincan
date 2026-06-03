@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.dbus_client import TincandClient
-from tincan_gui.theme import is_dark_theme
 from tincan_gui.degradation_banners import (
     ANCSRepairBanner,
     StateABanner,
@@ -32,6 +31,7 @@ from tincan_gui.degradation_banners import (
     StateCBanner,
 )
 from tincan_gui.notifications import DesktopNotifier
+from tincan_gui.theme import is_dark_theme
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
 
@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
         self.resize(1024, 700)
         self.setMinimumSize(600, 400)
         self._current_phone: str = ""     # phone for the open conversation
-        self._connected_device: str = ""  # human-readable name or address of the connected BT device
+        self._connected_device: str = ""  # human-readable name or address of connected BT device
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
@@ -200,6 +200,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self._thread_view, stretch=1)
 
         self._compose = ComposePanel()
+        self._compose.set_compose_enabled(False, "no conversation selected")
         right_layout.addWidget(self._compose)
 
         splitter.addWidget(right_pane)
@@ -362,6 +363,8 @@ class MainWindow(QMainWindow):
                 and str(message.get("status", "")) in ("unread", "new")):
             self._tray.increment_unread()
         conv_id = str(message.get("conversation_id", ""))
+        if conv_id and not self._current_phone:
+            return  # no conversation selected; don't append routed messages to thread view
         if self._current_phone and conv_id and conv_id != self._current_phone:
             return  # message is for a different conversation; notification already sent
         direction = str(message.get("direction", "inbound"))
@@ -515,6 +518,8 @@ class MainWindow(QMainWindow):
             conversations.append(data)
             self._conversations_by_id[data.id] = data
         self._conv_list.load_conversations(conversations)
+        if conversations and not self._current_phone:
+            self._conv_list.select_conversation(conversations[0].id)
 
     def _msg_dict_to_data(self, msg: dict) -> MessageData:
         direction = str(msg.get("direction", "inbound"))
