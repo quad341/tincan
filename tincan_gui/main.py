@@ -352,8 +352,8 @@ class MainWindow(QMainWindow):
 
     def _on_conversation_selected(self, conv_id: str) -> None:
         self.conversation_opened.emit(conv_id)
-        self._current_phone = conv_id
         conv_data = self._conversations_by_id.get(conv_id)
+        self._current_phone = conv_data.phone if conv_data else conv_id
         name = conv_data.name if conv_data else conv_id
         raw_msgs = self._dbus_client.get_messages(conv_id)
         messages = [self._msg_dict_to_data(m) for m in raw_msgs]
@@ -588,7 +588,7 @@ class MainWindow(QMainWindow):
             data = ConversationData(
                 id=str(c.get("id", "")),
                 name=str(c.get("display_name", c.get("id", ""))),
-                phone=str(c.get("id", "")),
+                phone=str(c.get("send_target", "") or c.get("id", "")),
                 preview=str(c.get("last_message_preview", "")),
                 timestamp=ts,
                 unread=unread > 0,
