@@ -123,6 +123,14 @@ class SettingsDialog(QDialog):
         s.sync()  # flush immediately so the notifier's next read sees the change
         self.notifications_toggled.emit(checked)
 
+    def checkbox_label_color(self) -> str:
+        """Return the hex color applied to the checkbox label (used by a11y tests)."""
+        style = self._desktop_cb.styleSheet()
+        for part in style.split(";"):
+            if "color" in part:
+                return part.split(":")[1].strip()
+        return "#111827"
+
     @property
     def desktop_notifications_enabled(self) -> bool:
         return self._desktop_cb.isChecked()

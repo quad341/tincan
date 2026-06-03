@@ -241,6 +241,22 @@ class ThreadHeader(QWidget):
         )
         layout.addWidget(self._phone_label)
 
+    def name_label_color(self) -> str:
+        """Return the hex color applied to the name label (used by a11y tests)."""
+        style = self._name_label.styleSheet()
+        for part in style.split(";"):
+            if "color" in part:
+                return part.split(":")[1].strip()
+        return "#111827"
+
+    def phone_label_color(self) -> str:
+        """Return the hex color applied to the phone label (used by a11y tests)."""
+        style = self._phone_label.styleSheet()
+        for part in style.split(";"):
+            if "color" in part:
+                return part.split(":")[1].strip()
+        return "#6b7280"
+
     def update_contact(self, name: str, phone: str, message_type: str = "SMS") -> None:
         self._name_label.setText(name)
         self._phone_label.setText(f"{phone}  ·  {message_type}")

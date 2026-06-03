@@ -263,6 +263,14 @@ class ConversationItem(QWidget):
         """Set PBAP contact photo (raw bytes). Called asynchronously when photo arrives."""
         self._avatar.set_photo(data)
 
+    def name_label_color(self) -> str:
+        """Return the hex color applied to the name label (used by a11y tests)."""
+        style = self._name_label.styleSheet()
+        for part in style.split(";"):
+            if "color" in part:
+                return part.split(":")[1].strip()
+        return "#111827"
+
     def timestamp_label_color(self) -> str:
         """Return the hex color applied to the timestamp label (used by a11y tests)."""
         style = self._ts_label.styleSheet()
