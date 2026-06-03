@@ -1,5 +1,5 @@
-"""Tests: AvatarWidget — PBAP photo display and accessibility.
-Bead: tincan-li9t
+"""Tests: AvatarWidget — PBAP photo display, accessibility, and palette contrast.
+Bead: tincan-li9t, tincan-tdk4
 
 Coverage:
   §2 Photo fetch: AvatarWidget updates to photo; accessible name set correctly
@@ -181,3 +181,38 @@ class TestInitialsHelper:
 
     def test_lowercase_names_uppercased(self):
         assert _initials("alice johnson") == "AJ"
+
+
+# ---------------------------------------------------------------------------
+# WCAG palette contrast — tincan-tdk4
+# ---------------------------------------------------------------------------
+
+def _relative_luminance(hex_color: str) -> float:
+    """WCAG 2.1 relative luminance for a hex color string."""
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+
+    def _linearize(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * _linearize(r) + 0.7152 * _linearize(g) + 0.0722 * _linearize(b)
+
+
+def _contrast(l1: float, l2: float) -> float:
+    """WCAG 2.1 contrast ratio between two relative luminance values."""
+    lighter, darker = (l1, l2) if l1 >= l2 else (l2, l1)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+_WHITE_LUMINANCE = _relative_luminance("#ffffff")
+
+
+def test_avatar_palette_wcag_aa():
+    """All 8 AvatarWidget palette colors meet WCAG AA (4.5:1) against white initials."""
+    from tincan_gui.avatar import _PALETTE
+    failures = []
+    for color in _PALETTE:
+        ratio = _contrast(_WHITE_LUMINANCE, _relative_luminance(color))
+        if ratio < 4.5:
+            failures.append(f"{color}: {ratio:.2f}:1 (need 4.5:1)")
+    assert not failures, "Palette colors fail WCAG AA contrast on white:\n" + "\n".join(failures)
