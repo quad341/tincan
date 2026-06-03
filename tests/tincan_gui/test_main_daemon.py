@@ -15,8 +15,20 @@ Coverage:
 """
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
+from PySide6.QtWidgets import QSystemTrayIcon
+
 from tincan_gui.main import MainWindow
 from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData, ThreadView
+
+
+@pytest.fixture(autouse=True)
+def _no_tray_show():
+    with patch.object(QSystemTrayIcon, "show"):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Helpers

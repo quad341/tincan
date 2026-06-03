@@ -14,10 +14,16 @@ from unittest.mock import patch
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QPushButton, QSystemTrayIcon
 
 from tincan_gui.degradation_banners import ANCSRepairBanner
 from tincan_gui.main import MainWindow
+
+
+@pytest.fixture(autouse=True)
+def _no_tray_show():
+    with patch.object(QSystemTrayIcon, "show"):
+        yield
 
 
 # ---------------------------------------------------------------------------

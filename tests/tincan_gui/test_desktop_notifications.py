@@ -18,12 +18,20 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QSystemTrayIcon
 
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.main import MainWindow
 from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.settings_dialog import SettingsDialog
+
+
+@pytest.fixture(autouse=True)
+def _no_tray_show():
+    with patch.object(QSystemTrayIcon, "show"):
+        yield
 
 
 # ---------------------------------------------------------------------------
