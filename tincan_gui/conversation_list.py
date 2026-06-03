@@ -79,12 +79,23 @@ class ConversationItem(QWidget):
 
     def _build(self) -> None:
         outer = QHBoxLayout(self)
-        outer.setContentsMargins(12, 0, 12, 0)
-        outer.setSpacing(8)
+        outer.setContentsMargins(6, 0, 6, 0)
+        outer.setSpacing(6)
+
+        # QFrame card wraps avatar + text columns
+        frame = QFrame()
+        frame.setStyleSheet(
+            "QFrame { background: #18181b; border: 1px solid #3f3f46; border-radius: 4px; }"
+            if self._dark else
+            "QFrame { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 4px; }"
+        )
+        frame_layout = QHBoxLayout(frame)
+        frame_layout.setContentsMargins(8, 8, 8, 8)
+        frame_layout.setSpacing(8)
 
         # Avatar (40×40 circle — initials until PBAP photo set)
         self._avatar = AvatarWidget(self._data.name)
-        outer.addWidget(self._avatar, alignment=Qt.AlignVCenter)
+        frame_layout.addWidget(self._avatar, alignment=Qt.AlignVCenter)
 
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
@@ -100,7 +111,7 @@ class ConversationItem(QWidget):
         self._name_label = QLabel(name)
         name_font = QFont()
         name_font.setPointSize(14)
-        name_font.setBold(True)
+        name_font.setBold(False)
         self._name_label.setFont(name_font)
         self._name_label.setStyleSheet(
             "color: #f4f4f5;" if self._dark else "color: #111827;"
@@ -125,7 +136,8 @@ class ConversationItem(QWidget):
         self._preview_label.setFont(prev_font)
         text_col.addWidget(self._preview_label)
 
-        outer.addLayout(text_col, stretch=1)
+        frame_layout.addLayout(text_col, stretch=1)
+        outer.addWidget(frame, stretch=1)
 
         # Unread indicator (right side): dot + optional badge (tincan-yq1)
         self._dot = QLabel()
@@ -252,6 +264,12 @@ class ConversationItem(QWidget):
                 "color: #a1a1aa;" if self._dark else "color: #6b7280;"
             )
             self._apply_preview()
+
+    def set_read(self) -> None:
+        """Clear unread state immediately when a conversation is opened."""
+        import dataclasses
+        self._data = dataclasses.replace(self._data, unread=False, unread_count=0)
+        self._apply_unread_style()
 
     def mousePressEvent(self, event) -> None:
         self.activated.emit(self._data.id)
@@ -476,6 +494,7 @@ class ConversationListWidget(QWidget):
         for i, item in enumerate(self._items):
             if item.conversation_id == conv_id:
                 self._select_index(i)
+                item.set_read()
                 self.conversation_selected.emit(conv_id)
                 self.focus_thread_requested.emit()
                 break
