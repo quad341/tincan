@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tincan_gui.theme import is_dark_theme
+
 _SMS_SINGLE_LIMIT = 160
 _SMS_MULTI_LIMIT = 153
 
@@ -53,9 +55,13 @@ class ComposePanel(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setObjectName("composePanel")
         self.setFixedHeight(100)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setStyleSheet("background: #ffffff; border-top: 1px solid #e5e7eb;")
+        if is_dark_theme():
+            self.setStyleSheet("background: #27272a; border-top: 1px solid #3f3f46;")
+        else:
+            self.setStyleSheet("background: #ffffff; border-top: 1px solid #e5e7eb;")
         self._enabled = True
         self._disable_reason = ""
         self._build()
@@ -89,6 +95,7 @@ class ComposePanel(QWidget):
         right_col.setSpacing(4)
 
         self._send_btn = QPushButton("Send")
+        self._send_btn.setObjectName("sendButton")
         self._send_btn.setFixedSize(64, 48)
         self._send_btn.setStyleSheet(
             "QPushButton { background-color: #0d9488; color: #ffffff; "

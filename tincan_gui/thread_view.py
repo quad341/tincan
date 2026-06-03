@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tincan_gui.theme import is_dark_theme
+
 
 class BubbleType(Enum):
     INBOUND = auto()
@@ -39,29 +41,29 @@ class MessageBubble(QWidget):
 
     _STYLES = {
         BubbleType.INBOUND: {
-            "bg": "#f3f4f6",
-            "fg": "#111827",
+            "bg": "#f3f4f6", "bg_dark": "#3f3f46",
+            "fg": "#111827", "fg_dark": "#f4f4f5",
             "align": Qt.AlignLeft,
             "margin_left": 20,
             "margin_right": 80,
         },
         BubbleType.OUTBOUND: {
-            "bg": "#0d9488",
-            "fg": "#ffffff",
+            "bg": "#0d9488", "bg_dark": "#0d9488",
+            "fg": "#ffffff", "fg_dark": "#ffffff",
             "align": Qt.AlignRight,
             "margin_left": 80,
             "margin_right": 20,
         },
         BubbleType.BODY_UNAVAILABLE: {
-            "bg": "#fef9c3",
-            "fg": "#92400e",
+            "bg": "#fef9c3", "bg_dark": "#3f3f46",
+            "fg": "#92400e", "fg_dark": "#fbbf24",
             "align": Qt.AlignLeft,
             "margin_left": 20,
             "margin_right": 80,
         },
         BubbleType.GROUP_UNKNOWN_SENDER: {
-            "bg": "#f3f4f6",
-            "fg": "#111827",
+            "bg": "#f3f4f6", "bg_dark": "#3f3f46",
+            "fg": "#111827", "fg_dark": "#f4f4f5",
             "align": Qt.AlignLeft,
             "margin_left": 20,
             "margin_right": 80,
@@ -76,6 +78,9 @@ class MessageBubble(QWidget):
 
     def _build(self) -> None:
         style = self._STYLES[self._data.bubble_type]
+        dark = is_dark_theme()
+        bg = style["bg_dark"] if dark else style["bg"]
+        fg = style["fg_dark"] if dark else style["fg"]
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 4, 0, 4)
@@ -94,7 +99,7 @@ class MessageBubble(QWidget):
             warn_font = QFont()
             warn_font.setPointSize(11)
             warn.setFont(warn_font)
-            warn.setStyleSheet("color: #92400e;")
+            warn.setStyleSheet("color: #fbbf24;" if dark else "color: #92400e;")
             warn.setWordWrap(True)
             bubble_layout.addWidget(warn)
 
@@ -109,7 +114,7 @@ class MessageBubble(QWidget):
         body_font.setPointSize(13)
         body_label.setFont(body_font)
         body_label.setWordWrap(True)
-        body_label.setStyleSheet(f"color: {style['fg']};")
+        body_label.setStyleSheet(f"color: {fg};")
         bubble_layout.addWidget(body_label)
 
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
@@ -117,7 +122,7 @@ class MessageBubble(QWidget):
             sub_font = QFont()
             sub_font.setPointSize(11)
             sub.setFont(sub_font)
-            sub.setStyleSheet("color: #92400e;")
+            sub.setStyleSheet("color: #fbbf24;" if dark else "color: #92400e;")
             sub.setWordWrap(True)
             bubble_layout.addWidget(sub)
 
@@ -139,7 +144,7 @@ class MessageBubble(QWidget):
         bubble_layout.addWidget(meta)
 
         bubble.setStyleSheet(
-            f"background-color: {style['bg']}; border-radius: 12px;"
+            f"background-color: {bg}; border-radius: 12px;"
         )
 
         ml = style["margin_left"]
@@ -196,7 +201,10 @@ class ThreadHeader(QWidget):
         super().__init__(parent)
         self.setFixedHeight(56)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setStyleSheet("background: #ffffff; border-bottom: 1px solid #e5e7eb;")
+        if is_dark_theme():
+            self.setStyleSheet("background: #27272a; border-bottom: 1px solid #3f3f46;")
+        else:
+            self.setStyleSheet("background: #ffffff; border-bottom: 1px solid #e5e7eb;")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(2)

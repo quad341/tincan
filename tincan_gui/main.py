@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.dbus_client import TincandClient
+from tincan_gui.theme import is_dark_theme
 from tincan_gui.degradation_banners import (
     ANCSRepairBanner,
     StateABanner,
@@ -177,7 +178,10 @@ class MainWindow(QMainWindow):
         # Splitter: left sidebar + right content
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
-        splitter.setStyleSheet("QSplitter::handle { background: #e5e7eb; }")
+        splitter.setStyleSheet(
+            "QSplitter::handle { background: #3f3f46; }" if is_dark_theme()
+            else "QSplitter::handle { background: #e5e7eb; }"
+        )
 
         # Left: conversation list
         self._conv_list = ConversationListWidget()
