@@ -611,14 +611,40 @@ class MapBackend(BackendInterface):
                 phone_by_display[latest_dn.lower()] = key
                 self._name_to_phone[latest_dn.lower()] = key
 
+        # Re-key name-keyed groups (SenderAddressing absent) to canonical phone
+        # where resolvable, so sent replies land in the same thread as received.
+        # Resolution order: current-batch phone_by_display → persistent
+        # _name_to_phone → service contact store (PBAP-populated).
+        canonical: dict[str, list[dict]] = {}
+        for key, msgs in by_sender.items():
+            if len(_NON_DIGIT_RE.sub("", key)) >= 7:
+                canonical.setdefault(key, []).extend(msgs)
+            else:
+                dn = (max(msgs, key=lambda m: m["timestamp"] or "")
+                      .get("display_name", key) or key)
+                dn_lower = dn.lower()
+                cs = getattr(svc, "_contact_store", None)
+                phone = (
+                    phone_by_display.get(dn_lower)
+                    or self._name_to_phone.get(dn_lower)
+                    or (cs.lookup_by_name(dn) if cs is not None else None)
+                )
+                canonical_key = phone if phone else key
+                canonical.setdefault(canonical_key, []).extend(msgs)
+                # Remove stale name-keyed conv so it does not duplicate the thread.
+                if phone and phone != key:
+                    stale_convs = getattr(svc, "_conversations", {})
+                    stale_convs.pop(key, None)
+        by_sender = canonical
+
         for sender, msgs in by_sender.items():
             unread = sum(1 for m in msgs if not m["read"]) if notify else 0
             latest = max(msgs, key=lambda m: m["timestamp"] or "")
             display_name = latest.get("display_name", sender) or sender
             is_phone_key = len(_NON_DIGIT_RE.sub("", sender)) >= 7
-            dn_lower = display_name.lower()
             send_target = sender if is_phone_key else (
-                phone_by_display.get(dn_lower) or self._name_to_phone.get(dn_lower, "")
+                phone_by_display.get(display_name.lower())
+                or self._name_to_phone.get(display_name.lower(), "")
             )
             conv = Conversation(
                 id=sender,
