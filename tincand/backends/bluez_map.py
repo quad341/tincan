@@ -23,6 +23,7 @@ from gi.repository import GLib
 
 from tincand.backends.base import BackendInterface
 from tincand.dbus_service import Conversation
+from tincand.message_store import MessageStore
 
 _log = logging.getLogger(__name__)
 
@@ -169,7 +170,7 @@ def _parse_map_datetime(dt: str) -> str:
 class MapBackend(BackendInterface):
     """MAP backend using obexd org.bluez.obex.Client1."""
 
-    def __init__(self) -> None:
+    def __init__(self, message_store: MessageStore | None = None) -> None:
         self._service: object | None = None
         self._session_path: str | None = None
         self._msg_access: object | None = None
@@ -177,7 +178,8 @@ class MapBackend(BackendInterface):
         self._reconnect_source_id: int | None = None
         self._device_addr: str = ""
         self._device_name: str = ""
-        self._seen_handles: set[str] = set()  # handles seen on initial poll — skip notifications
+        self._store: MessageStore | None = message_store  # SQLite-backed seen-handle cache
+        self._seen_handles: set[str] = set()  # in-memory fallback when _store is None
         self._initial_poll_done: bool = False
         self._failed_handles: set[str] = set()  # handles where GetMessage raised; skip on retry
         # display_name.lower() → phone; populated from phone-keyed messages, persists across polls
@@ -383,17 +385,32 @@ class MapBackend(BackendInterface):
 
         if parsed and self._service is not None:
             if not self._initial_poll_done:
-                # Seed the seen-handles baseline so historical messages don't replay
-                # as notifications or inflate the unread badge.
-                for msg in parsed:
-                    self._seen_handles.add(msg["path"])
+                # First poll of this daemon session.
+                if self._store is not None:
+                    # SQLite store: check for history before adding this batch.
+                    store_had_history = not self._store.is_empty()
+                    new_msgs = self._store.filter_new(parsed)
+                    self._store.add_messages(parsed)
+                    if new_msgs and store_had_history:
+                        # Daemon restarted with prior history — only truly new msgs notify.
+                        self._emit_messages(new_msgs, notify=True)
+                    else:
+                        # First ever run (empty store) → seed conversations silently.
+                        self._emit_messages(parsed, notify=False)
+                else:
+                    # In-memory fallback: seed all as seen, no notification.
+                    for msg in parsed:
+                        self._seen_handles.add(msg["path"])
+                    self._emit_messages(parsed, notify=False)
                 self._initial_poll_done = True
-                # Still upsert conversations for list display, but skip signals.
-                self._emit_messages(parsed, notify=False)
             else:
-                new_msgs = [m for m in parsed if m["path"] not in self._seen_handles]
-                for msg in new_msgs:
-                    self._seen_handles.add(msg["path"])
+                if self._store is not None:
+                    new_msgs = self._store.filter_new(parsed)
+                    self._store.add_messages(new_msgs)
+                else:
+                    new_msgs = [m for m in parsed if m["path"] not in self._seen_handles]
+                    for msg in new_msgs:
+                        self._seen_handles.add(msg["path"])
                 if new_msgs:
                     self._emit_messages(new_msgs, notify=True)
 
