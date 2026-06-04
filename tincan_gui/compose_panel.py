@@ -22,6 +22,25 @@ from tincan_gui.theme import is_dark_theme
 from tincan_gui.thread_view import _emoji_font_families
 
 _SMS_SINGLE_LIMIT = 160
+_SMS_MULTI_LIMIT = 153
+_SMS_UCS2_SINGLE = 70
+_SMS_UCS2_MULTI = 67
+
+# GSM 7-bit charset: basic (1 septet) plus extended (2 septets via ESC prefix).
+# Characters outside this set force UCS-2 encoding with 70/67-char limits.
+_GSM7_CHARSET = frozenset(
+    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ"
+    " !\"#¤%&'()*+,-./0123456789:;<=>?"
+    "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿"
+    "abcdefghijklmnopqrstuvwxyzäöñüà"
+    "\x0c€^{}[~]\\|"  # extended table via ESC
+)
+
+
+def _is_ucs2(text: str) -> bool:
+    """Return True if *text* contains characters outside the GSM-7 charset."""
+    return any(c not in _GSM7_CHARSET for c in text)
+
 
 _COMPOSE_HINTS: dict[str, str] = {
     "phone number unavailable for this thread": "Can't reply — no number for this contact",
@@ -46,18 +65,23 @@ def _error_bar_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
 
 
 QAccessible.installFactory(_error_bar_factory)
-_SMS_MULTI_LIMIT = 153
 
 
 def _sms_segments(text: str) -> tuple[int, int, int]:
-    """Return (total_chars, segment_count, chars_in_last_segment)."""
+    """Return (total_chars, segment_count, chars_in_last_segment).
+
+    Uses UCS-2 limits (70/67) when the text requires UCS-2 encoding.
+    """
     n = len(text)
     if n == 0:
         return 0, 0, 0
-    if n <= _SMS_SINGLE_LIMIT:
+    ucs2 = _is_ucs2(text)
+    single = _SMS_UCS2_SINGLE if ucs2 else _SMS_SINGLE_LIMIT
+    multi = _SMS_UCS2_MULTI if ucs2 else _SMS_MULTI_LIMIT
+    if n <= single:
         return n, 1, n
-    parts = math.ceil(n / _SMS_MULTI_LIMIT)
-    chars_in_last = n - (parts - 1) * _SMS_MULTI_LIMIT
+    parts = math.ceil(n / multi)
+    chars_in_last = n - (parts - 1) * multi
     return n, parts, chars_in_last
 
 
@@ -207,11 +231,14 @@ class ComposePanel(QWidget):
     def _on_text_changed(self) -> None:
         text = self._input.toPlainText()
         total, parts, last = _sms_segments(text)
+        ucs2 = _is_ucs2(text)
+        single_limit = _SMS_UCS2_SINGLE if ucs2 else _SMS_SINGLE_LIMIT
+        multi_limit = _SMS_UCS2_MULTI if ucs2 else _SMS_MULTI_LIMIT
         if parts <= 1:
-            self._char_counter.setText(f"{total}/{_SMS_SINGLE_LIMIT}")
+            self._char_counter.setText(f"{total}/{single_limit}")
             self._char_counter.setStyleSheet("color: #9ca3af;")
         else:
-            self._char_counter.setText(f"{parts} seg · {last}/{_SMS_MULTI_LIMIT}")
+            self._char_counter.setText(f"{parts} seg · {last}/{multi_limit}")
             self._char_counter.setStyleSheet("color: #d97706;")
 
     def _on_send(self) -> None:
