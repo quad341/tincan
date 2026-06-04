@@ -173,6 +173,7 @@ class MainWindow(QMainWindow):
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
+        self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP inbound echo of self-sends
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
@@ -417,6 +418,7 @@ class MainWindow(QMainWindow):
         self._connected_device = ""
         self._messages_ok = False
         self._sent_bodies.clear()
+        self._self_echo_guard.clear()
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
@@ -463,6 +465,11 @@ class MainWindow(QMainWindow):
         # Suppress MAP-poll duplicates (poll re-emits the sent message from 'sent'
         # folder after _pending_sends is cleared; _sent_bodies persists longer).
         if direction == "outbound" and body in self._sent_bodies.get(conv_id, set()):
+            return
+        # Suppress MAP inbound echo of a self-sent message: iOS MAP delivers messages
+        # sent to yourself back to the inbox with direction="inbound".
+        if direction == "inbound" and (conv_id, body) in self._self_echo_guard:
+            self._self_echo_guard.discard((conv_id, body))
             return
         sender = str(message.get("sender", "") or message.get("from", ""))
         timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM
@@ -563,6 +570,9 @@ class MainWindow(QMainWindow):
         ts = datetime.now().strftime("%H:%M")
         self._thread_view.append_message(MessageData(BubbleType.OUTBOUND, text, "", ts))
         self._pending_sends.add((phone, text))
+        # Guard self-conversations: MAP re-delivers self-sent messages to inbox as inbound.
+        self._self_echo_guard.add((phone, text))
+        QTimer.singleShot(10000, lambda: self._self_echo_guard.discard((phone, text)))
         message_id = self._dbus_client.send_message(phone, text)
         # Defer cleanup so daemon's MessageReceived echo arrives first and is suppressed.
         QTimer.singleShot(0, lambda: self._pending_sends.discard((phone, text)))
