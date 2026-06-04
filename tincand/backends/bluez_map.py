@@ -471,6 +471,22 @@ class MapBackend(BackendInterface):
             _log.warning("poll_inbox error: %s", exc)
         return GLib.SOURCE_CONTINUE
 
+    def schedule_reconnect(self) -> None:
+        """Schedule a reconnect attempt without requiring an existing session.
+
+        Called when the initial connect() fails so the daemon can keep running
+        and retry once the target device is available, rather than crashing.
+        """
+        if self._device_addr and not self._reconnect_source_id:
+            _log.info(
+                "Scheduling MAP reconnect to %s in %ds",
+                self._device_addr,
+                _RECONNECT_INTERVAL_SECONDS,
+            )
+            self._reconnect_source_id = GLib.timeout_add_seconds(
+                _RECONNECT_INTERVAL_SECONDS, self._reconnect_tick
+            )
+
     def _handle_session_dead(self) -> None:
         """Tear down a dead OBEX session and schedule reconnect attempts."""
         # Nullify poll ID before disconnect() so it skips the source_remove call —

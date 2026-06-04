@@ -121,7 +121,18 @@ def main() -> None:
     device = args.device or os.environ.get("TINCAN_DEVICE", "")
     backend_name = args.backend or os.environ.get("TINCAN_BACKEND", "")
     _log.info("tincand starting with backend=%s device=%s", backend_name, device)
-    backend.connect(device)
+    try:
+        backend.connect(device)
+    except Exception as exc:
+        _log.warning(
+            "tincand: initial connection to %s failed (%s) — "
+            "daemon running, will retry every %ds",
+            device,
+            exc,
+            10,
+        )
+        if hasattr(backend, "schedule_reconnect"):
+            backend.schedule_reconnect()
 
     if backend_name == "map" and device:
         from tincand.backends.pbap import PBAPContactSync
