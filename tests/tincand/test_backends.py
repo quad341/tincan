@@ -1,5 +1,5 @@
 """Tests: MockBackend and MapBackend unit tests.
-Bead: tincan-spa, tincan-44wr
+Bead: tincan-spa, tincan-44wr, tincan-kf1k
 
 Coverage:
   §1 MockBackend.connect() — loads canned conversations, calls service.Connect(), requires service
@@ -11,6 +11,12 @@ Coverage:
   §10 MapBackend.connect() — set_capability('messages', True) and set_device_name called on service
   §11 MapBackend.poll_inbox — direction='inbound' for inbox, 'outbound' for sent
   §12 MapBackend.poll_inbox — sent folder DBusException swallowed; inbox messages still returned
+  §14 MapBackend — dead-session detection + reconnect (tincan-kf1k)
+     _poll_tick: UnknownObject → _handle_session_dead() + SOURCE_REMOVE; other exceptions → SOURCE_CONTINUE
+     _handle_session_dead: svc.Disconnect() called; poll timer not double-removed; reconnect timer scheduled
+     _reconnect_tick: success → connect() + SOURCE_REMOVE; failure → SOURCE_CONTINUE; empty addr → SOURCE_REMOVE
+     connect(): _device_addr stored; pending reconnect timer cancelled
+     disconnect(): reconnect timer cancelled
 
 No hardware or real D-Bus — all D-Bus objects mocked.
 Run with: python -m pytest tests/tincand/test_backends.py -v
@@ -709,3 +715,286 @@ class TestMapBackendPollInboxSentFolderException:
         mock_access.ListMessages.side_effect = _list
         result = backend.poll_inbox()
         assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# §14 MapBackend — dead-session detection + reconnect (tincan-kf1k)
+# ---------------------------------------------------------------------------
+
+_RECONNECT_INTERVAL = 10  # must match _RECONNECT_INTERVAL_SECONDS in bluez_map.py
+
+
+def _unknown_object_exc():
+    """Dead MAP session: org.freedesktop.DBus.Error.UnknownObject."""
+    return dbus.exceptions.DBusException(name="org.freedesktop.DBus.Error.UnknownObject")
+
+
+def _unknown_method_exc():
+    """BlueZ API gap (NOT dead session): org.freedesktop.DBus.Error.UnknownMethod."""
+    return dbus.exceptions.DBusException(name="org.freedesktop.DBus.Error.UnknownMethod")
+
+
+def _make_backend_with_update_inbox_exc(exc):
+    """MapBackend with _msg_access wired to raise *exc* on UpdateInbox."""
+    backend = MapBackend()
+    mock_access = MagicMock(name="MessageAccess1")
+    mock_access.UpdateInbox.side_effect = exc
+    backend._msg_access = mock_access
+    return backend
+
+
+class TestMapBackendPollTickDeadSession:
+    """_poll_tick: UnknownObject → recovery; other exceptions → SOURCE_CONTINUE."""
+
+    def _run_poll_tick(self, exc, device_addr="AA:BB:CC:DD:EE:FF"):
+        """Run _poll_tick() with UpdateInbox raising *exc*; return (result, mock_glib, svc)."""
+        backend = _make_backend_with_update_inbox_exc(exc)
+        backend._device_addr = device_addr
+        backend._session_path = "/org/obex/session1"
+        svc = _make_service()
+        backend.register_service(svc)
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib, \
+             patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface"):
+            mock_glib.SOURCE_REMOVE = False
+            mock_glib.SOURCE_CONTINUE = True
+            mock_glib.timeout_add_seconds.return_value = 77
+            result = backend._poll_tick()
+
+        return result, mock_glib, svc
+
+    def test_unknown_object_returns_source_remove(self):
+        result, _, _ = self._run_poll_tick(_unknown_object_exc())
+        assert result is False
+
+    def test_unknown_object_calls_service_disconnect(self):
+        _, _, svc = self._run_poll_tick(_unknown_object_exc())
+        svc.Disconnect.assert_called_once()
+
+    def test_unknown_object_schedules_reconnect_timer(self):
+        _, mock_glib, _ = self._run_poll_tick(_unknown_object_exc())
+        mock_glib.timeout_add_seconds.assert_called_once()
+
+    def test_unknown_object_reconnect_timer_uses_reconnect_interval(self):
+        _, mock_glib, _ = self._run_poll_tick(_unknown_object_exc())
+        interval = mock_glib.timeout_add_seconds.call_args[0][0]
+        assert interval == _RECONNECT_INTERVAL
+
+    def test_non_dead_dbus_exc_returns_source_continue(self):
+        result, _, _ = self._run_poll_tick(_unknown_method_exc())
+        assert result is True
+
+    def test_non_dead_dbus_exc_does_not_schedule_reconnect(self):
+        _, mock_glib, _ = self._run_poll_tick(_unknown_method_exc())
+        mock_glib.timeout_add_seconds.assert_not_called()
+
+    def test_non_dead_dbus_exc_does_not_call_service_disconnect(self):
+        _, _, svc = self._run_poll_tick(_unknown_method_exc())
+        svc.Disconnect.assert_not_called()
+
+    def test_generic_exception_returns_source_continue(self):
+        backend = _make_backend_with_update_inbox_exc(RuntimeError("boom"))
+        backend._device_addr = "AA:BB:CC:DD:EE:FF"
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            mock_glib.SOURCE_CONTINUE = True
+            result = backend._poll_tick()
+
+        assert result is True
+
+    def test_generic_exception_does_not_schedule_reconnect(self):
+        backend = _make_backend_with_update_inbox_exc(RuntimeError("boom"))
+        backend._device_addr = "AA:BB:CC:DD:EE:FF"
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            mock_glib.SOURCE_CONTINUE = True
+            backend._poll_tick()
+
+        mock_glib.timeout_add_seconds.assert_not_called()
+
+
+class TestMapBackendHandleSessionDead:
+    """_handle_session_dead: teardown + GUI disconnect + reconnect timer scheduling."""
+
+    def _run_handle_session_dead(self, device_addr="AA:BB:CC:DD:EE:FF"):
+        """Invoke _handle_session_dead with pre-set state; return (backend, mock_glib, svc)."""
+        backend = MapBackend()
+        backend._device_addr = device_addr
+        backend._session_path = "/org/obex/session1"
+        backend._poll_source_id = 42  # non-None: verify NOT double-removed
+        svc = _make_service()
+        backend.register_service(svc)
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib, \
+             patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface"):
+            mock_glib.timeout_add_seconds.return_value = 77
+            backend._handle_session_dead()
+
+        return backend, mock_glib, svc
+
+    def test_service_disconnect_called(self):
+        _, _, svc = self._run_handle_session_dead()
+        svc.Disconnect.assert_called_once()
+
+    def test_poll_source_id_not_passed_to_source_remove(self):
+        # _poll_source_id is set to None BEFORE disconnect() runs, so GLib.source_remove
+        # is never called with the poll timer ID (GLib removes it by SOURCE_REMOVE return).
+        _, mock_glib, _ = self._run_handle_session_dead()
+        removed_ids = [c[0][0] for c in mock_glib.source_remove.call_args_list]
+        assert 42 not in removed_ids
+
+    def test_reconnect_timer_scheduled_with_correct_interval(self):
+        _, mock_glib, _ = self._run_handle_session_dead()
+        mock_glib.timeout_add_seconds.assert_called_once()
+        assert mock_glib.timeout_add_seconds.call_args[0][0] == _RECONNECT_INTERVAL
+
+    def test_reconnect_timer_callback_is_reconnect_tick(self):
+        backend, mock_glib, _ = self._run_handle_session_dead()
+        cb = mock_glib.timeout_add_seconds.call_args[0][1]
+        assert cb == backend._reconnect_tick
+
+    def test_reconnect_timer_stored_in_reconnect_source_id(self):
+        backend, _, _ = self._run_handle_session_dead()
+        assert backend._reconnect_source_id == 77
+
+    def test_no_reconnect_timer_when_device_addr_empty(self):
+        _, mock_glib, _ = self._run_handle_session_dead(device_addr="")
+        mock_glib.timeout_add_seconds.assert_not_called()
+
+
+class TestMapBackendReconnectTick:
+    """_reconnect_tick: retries connect(); SOURCE_REMOVE on success, SOURCE_CONTINUE on failure."""
+
+    def test_success_calls_connect_with_device_addr(self):
+        backend = MapBackend()
+        backend._device_addr = "AA:BB:CC:DD:EE:FF"
+        backend.connect = MagicMock()
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            mock_glib.SOURCE_REMOVE = False
+            backend._reconnect_tick()
+
+        backend.connect.assert_called_once_with("AA:BB:CC:DD:EE:FF")
+
+    def test_success_returns_source_remove(self):
+        backend = MapBackend()
+        backend._device_addr = "AA:BB:CC:DD:EE:FF"
+        backend.connect = MagicMock()
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            mock_glib.SOURCE_REMOVE = False
+            result = backend._reconnect_tick()
+
+        assert result is False
+
+    def test_failure_returns_source_continue(self):
+        backend = MapBackend()
+        backend._device_addr = "AA:BB:CC:DD:EE:FF"
+        backend.connect = MagicMock(side_effect=Exception("BT unavailable"))
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            mock_glib.SOURCE_CONTINUE = True
+            result = backend._reconnect_tick()
+
+        assert result is True
+
+    def test_failure_does_not_clear_reconnect_source_id(self):
+        # SOURCE_CONTINUE means the timer keeps running; _reconnect_source_id stays set.
+        backend = MapBackend()
+        backend._device_addr = "AA:BB:CC:DD:EE:FF"
+        backend._reconnect_source_id = 55
+        backend.connect = MagicMock(side_effect=Exception("BT unavailable"))
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            mock_glib.SOURCE_CONTINUE = True
+            backend._reconnect_tick()
+
+        assert backend._reconnect_source_id == 55
+
+    def test_empty_device_addr_returns_source_remove(self):
+        backend = MapBackend()
+        backend._device_addr = ""
+        backend.connect = MagicMock()
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            mock_glib.SOURCE_REMOVE = False
+            result = backend._reconnect_tick()
+
+        assert result is False
+
+    def test_empty_device_addr_does_not_call_connect(self):
+        backend = MapBackend()
+        backend._device_addr = ""
+        backend.connect = MagicMock()
+
+        with patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            mock_glib.SOURCE_REMOVE = False
+            backend._reconnect_tick()
+
+        backend.connect.assert_not_called()
+
+
+class TestMapBackendConnectDisconnectTimers:
+    """connect() stores _device_addr and cancels pending reconnect; disconnect() cancels reconnect."""
+
+    def test_connect_stores_device_addr(self):
+        backend = MapBackend()
+        mock_client = MagicMock()
+        mock_client.CreateSession.return_value = "/org/obex/session1"
+
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_client), \
+             patch("tincand.backends.bluez_map.GLib"):
+            backend.connect("AA:BB:CC:DD:EE:FF")
+
+        assert backend._device_addr == "AA:BB:CC:DD:EE:FF"
+
+    def test_connect_cancels_pending_reconnect_timer(self):
+        backend = MapBackend()
+        backend._reconnect_source_id = 99
+        mock_client = MagicMock()
+        mock_client.CreateSession.return_value = "/org/obex/session1"
+
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_client), \
+             patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            backend.connect("AA:BB:CC:DD:EE:FF")
+
+        mock_glib.source_remove.assert_any_call(99)
+
+    def test_connect_clears_reconnect_source_id_after_cancel(self):
+        backend = MapBackend()
+        backend._reconnect_source_id = 99
+        mock_client = MagicMock()
+        mock_client.CreateSession.return_value = "/org/obex/session1"
+
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_client), \
+             patch("tincand.backends.bluez_map.GLib"):
+            backend.connect("AA:BB:CC:DD:EE:FF")
+
+        assert backend._reconnect_source_id is None
+
+    def test_disconnect_cancels_reconnect_timer(self):
+        backend = MapBackend()
+        backend._reconnect_source_id = 55
+        backend._session_path = "/org/obex/session1"
+
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface"), \
+             patch("tincand.backends.bluez_map.GLib") as mock_glib:
+            backend.disconnect()
+
+        mock_glib.source_remove.assert_any_call(55)
+
+    def test_disconnect_clears_reconnect_source_id(self):
+        backend = MapBackend()
+        backend._reconnect_source_id = 55
+        backend._session_path = None  # no session — early return after timer cancel
+
+        with patch("tincand.backends.bluez_map.GLib"):
+            backend.disconnect()
+
+        assert backend._reconnect_source_id is None
