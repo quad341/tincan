@@ -125,6 +125,7 @@ class ConversationItem(QWidget):
             if self._dark
             else "background: transparent; color: #111827;"
         )
+        self._name_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         top_row.addWidget(self._name_label, stretch=1)
 
         self._ts_label = QLabel(self._data.timestamp)
@@ -136,6 +137,7 @@ class ConversationItem(QWidget):
             if self._dark
             else "background: transparent; color: #6b7280;"
         )
+        self._ts_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         top_row.addWidget(self._ts_label)
 
         text_col.addLayout(top_row)
@@ -145,6 +147,7 @@ class ConversationItem(QWidget):
         prev_font = QFont()
         prev_font.setPointSize(12)
         self._preview_label.setFont(prev_font)
+        self._preview_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         text_col.addWidget(self._preview_label)
 
         frame_layout.addLayout(text_col, stretch=1)
