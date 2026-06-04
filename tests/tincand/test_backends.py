@@ -1,5 +1,5 @@
 """Tests: MockBackend and MapBackend unit tests.
-Bead: tincan-spa, tincan-44wr, tincan-kf1k
+Bead: tincan-spa, tincan-44wr, tincan-kf1k, tincan-br25
 
 Coverage:
   §1 MockBackend.connect() — loads canned conversations, calls service.Connect(), requires service
@@ -17,6 +17,10 @@ Coverage:
      _reconnect_tick: success → connect() + SOURCE_REMOVE; failure → SOURCE_CONTINUE; empty addr → SOURCE_REMOVE
      connect(): _device_addr stored; pending reconnect timer cancelled
      disconnect(): reconnect timer cancelled
+  §15 MapBackend.poll_inbox — sent folder fallback to outbox (tincan-br25)
+     - 'sent' raises DBusException, 'outbox' succeeds: outbox messages returned
+     - both 'sent' and 'outbox' raise DBusException: WARNING logged, no outbound messages
+     - both fail: inbox messages still returned
 
 No hardware or real D-Bus — all D-Bus objects mocked.
 Run with: python -m pytest tests/tincand/test_backends.py -v
@@ -998,3 +1002,115 @@ class TestMapBackendConnectDisconnectTimers:
             backend.disconnect()
 
         assert backend._reconnect_source_id is None
+
+
+# ---------------------------------------------------------------------------
+# §15 MapBackend.poll_inbox — sent folder fallback to outbox (tincan-br25)
+# ---------------------------------------------------------------------------
+
+def _dbus_exc(name="org.bluez.obex.Error.NotFound"):
+    return dbus.exceptions.DBusException(name=name)
+
+
+class TestMapBackendPollInboxOutboxFallback:
+    """poll_inbox falls back to 'outbox' when 'sent' is unavailable."""
+
+    def _make_backend_with_inbox_and_folders(self, sent_raises, outbox_raises):
+        backend, mock_access = _make_map_backend_with_mock_access()
+        mock_access.GetMessage.return_value = None
+
+        def _list(folder, _filter):
+            if folder == "inbox":
+                return {"/inbox/1": {
+                    "Sender": "Alice", "Datetime": "20260101T100000",
+                    "Read": False, "Subject": "Hi",
+                }}
+            if folder == "sent":
+                if sent_raises:
+                    raise _dbus_exc()
+                return {"/sent/1": {
+                    "RecipientAddressing": "+15550001", "Datetime": "20260101T110000",
+                    "Subject": "Hey",
+                }}
+            if folder == "outbox":
+                if outbox_raises:
+                    raise _dbus_exc()
+                return {"/outbox/1": {
+                    "RecipientAddressing": "+15550002", "Datetime": "20260101T120000",
+                    "Subject": "From outbox",
+                }}
+            return {}
+
+        mock_access.ListMessages.side_effect = _list
+        return backend, mock_access
+
+    def test_sent_success_does_not_try_outbox(self):
+        backend, mock_access = self._make_backend_with_inbox_and_folders(
+            sent_raises=False, outbox_raises=False
+        )
+        backend.poll_inbox()
+
+        folders_tried = [c[0][0] for c in mock_access.ListMessages.call_args_list]
+        assert "outbox" not in folders_tried
+
+    def test_sent_fails_outbox_succeeds_returns_outbox_messages(self):
+        backend, mock_access = self._make_backend_with_inbox_and_folders(
+            sent_raises=True, outbox_raises=False
+        )
+        result = backend.poll_inbox()
+
+        outbound = [m for m in result if m.get("direction") == "outbound"]
+        assert len(outbound) == 1
+        assert outbound[0]["path"] == "/outbox/1"
+
+    def test_sent_fails_outbox_succeeds_inbox_also_returned(self):
+        backend, mock_access = self._make_backend_with_inbox_and_folders(
+            sent_raises=True, outbox_raises=False
+        )
+        result = backend.poll_inbox()
+
+        inbound = [m for m in result if m.get("direction") == "inbound"]
+        assert len(inbound) == 1
+
+    def test_both_fail_no_outbound_messages(self):
+        backend, mock_access = self._make_backend_with_inbox_and_folders(
+            sent_raises=True, outbox_raises=True
+        )
+        result = backend.poll_inbox()
+
+        outbound = [m for m in result if m.get("direction") == "outbound"]
+        assert outbound == []
+
+    def test_both_fail_inbox_messages_still_returned(self):
+        backend, mock_access = self._make_backend_with_inbox_and_folders(
+            sent_raises=True, outbox_raises=True
+        )
+        result = backend.poll_inbox()
+
+        inbound = [m for m in result if m.get("direction") == "inbound"]
+        assert len(inbound) == 1
+
+    def test_both_fail_logs_warning(self, caplog):
+        import logging
+        backend, mock_access = self._make_backend_with_inbox_and_folders(
+            sent_raises=True, outbox_raises=True
+        )
+
+        with caplog.at_level(logging.WARNING, logger="tincand.backends.bluez_map"):
+            backend.poll_inbox()
+
+        assert any(
+            "sent folder unavailable" in r.message or "outbox" in r.message
+            for r in caplog.records
+        )
+
+    def test_sent_fails_outbox_succeeds_sent_raw_not_none(self):
+        """sent_raw is set from outbox — the sent_raw=None path is not entered."""
+        backend, mock_access = self._make_backend_with_inbox_and_folders(
+            sent_raises=True, outbox_raises=False
+        )
+        result = backend.poll_inbox()
+
+        # If the None path were entered, outbound would be empty
+        outbound = [m for m in result if m.get("direction") == "outbound"]
+        assert len(outbound) == 1
