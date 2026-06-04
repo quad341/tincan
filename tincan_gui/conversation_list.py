@@ -121,10 +121,11 @@ class ConversationItem(QWidget):
         name_font.setBold(False)
         self._name_label.setFont(name_font)
         self._name_label.setStyleSheet(
-            "background: transparent; color: #f4f4f5;"
+            "background: transparent; border: none; outline: none; color: #f4f4f5;"
             if self._dark
-            else "background: transparent; color: #111827;"
+            else "background: transparent; border: none; outline: none; color: #111827;"
         )
+        self._name_label.setFocusPolicy(Qt.NoFocus)
         self._name_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         top_row.addWidget(self._name_label, stretch=1)
 
@@ -133,10 +134,11 @@ class ConversationItem(QWidget):
         ts_font.setPointSize(11)
         self._ts_label.setFont(ts_font)
         self._ts_label.setStyleSheet(
-            "background: transparent; color: #a1a1aa;"
+            "background: transparent; border: none; outline: none; color: #a1a1aa;"
             if self._dark
-            else "background: transparent; color: #6b7280;"
+            else "background: transparent; border: none; outline: none; color: #6b7280;"
         )
+        self._ts_label.setFocusPolicy(Qt.NoFocus)
         self._ts_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         top_row.addWidget(self._ts_label)
 
@@ -147,6 +149,7 @@ class ConversationItem(QWidget):
         prev_font = QFont()
         prev_font.setPointSize(12)
         self._preview_label.setFont(prev_font)
+        self._preview_label.setFocusPolicy(Qt.NoFocus)
         self._preview_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         text_col.addWidget(self._preview_label)
 
@@ -206,7 +209,9 @@ class ConversationItem(QWidget):
             else:
                 display = raw[:36] + "…" if len(raw) > 36 else raw
             self._preview_label.setText(display)
-            self._preview_label.setStyleSheet(f"background: transparent; color: {preview_color};")
+            self._preview_label.setStyleSheet(
+                f"background: transparent; border: none; outline: none; color: {preview_color};"
+            )
             f = self._preview_label.font()
             f.setItalic(False)
             self._preview_label.setFont(f)
@@ -214,7 +219,7 @@ class ConversationItem(QWidget):
         else:
             self._preview_label.setText("—")
             self._preview_label.setStyleSheet(
-                f"background: transparent; color: {no_preview_color};"
+                f"background: transparent; border: none; outline: none; color: {no_preview_color};"
             )
             f = self._preview_label.font()
             f.setItalic(True)
@@ -267,25 +272,29 @@ class ConversationItem(QWidget):
                 f"QFrame {{ background: {sel_bg}; border: 2px solid {sel_border};"
                 " border-radius: 4px; }}"
             )
-            self._name_label.setStyleSheet(f"background: transparent; color: {sel_name};")
-            self._ts_label.setStyleSheet(f"background: transparent; color: {sel_muted};")
+            self._name_label.setStyleSheet(
+                f"background: transparent; border: none; outline: none; color: {sel_name};"
+            )
+            self._ts_label.setStyleSheet(
+                f"background: transparent; border: none; outline: none; color: {sel_muted};"
+            )
             self._apply_preview()
         else:
-            self.setStyleSheet("QLabel { background: transparent; }")
+            self.setStyleSheet("QLabel { background: transparent; border: none; outline: none; }")
             bg = self._CARD_BG_DARK if self._dark else self._CARD_BG
             border = self._CARD_BORDER_DARK if self._dark else self._CARD_BORDER
             self._frame.setStyleSheet(
                 f"QFrame {{ background: {bg}; border: 1px solid {border}; border-radius: 4px; }}"
             )
             self._name_label.setStyleSheet(
-                "background: transparent; color: #f4f4f5;"
+                "background: transparent; border: none; outline: none; color: #f4f4f5;"
                 if self._dark
-                else "background: transparent; color: #111827;"
+                else "background: transparent; border: none; outline: none; color: #111827;"
             )
             self._ts_label.setStyleSheet(
-                "background: transparent; color: #a1a1aa;"
+                "background: transparent; border: none; outline: none; color: #a1a1aa;"
                 if self._dark
-                else "background: transparent; color: #6b7280;"
+                else "background: transparent; border: none; outline: none; color: #6b7280;"
             )
             self._apply_preview()
 

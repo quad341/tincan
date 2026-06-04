@@ -78,6 +78,9 @@ class AvatarWidget(QLabel):
         super().__init__(parent)
         self._name = name
         self.setFixedSize(_AVATAR_SIZE, _AVATAR_SIZE)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setStyleSheet("border: none; outline: none; background: transparent;")
         self._show_initials()
 
     def _show_initials(self) -> None:
