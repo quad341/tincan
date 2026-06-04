@@ -34,7 +34,9 @@ from gi.repository import GLib
 from tincand.ancs_util import (
     ANCS_SERVICE_UUID,
     ATTR_APP_ID,
+    ATTR_DATE,
     ATTR_MESSAGE,
+    ATTR_SUBTITLE,
     ATTR_TITLE,
     CONTROL_POINT_UUID,
     DATA_SOURCE_UUID,
@@ -179,6 +181,7 @@ class ANCSBackend(BackendInterface):
         self._control_point_proxy = None
         self._notif_src_path: str | None = None
         self._data_src_path: str | None = None
+        self._uid_meta: dict[int, tuple[int, int]] = {}  # uid → (category_id, event_flags)
         self._health_check_id: int | None = None
         self._heal_timer_id: int | None = None
         self._heal_attempts: int = 0
@@ -535,6 +538,7 @@ class ANCSBackend(BackendInterface):
         self._notif_src_path = None
         self._data_src_path = None
         self._data_buffer.clear_all()
+        self._uid_meta.clear()
         self._control_point_proxy = None
         if self._service is not None:
             self._service.set_capability("ancs", False)
@@ -638,13 +642,16 @@ class ANCSBackend(BackendInterface):
         except ValueError as exc:
             _log.debug("ANCSBackend: parse_notification_source error: %s", exc)
             return
-        if parsed["event_id"] != 0 or parsed["category_id"] not in (4, 6):
+        if parsed["event_id"] != 0:
             return
         uid = parsed["notification_uid"]
+        self._uid_meta[uid] = (parsed["category_id"], parsed["event_flags"])
         self._data_buffer.clear(uid)
         if self._control_point_proxy is None:
             return
-        cmd = build_get_attrs_cmd(uid, [ATTR_APP_ID, ATTR_TITLE, ATTR_MESSAGE])
+        cmd = build_get_attrs_cmd(
+            uid, [ATTR_APP_ID, ATTR_TITLE, ATTR_SUBTITLE, ATTR_MESSAGE, ATTR_DATE]
+        )
         try:
             self._control_point_proxy.WriteValue(list(cmd), {})
         except dbus.exceptions.DBusException as exc:
@@ -670,12 +677,29 @@ class ANCSBackend(BackendInterface):
             return
         self._data_buffer.clear(uid)
         attrs = result.get("attrs", {})
-        if self._service is not None:
+        self._uid_meta.pop(uid, None)  # consume to prevent memory leak
+        app_id = attrs.get(ATTR_APP_ID, "")
+        if self._service is None:
+            return
+        if app_id == "com.apple.MobileSMS":
+            # SMS path — unchanged
             self._service.on_message_received({
-                "conversation_id": attrs.get(ATTR_APP_ID, ""),
+                "conversation_id": app_id,
                 "body": attrs.get(ATTR_MESSAGE, ""),
                 "from": attrs.get(ATTR_TITLE, ""),
                 "direction": "inbound",
                 "status": "unread",
                 "timestamp": "",
             })
+        else:
+            # All other app notifications (WhatsApp, Calendar, Mail, etc.)
+            if hasattr(self._service, "on_app_notification_received"):
+                self._service.on_app_notification_received({
+                    "app_id": app_id,
+                    "title": attrs.get(ATTR_TITLE, ""),
+                    "subtitle": attrs.get(ATTR_SUBTITLE, ""),
+                    "body": attrs.get(ATTR_MESSAGE, ""),
+                    "date": attrs.get(ATTR_DATE, ""),
+                    "direction": "inbound",
+                    "status": "unread",
+                })

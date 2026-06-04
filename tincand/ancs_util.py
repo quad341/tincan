@@ -17,9 +17,11 @@ import struct
 # Attribute ID constants
 # ---------------------------------------------------------------------------
 
-ATTR_APP_ID = 0   # no length field in GetNotifAttrs command
-ATTR_TITLE = 1    # max_len field required: 255
-ATTR_MESSAGE = 3  # max_len field required: 255
+ATTR_APP_ID = 0    # no length field in GetNotifAttrs command
+ATTR_TITLE = 1     # max_len field required: 255
+ATTR_SUBTITLE = 2  # max_len field required: 255
+ATTR_MESSAGE = 3   # max_len field required: 255
+ATTR_DATE = 5      # ISO 8601 timestamp; no max_len (fixed-length string from iOS)
 
 # ---------------------------------------------------------------------------
 # GATT UUID constants
@@ -96,7 +98,7 @@ def build_get_attrs_cmd(uid: int, attrs: list[int]) -> bytes:
     """
     cmd = struct.pack("<BL", 0, uid)
     for attr_id in attrs:
-        if attr_id in (ATTR_TITLE, ATTR_MESSAGE):
+        if attr_id in (ATTR_TITLE, ATTR_SUBTITLE, ATTR_MESSAGE):
             cmd += struct.pack("<BH", attr_id, 255)
         else:
             cmd += struct.pack("<B", attr_id)

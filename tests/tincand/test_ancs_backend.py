@@ -473,7 +473,8 @@ class TestNotifSourceChanged:
         )
         mock_ctrl_pt.WriteValue.assert_called_once()
 
-    def test_category_0_other_does_not_write_control_point(self, subscribed):
+    def test_category_0_other_writes_control_point(self, subscribed):
+        # tincan-47mh: category filter removed — ALL EventID=0 notifications routed.
         backend, _, mock_ctrl_pt, _ = subscribed
         data = _notif_source_bytes(event_id=0, category_id=0, uid=3)
         backend._on_notif_source_changed(
@@ -481,7 +482,7 @@ class TestNotifSourceChanged:
             {"Value": list(data)},
             [],
         )
-        mock_ctrl_pt.WriteValue.assert_not_called()
+        mock_ctrl_pt.WriteValue.assert_called_once()
 
     def test_event_id_1_modified_does_not_write_control_point(self, subscribed):
         backend, _, mock_ctrl_pt, _ = subscribed
