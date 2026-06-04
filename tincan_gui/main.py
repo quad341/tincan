@@ -1,6 +1,7 @@
 """Main window: QMainWindow with title bar, QSplitter, and component wiring."""
 from __future__ import annotations
 
+import re
 import sys
 import warnings
 from datetime import datetime, timezone
@@ -37,6 +38,13 @@ from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
 
 _ASSETS = Path(__file__).parent / "assets"
+
+_NON_DIGIT_RE = re.compile(r"\D")
+
+
+def _is_dialable(s: str) -> bool:
+    """Return True when *s* contains ≥7 digits (resolvable phone number)."""
+    return len(_NON_DIGIT_RE.sub("", s)) >= 7
 
 
 class TitleBar(QWidget):
@@ -137,6 +145,7 @@ class MainWindow(QMainWindow):
         self.resize(1024, 700)
         self.setMinimumSize(600, 400)
         self._current_phone: str = ""     # phone for the open conversation
+        self._current_phone_dialable: bool = True  # False when phone is unresolvable name
         self._connected_device: str = ""  # human-readable name or address of connected BT device
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
@@ -261,15 +270,22 @@ class MainWindow(QMainWindow):
     def _sync_compose_state(self) -> None:
         """Gate compose on messaging availability AND conversation selection.
 
-        Three states:
-        - messaging OK + conversation selected → fully enabled
+        States:
+        - messaging OK + conversation selected + phone resolvable → fully enabled
+        - messaging OK + conversation selected + phone unresolvable → disabled
+          with "phone number unavailable" (name-keyed thread, tincan-6b9m)
         - messaging unavailable + conversation selected → fully disabled
           (set_compose_enabled so Enter key also blocked; BLOCKER-2)
         - no conversation selected (regardless of messaging) → button-only
           disable so keyboard navigation stays accessible (a11y)
         """
         if self._messages_ok and self._current_phone:
-            self._compose.set_compose_enabled(True)
+            if self._current_phone_dialable:
+                self._compose.set_compose_enabled(True)
+            else:
+                self._compose.set_compose_enabled(
+                    False, "phone number unavailable for this thread"
+                )
         elif not self._messages_ok and self._current_phone:
             self._compose.set_compose_enabled(False, "messaging unavailable")
         else:
@@ -331,7 +347,14 @@ class MainWindow(QMainWindow):
     def _on_conversation_selected(self, conv_id: str) -> None:
         self.conversation_opened.emit(conv_id)
         conv_data = self._conversations_by_id.get(conv_id)
-        self._current_phone = conv_data.phone if conv_data else conv_id
+        if conv_data:
+            self._current_phone = conv_data.phone
+            # Only flag as undialable when we KNOW the phone from a populated conv.
+            # Unknown convs (conv_data is None) stay dialable so compose stays open.
+            self._current_phone_dialable = _is_dialable(conv_data.phone)
+        else:
+            self._current_phone = conv_id
+            self._current_phone_dialable = True
         name = conv_data.name if conv_data else conv_id
         raw_msgs = self._dbus_client.get_messages(conv_id)
         messages = [self._msg_dict_to_data(m) for m in raw_msgs]
@@ -486,6 +509,7 @@ class MainWindow(QMainWindow):
             return
         phone = phone.strip()
         self._current_phone = phone
+        self._current_phone_dialable = _is_dialable(phone)
         self._thread_view.load_thread(phone, phone, [], "SMS")
         self._sync_compose_state()
         self._compose._input.setFocus()
@@ -493,7 +517,7 @@ class MainWindow(QMainWindow):
     def _on_send(self, text: str) -> None:
         self.message_send_requested.emit(text)
         self._compose.hide_send_error()
-        if not self._current_phone:
+        if not self._current_phone or not self._current_phone_dialable:
             self._compose.show_send_error(text)
             return
         phone = self._current_phone

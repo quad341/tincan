@@ -160,6 +160,8 @@ class MapBackend(BackendInterface):
         self._seen_handles: set[str] = set()  # handles seen on initial poll — skip notifications
         self._initial_poll_done: bool = False
         self._failed_handles: set[str] = set()  # handles where GetMessage raised; skip on retry
+        # display_name.lower() → phone; populated from phone-keyed messages, persists across polls
+        self._name_to_phone: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -211,6 +213,7 @@ class MapBackend(BackendInterface):
         self._seen_handles.clear()
         self._initial_poll_done = False
         self._failed_handles.clear()
+        self._name_to_phone.clear()
 
         if self._service is not None:
             self._service.Connect(device_addr)  # type: ignore[attr-defined]
@@ -574,12 +577,15 @@ class MapBackend(BackendInterface):
 
         # Build phone → display_name for phone-keyed groups so name-keyed groups
         # (SenderAddressing absent/non-numeric) can resolve a send_target.
+        # Also persist mappings in _name_to_phone so subsequent polls can still
+        # resolve names even when no phone-keyed messages appear in the new batch.
         phone_by_display: dict[str, str] = {}
         for key, msgs in by_sender.items():
             if len(_NON_DIGIT_RE.sub("", key)) >= 7:
                 latest_dn = (max(msgs, key=lambda m: m["timestamp"] or "")
                              .get("display_name", key) or key)
                 phone_by_display[latest_dn.lower()] = key
+                self._name_to_phone[latest_dn.lower()] = key
 
         for sender, msgs in by_sender.items():
             unread = sum(1 for m in msgs if not m["read"]) if notify else 0
@@ -587,7 +593,9 @@ class MapBackend(BackendInterface):
             display_name = latest.get("display_name", sender) or sender
             is_phone_key = len(_NON_DIGIT_RE.sub("", sender)) >= 7
             dn_lower = display_name.lower()
-            send_target = sender if is_phone_key else phone_by_display.get(dn_lower, "")
+            send_target = sender if is_phone_key else (
+                phone_by_display.get(dn_lower) or self._name_to_phone.get(dn_lower, "")
+            )
             conv = Conversation(
                 id=sender,
                 display_name=display_name,
