@@ -274,9 +274,16 @@ class ThreadHeader(QWidget):
                 return part.split(":")[1].strip()
         return "#6b7280"
 
-    def update_contact(self, name: str, phone: str, message_type: str = "SMS") -> None:
+    def update_contact(self, name: str, phone: str, message_type: str = "SMS") -> None:  # noqa: ARG002
         self._name_label.setText(name)
-        self._phone_label.setText(f"{phone}  ·  {message_type}")
+        # Show the phone line only when it adds information (differs from name).
+        # Suppress the message-type label — SMS vs iMessage is undetectable via MAP.
+        if phone and phone != name:
+            self._phone_label.setText(phone)
+            self._phone_label.setVisible(True)
+        else:
+            self._phone_label.setText("")
+            self._phone_label.setVisible(False)
 
 
 class ThreadView(QWidget):
