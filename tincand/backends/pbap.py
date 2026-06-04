@@ -55,7 +55,19 @@ class PBAPContactSync:
                 bus.get_object(_OBEX_CLIENT, self.session_path),
                 _PBAP_ACCESS_IFACE,
             )
-            pbap.Select("int", "pb")
+            # PBAP 1.1+ (iOS) uses "telecom/pb"; PBAP 1.0 uses "pb".
+            _selected = False
+            for _pb_path in ("telecom/pb", "pb"):
+                try:
+                    pbap.Select("int", _pb_path)
+                    _log.debug("PBAP: selected phonebook int/%s", _pb_path)
+                    _selected = True
+                    break
+                except dbus.exceptions.DBusException as exc:
+                    _log.debug("PBAP: Select('int', '%s') failed: %s", _pb_path, exc)
+            if not _selected:
+                _log.warning("PBAP: could not select any phonebook — aborting contact sync")
+                return
 
             tmp = tempfile.NamedTemporaryFile(
                 mode="w", suffix=".vcf", delete=False, encoding="utf-8"
@@ -63,9 +75,11 @@ class PBAPContactSync:
             tmp_path = tmp.name
             tmp.close()
 
+            # Request vCard 2.1 without field filtering: 'Fields'/'PropertySelector'
+            # syntax varies by implementation; omitting it returns all fields safely.
             result = pbap.PullAll(
                 tmp_path,
-                {"Format": dbus.String("vcard21"), "Fields": dbus.Array(["FN", "TEL"], "s")},
+                {"Format": dbus.String("vcard21")},
             )
             transfer_path = str(result[0]) if isinstance(result, (list, tuple)) else str(result)
             self._wait_transfer(transfer_path, lambda error=False: self._on_pullall_complete(
@@ -137,16 +151,21 @@ class PBAPContactSync:
                 return
 
             count = 0
+            skipped_no_fn = 0
+            skipped_no_tel = 0
             try:
                 for vcard in vobject.readComponents(content):
                     fn = getattr(vcard, "fn", None)
                     if fn is None:
+                        skipped_no_fn += 1
                         continue
                     name = fn.value.strip()
                     if not name:
+                        skipped_no_fn += 1
                         continue
                     tels = vcard.contents.get("tel", [])
                     if not tels:
+                        skipped_no_tel += 1
                         continue
                     for tel_obj in tels:
                         number = "".join(tel_obj.value.split())  # strip whitespace
@@ -162,7 +181,12 @@ class PBAPContactSync:
                     count, exc,
                 )
 
-            _log.info("PBAP PullAll: %d phone-name mappings loaded", count)
+            level = _log.info if count > 0 else _log.warning
+            level(
+                "PBAP PullAll: %d phone-name mappings loaded "
+                "(skipped: %d no-fn, %d no-tel)",
+                count, skipped_no_fn, skipped_no_tel,
+            )
             self._service.set_capability("contacts", True)
         finally:
             try:
