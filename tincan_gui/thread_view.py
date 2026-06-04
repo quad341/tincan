@@ -10,8 +10,8 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAccessible, QFont
 from PySide6.QtWidgets import (
-    QApplication,
     QAccessibleWidget,
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
