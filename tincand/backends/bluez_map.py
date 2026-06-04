@@ -47,6 +47,12 @@ _TRANSFER_TIMEOUT = 15.0
 _RETRY_MAX = 3
 _RETRY_BACKOFF = 0.5
 _POLL_INTERVAL_SECONDS = 5
+_RECONNECT_INTERVAL_SECONDS = 10
+
+# UpdateInbox raising UnknownObject means the OBEX session object is gone — dead session.
+# Contrast: UnknownMethod from GetMessage is a BlueZ API gap (tincan-ixqg) — handled by
+# _fetch_full_body's _failed_handles cache, never propagates to _poll_tick.
+_DEAD_SESSION_ERRORS = frozenset({"org.freedesktop.DBus.Error.UnknownObject"})
 
 
 class ConsentRequired(Exception):
@@ -148,6 +154,8 @@ class MapBackend(BackendInterface):
         self._session_path: str | None = None
         self._msg_access: object | None = None
         self._poll_source_id: int | None = None
+        self._reconnect_source_id: int | None = None
+        self._device_addr: str = ""
         self._device_name: str = ""
         self._seen_handles: set[str] = set()  # handles seen on initial poll — skip notifications
         self._initial_poll_done: bool = False
@@ -165,6 +173,11 @@ class MapBackend(BackendInterface):
                 consent not yet granted).
             dbus.exceptions.DBusException: for other D-Bus / obexd errors.
         """
+        self._device_addr = device_addr
+        # Cancel any pending reconnect timer so it doesn't race this explicit connect.
+        if self._reconnect_source_id is not None:
+            GLib.source_remove(self._reconnect_source_id)
+            self._reconnect_source_id = None
         bus = dbus.SessionBus()
         client = dbus.Interface(
             bus.get_object(_OBEX_CLIENT, _OBEX_CLIENT_PATH),
@@ -208,6 +221,9 @@ class MapBackend(BackendInterface):
 
     def disconnect(self) -> None:
         """Remove the obexd MAP session; silently no-ops if not connected."""
+        if self._reconnect_source_id is not None:
+            GLib.source_remove(self._reconnect_source_id)
+            self._reconnect_source_id = None
         if self._poll_source_id is not None:
             GLib.source_remove(self._poll_source_id)
             self._poll_source_id = None
@@ -405,12 +421,43 @@ class MapBackend(BackendInterface):
         return device_addr
 
     def _poll_tick(self) -> bool:
-        """GLib timer callback — poll inbox and return SOURCE_CONTINUE."""
+        """GLib timer callback — poll inbox; detect dead session and trigger recovery."""
         try:
             self.poll_inbox()
+        except dbus.exceptions.DBusException as exc:
+            if exc.get_dbus_name() in _DEAD_SESSION_ERRORS:
+                _log.warning("MAP session object gone — recovering: %s", exc)
+                self._handle_session_dead()
+                return GLib.SOURCE_REMOVE
+            _log.warning("poll_inbox error: %s", exc)
         except Exception as exc:
             _log.warning("poll_inbox error: %s", exc)
         return GLib.SOURCE_CONTINUE
+
+    def _handle_session_dead(self) -> None:
+        """Tear down a dead OBEX session and schedule reconnect attempts."""
+        # Nullify poll ID before disconnect() so it skips the source_remove call —
+        # GLib removes it when we return SOURCE_REMOVE from _poll_tick.
+        self._poll_source_id = None
+        self.disconnect()
+        if self._device_addr:
+            self._reconnect_source_id = GLib.timeout_add_seconds(
+                _RECONNECT_INTERVAL_SECONDS, self._reconnect_tick
+            )
+
+    def _reconnect_tick(self) -> bool:
+        """GLib timer callback — attempt to re-establish the MAP session."""
+        if not self._device_addr:
+            self._reconnect_source_id = None
+            return GLib.SOURCE_REMOVE
+        try:
+            self.connect(self._device_addr)
+            _log.info("MAP session reconnected to %s", self._device_addr)
+            self._reconnect_source_id = None
+            return GLib.SOURCE_REMOVE
+        except Exception as exc:
+            _log.debug("MAP reconnect attempt failed (will retry): %s", exc)
+            return GLib.SOURCE_CONTINUE
 
     def _retry(self, fn: object, *args: object) -> object:
         """Call *fn(*args)*, retrying on transient obexd errors."""
