@@ -302,6 +302,14 @@ class MapBackend(BackendInterface):
                     {str(k): str(v) for k, v in props.items()},
                 )
                 _first_inbox = False
+            msg_type = str(props.get("Type", "SMS_GSM")).upper()
+            if msg_type not in ("SMS_GSM", "SMS_CDMA"):
+                # MMS or other type — log for research; body may be text-only placeholder.
+                # tincan-cc2v: iOS MAP exposes MMS here but Attachment:False drops media.
+                _log.warning(
+                    "MAP inbox: non-SMS message type=%s path=%s — displaying text body only",
+                    msg_type, msg_path,
+                )
             body = (
                 self._fetch_full_body(str(msg_path))
                 or str(props.get("Subject", "")).strip()
@@ -318,6 +326,7 @@ class MapBackend(BackendInterface):
                 "read": bool(props.get("Read", False)),
                 "body": body,
                 "direction": "inbound",
+                "msg_type": msg_type,
             })
 
         # Try both "sent" and "outbox" — MAP spec says "sent" but some iOS versions
