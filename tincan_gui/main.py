@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QObject, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -121,29 +121,6 @@ class TitleBar(QWidget):
         self._status_chip.setText("○ Disconnected")
         self._status_chip.setStyleSheet("color: #fca5a5;")
         self._status_chip.setAccessibleName("Connection status: Disconnected")
-
-
-class _SendWorker(QObject):
-    """Worker that calls SendMessage on a background thread to avoid freezing the GUI."""
-
-    done = Signal(str, str, str)  # (phone, text, message_id_or_empty)
-
-    def __init__(self, phone: str, text: str, parent=None) -> None:
-        super().__init__(parent)
-        self._phone = phone
-        self._text = text
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            import dbus as _dbus
-            bus = _dbus.SessionBus()
-            obj = bus.get_object("im.tincan.Daemon", "/im/tincan")
-            iface = _dbus.Interface(obj, "im.tincan.Messages")
-            result = str(iface.SendMessage(self._phone, self._text))
-        except Exception:
-            result = ""
-        self.done.emit(self._phone, self._text, result)
 
 
 class MainWindow(QMainWindow):
@@ -521,19 +498,11 @@ class MainWindow(QMainWindow):
         ts = datetime.now(tz=timezone.utc).strftime("%H:%M")
         self._thread_view.append_message(MessageData(BubbleType.OUTBOUND, text, "", ts))
         self._pending_sends.add((phone, text))
-        worker = _SendWorker(phone, text)
-        thread = QThread(self)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.done.connect(self._on_send_done)
-        worker.done.connect(thread.quit)
-        thread.finished.connect(thread.deleteLater)
-        worker.done.connect(worker.deleteLater)
-        thread.start()
-
-    def _on_send_done(self, phone: str, text: str, message_id: str) -> None:
-        self._pending_sends.discard((phone, text))
+        message_id = self._dbus_client.send_message(phone, text)
+        # Defer cleanup so daemon's MessageReceived echo arrives first and is suppressed.
+        QTimer.singleShot(0, lambda: self._pending_sends.discard((phone, text)))
         if not message_id:
+            self._thread_view.mark_last_send_failed()
             self._compose.show_send_error(text)
 
     def _activate_and_focus(self, widget) -> None:
