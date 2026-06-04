@@ -476,11 +476,18 @@ class MainWindow(QMainWindow):
         direction = str(message.get("direction", "inbound"))
         body = str(message.get("body", ""))
         # Suppress daemon echo for messages already shown as optimistic bubbles.
-        if direction == "outbound" and (conv_id, body) in self._pending_sends:
+        # Use _same_conv for pending/sent lookups: daemon may normalize the phone
+        # differently (e.g. "+15550100" → "5550100") producing a key mismatch.
+        if direction == "outbound" and any(
+            _same_conv(k, conv_id) and b == body for k, b in self._pending_sends
+        ):
             return
         # Suppress MAP-poll duplicates (poll re-emits the sent message from 'sent'
         # folder after _pending_sends is cleared; _sent_bodies persists longer).
-        if direction == "outbound" and body in self._sent_bodies.get(conv_id, set()):
+        if direction == "outbound" and any(
+            _same_conv(k, conv_id) and body in bodies
+            for k, bodies in self._sent_bodies.items()
+        ):
             return
         # Suppress MAP inbound echo of a self-sent message: iOS MAP delivers messages
         # sent to yourself back to the inbox with direction="inbound".
