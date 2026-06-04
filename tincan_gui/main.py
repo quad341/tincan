@@ -391,6 +391,7 @@ class MainWindow(QMainWindow):
         self._thread_view.load_thread(name, conv_id, messages, "SMS")
         self._sync_compose_state()
         self._tray.reset_unread()
+        self._dbus_client.mark_conversation_read(conv_id)
         self._dbus_client.fetch_contact_photo(conv_id)
 
     def _on_daemon_connected(self, device_address: str) -> None:

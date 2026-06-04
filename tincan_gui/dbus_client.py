@@ -362,6 +362,16 @@ class TincandClient(QObject):
             return ""
         return str(reply.value() or "")
 
+    def mark_conversation_read(self, conv_id: str) -> None:
+        """Call MarkConversationRead on the daemon (fire-and-forget)."""
+        if not self._bus.isConnected():
+            return
+        result = self._dbus_call(_IFACE_MESSAGES, "MarkConversationRead", str(conv_id))
+        if result is None:
+            iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
+            if iface.isValid():
+                iface.call("MarkConversationRead", str(conv_id))
+
     def fetch_contact_photo(self, conv_id: str) -> None:
         """Call FetchContactPhoto on the daemon (fire-and-forget)."""
         if not self._bus.isConnected():

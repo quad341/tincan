@@ -361,6 +361,14 @@ class TincanService(dbus.service.Object):
         pass
 
     @dbus.service.method(IFACE_MESSAGES, in_signature="s", out_signature="")
+    def MarkConversationRead(self, conversation_id: str) -> None:  # noqa: N802
+        """Reset unread_count to 0 for the given conversation and emit ConversationUpdated."""
+        conv = self._conversations.get(str(conversation_id))
+        if conv is not None and conv.unread_count != 0:
+            conv.unread_count = 0
+            self.ConversationUpdated(conv.to_dbus())
+
+    @dbus.service.method(IFACE_MESSAGES, in_signature="s", out_signature="")
     def FetchContactPhoto(self, conversation_id: str) -> None:  # noqa: N802
         if self._pbap is not None:
             self._pbap.fetch_photo(str(conversation_id))
