@@ -1,6 +1,7 @@
 """Main window: QMainWindow with title bar, QSplitter, and component wiring."""
 from __future__ import annotations
 
+import os
 import re
 import sys
 import warnings
@@ -613,6 +614,10 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    if os.environ.get("TINCAN_DEBUG"):
+        from tincan_gui.debug_log import install, install_excepthook  # noqa: PLC0415
+        install()
+        install_excepthook()
     app = QApplication.instance() or QApplication(sys.argv)
     window = MainWindow()
     window.show()

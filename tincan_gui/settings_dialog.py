@@ -1,6 +1,8 @@
 """Settings dialog — Desktop notifications toggle and placeholder Appearance section."""
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -9,6 +11,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFrame,
     QLabel,
+    QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -103,6 +106,45 @@ class SettingsDialog(QDialog):
         ghost_label.setStyleSheet("color: #d1d5db;")
         ghost_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         layout.addWidget(ghost_label)
+
+        # ── DEVELOPER section (only when TINCAN_DEBUG=1) ──────────────────
+        if os.environ.get("TINCAN_DEBUG"):
+            layout.addSpacing(20)
+            dev_hdr, dev_sep = _section_header("Developer")
+            layout.addWidget(dev_hdr)
+            layout.addWidget(dev_sep)
+
+            from tincan_gui.debug_log import get_recent_logs  # noqa: PLC0415
+            hint = QLabel(
+                "Recent warnings/errors (WARNING+). "
+                "Unhandled exceptions also show as popups."
+            )
+            hint.setWordWrap(True)
+            hint.setStyleSheet("color: #a1a1aa;" if _dark else "color: #6b7280;")
+            hint_font = QFont()
+            hint_font.setPointSize(10)
+            hint.setFont(hint_font)
+            layout.addWidget(hint)
+
+            self._log_view = QPlainTextEdit()
+            self._log_view.setReadOnly(True)
+            self._log_view.setPlainText(get_recent_logs())
+            log_font = QFont("Monospace")
+            log_font.setPointSize(9)
+            self._log_view.setFont(log_font)
+            self._log_view.setMinimumHeight(120)
+            self._log_view.setMaximumHeight(200)
+            if _dark:
+                self._log_view.setStyleSheet(
+                    "background: #18181b; color: #a1a1aa; border: 1px solid #3f3f46;"
+                )
+            else:
+                self._log_view.setStyleSheet(
+                    "background: #f9fafb; color: #374151; border: 1px solid #e5e7eb;"
+                )
+            layout.addWidget(self._log_view)
+        else:
+            self._log_view = None
 
         layout.addStretch()
 
