@@ -532,7 +532,11 @@ class TestSyncDaemonState:
     def test_connected_daemon_sets_connected_device(self, qtbot, monkeypatch):
         monkeypatch.setattr(
             TincandClient, "get_status",
-            lambda self: {"connected": True, "device_name": "AA:BB:CC:DD:EE:FF", "capabilities": {}},
+            lambda self: {
+                "connected": True,
+                "device_name": "AA:BB:CC:DD:EE:FF",
+                "capabilities": {},
+            },
         )
         window = MainWindow()
         qtbot.addWidget(window)

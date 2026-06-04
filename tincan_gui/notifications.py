@@ -141,7 +141,10 @@ class DesktopNotifier:
         import dbus
 
         display_name = str(
-            message.get("display_name") or message.get("from") or message.get("conversation_id") or ""
+            message.get("display_name")
+            or message.get("from")
+            or message.get("conversation_id")
+            or ""
         ).strip()
         summary = _truncate(display_name, 30) if display_name else "tincan"
 

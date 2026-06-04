@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -177,8 +176,8 @@ class MainWindow(QMainWindow):
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
-        self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP inbound echo of self-sends
-        self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs for thread render
+        self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP echo of self-sends
+        self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs for render
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
