@@ -152,6 +152,7 @@ class MainWindow(QMainWindow):
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
+        self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
@@ -384,6 +385,7 @@ class MainWindow(QMainWindow):
     def _on_daemon_disconnected(self) -> None:
         self._connected_device = ""
         self._messages_ok = False
+        self._sent_bodies.clear()
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
@@ -425,6 +427,10 @@ class MainWindow(QMainWindow):
         body = str(message.get("body", ""))
         # Suppress daemon echo for messages already shown as optimistic bubbles.
         if direction == "outbound" and (conv_id, body) in self._pending_sends:
+            return
+        # Suppress MAP-poll duplicates (poll re-emits the sent message from 'sent'
+        # folder after _pending_sends is cleared; _sent_bodies persists longer).
+        if direction == "outbound" and body in self._sent_bodies.get(conv_id, set()):
             return
         sender = str(message.get("sender", "") or message.get("from", ""))
         timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM
@@ -528,6 +534,10 @@ class MainWindow(QMainWindow):
         message_id = self._dbus_client.send_message(phone, text)
         # Defer cleanup so daemon's MessageReceived echo arrives first and is suppressed.
         QTimer.singleShot(0, lambda: self._pending_sends.discard((phone, text)))
+        if message_id:
+            # Track sent body so MAP-poll echoes (which arrive after _pending_sends
+            # is cleared) are suppressed without showing a duplicate bubble.
+            self._sent_bodies.setdefault(phone, set()).add(text)
         if not message_id:
             self._thread_view.mark_last_send_failed()
             self._compose.show_send_error(text)
