@@ -188,6 +188,9 @@ class PBAPContactSync:
                 count, skipped_no_fn, skipped_no_tel,
             )
             self._service.set_capability("contacts", True)
+            # Signal GUI to show a hint when 0 contacts were loaded (tincan-d3xw).
+            # This usually means 'Sync Contacts' is off in iPhone BT settings.
+            self._service.set_capability("contacts_empty", count == 0)
         finally:
             try:
                 os.unlink(tmp_path)

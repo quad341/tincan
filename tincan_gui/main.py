@@ -29,6 +29,7 @@ from tincan_gui.conversation_list import ConversationData, ConversationListWidge
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
     ANCSRepairBanner,
+    ContactsEmptyBanner,
     StateABanner,
     StateBBanner,
     StateCBanner,
@@ -213,6 +214,11 @@ class MainWindow(QMainWindow):
         self._banner_c.refresh_clicked.connect(self.refresh_requested.emit)
         root_layout.addWidget(self._banner_c)
 
+        # Contacts-empty hint (tincan-d3xw)
+        self._banner_contacts_empty = ContactsEmptyBanner()
+        self._banner_contacts_empty.hide()
+        root_layout.addWidget(self._banner_contacts_empty)
+
         # Splitter: left sidebar + right content
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
@@ -327,6 +333,9 @@ class MainWindow(QMainWindow):
         ancs_needs_repair = bool(caps.get("ancs_needs_repair", False))
         self._update_ancs_repair_banner(ancs_needs_repair)
         self._update_state_c_banner(ancs_ok, ancs_needs_repair)
+        # Contacts-empty hint (tincan-d3xw)
+        contacts_empty = bool(caps.get("contacts_empty", False))
+        self._banner_contacts_empty.setVisible(contacts_empty)
 
     def _update_ancs_repair_banner(self, needs_repair: bool) -> None:
         """Show/hide ANCSRepairBanner; fire FALLBACK notification on first entry."""
@@ -410,6 +419,7 @@ class MainWindow(QMainWindow):
         self._banner_b.hide()
         self._banner_ancs_repair.hide()
         self._banner_c.hide()
+        self._banner_contacts_empty.hide()
         self._compose.set_compose_enabled(False, "not connected")
         self._tray.set_connected(False)
 

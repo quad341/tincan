@@ -73,6 +73,7 @@ class TincanService(dbus.service.Object):
         self._capabilities: dict[str, bool] = {
             "messages": False,
             "contacts": False,
+            "contacts_empty": False,   # True when PBAP loaded but found 0 contacts (tincan-d3xw)
             "ancs": False,
             "ancs_needs_repair": False,
         }
@@ -157,7 +158,9 @@ class TincanService(dbus.service.Object):
     def CapabilityChanged(self, feature: str, available: bool) -> None:  # noqa: N802
         pass
 
-    _KNOWN_CAPABILITIES = frozenset({"messages", "contacts", "ancs", "ancs_needs_repair"})
+    _KNOWN_CAPABILITIES = frozenset({
+        "messages", "contacts", "contacts_empty", "ancs", "ancs_needs_repair",
+    })
 
     def set_capability(self, feature: str, available: bool) -> None:
         """Update a capability and emit CapabilityChanged.

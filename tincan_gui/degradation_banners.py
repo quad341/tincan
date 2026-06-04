@@ -193,6 +193,43 @@ class StateCBanner(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Contacts-empty hint (tincan-d3xw)
+# ---------------------------------------------------------------------------
+
+class ContactsEmptyBanner(QWidget):
+    """Slim informational banner shown when PBAP loads 0 contacts (h=32, blue)."""
+
+    MSG = (
+        "ℹ No contacts loaded — on iPhone: Settings › Bluetooth › "
+        "[device] › Sync Contacts"
+    )
+    ACCESSIBLE_NAME = (
+        "No contacts loaded. "
+        "To see contact names, enable Sync Contacts in iPhone Settings, "
+        "Bluetooth, then tap your device name."
+    )
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(32)
+        self.setStyleSheet(
+            "background-color: #eff6ff; border: 1px solid #93c5fd;"
+        )
+        self.setAccessibleName(self.ACCESSIBLE_NAME)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 12, 0)
+
+        label = QLabel(self.MSG)
+        label_font = QFont()
+        label_font.setPointSize(11)
+        label.setFont(label_font)
+        label.setStyleSheet("color: #1e40af;")
+        label.setWordWrap(True)
+        layout.addWidget(label, stretch=1)
+
+
+# ---------------------------------------------------------------------------
 # Accessible role factory — StateBBanner + StateCBanner → AlertMessage
 # (StateABanner inherits CapabilityBanner and is already covered by its factory)
 # ---------------------------------------------------------------------------
