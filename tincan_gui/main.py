@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
 
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
+from tincan_gui.daemon_config import load_daemon_config
+from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
     ANCSRepairBanner,
@@ -171,6 +173,7 @@ class MainWindow(QMainWindow):
         self._current_phone: str = ""     # phone for the open conversation
         self._current_phone_dialable: bool = True  # False when phone is unresolvable name
         self._connected_device: str = ""  # human-readable name or address of connected BT device
+        self._daemon_spawn_attempted: bool = False
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._conversations_by_id: dict[str, ConversationData] = {}
@@ -285,11 +288,23 @@ class MainWindow(QMainWindow):
         c.contact_photo_received.connect(self._on_contact_photo_received)
         self.refresh_requested.connect(self._load_conversations)
 
+    def _maybe_spawn_daemon(self) -> None:
+        """Spawn tincand if config has a device and no spawn has been attempted yet."""
+        if self._daemon_spawn_attempted:
+            return
+        self._daemon_spawn_attempted = True
+        config = load_daemon_config()
+        if not config.device:
+            return
+        spawn_daemon(config.backend, config.device)
+        QTimer.singleShot(2000, self._sync_daemon_state)
+
     def _sync_daemon_state(self) -> None:
         """Query tincand at startup and sync UI to current daemon state."""
         status = self._dbus_client.get_status()
         if not status:
-            return  # daemon not running — UI stays in default disconnected state
+            self._maybe_spawn_daemon()
+            return
         if status.get("connected"):
             addr = str(status.get("device_name") or status.get("device_address") or "")
             self._connected_device = addr
