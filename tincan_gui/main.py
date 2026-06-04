@@ -9,13 +9,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QStringListModel, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QCompleter,
+    QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QSizePolicy,
     QSplitter,
@@ -557,15 +561,51 @@ class MainWindow(QMainWindow):
         )
 
     def _on_compose_new(self) -> None:
-        """Open a dialog asking for a recipient phone number and start a new thread."""
-        phone, ok = QInputDialog.getText(
-            self,
-            "New Conversation",
-            "Recipient phone number:",
+        """Open a new-conversation dialog with name/number autocomplete."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("New Conversation")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Recipient (name or number):"))
+
+        line_edit = QLineEdit()
+        line_edit.setMinimumWidth(300)
+        line_edit.setPlaceholderText("Type a name or phone number…")
+
+        # Build autocomplete candidates from known conversations.
+        name_to_phone: dict[str, str] = {}
+        display_items: list[str] = []
+        for conv in self._conversations_by_id.values():
+            phone = conv.phone or conv.id
+            if conv.name and conv.name != phone:
+                name_to_phone[conv.name] = phone
+                display_items.append(conv.name)
+            display_items.append(phone)
+        if display_items:
+            model = QStringListModel(sorted(set(display_items)), dialog)
+            completer = QCompleter(model, dialog)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            line_edit.setCompleter(completer)
+
+        layout.addWidget(line_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        if not ok or not phone.strip():
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        line_edit.returnPressed.connect(dialog.accept)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        phone = phone.strip()
+
+        text = line_edit.text().strip()
+        if not text:
+            return
+
+        phone = name_to_phone.get(text, text)
         self._current_phone = phone
         self._current_phone_dialable = _is_dialable(phone)
         self._thread_view.load_thread(phone, phone, [], "SMS")
