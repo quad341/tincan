@@ -304,10 +304,22 @@ class MapBackend(BackendInterface):
                 "direction": "inbound",
             })
 
+        # Try both "sent" and "outbox" — MAP spec says "sent" but some iOS versions
+        # or obexd versions surface this as "outbox".
+        sent_raw = None
+        for _sent_folder in ("sent", "outbox"):
+            try:
+                sent_raw = self._retry(self._msg_access.ListMessages, _sent_folder, {})
+                break
+            except dbus.exceptions.DBusException:
+                continue
+        if sent_raw is None:
+            _log.warning(
+                "MAP sent folder unavailable (tried 'sent' and 'outbox') — no outbound history"
+            )
         try:
-            sent_raw = self._retry(self._msg_access.ListMessages, "sent", {})
             _first_sent = True
-            for msg_path, props in sent_raw.items():
+            for msg_path, props in (sent_raw or {}).items():
                 if _first_sent:
                     _log.debug(
                         "MAP sent props (first message) — raw keys: %s",
