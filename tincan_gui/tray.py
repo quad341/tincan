@@ -152,7 +152,9 @@ class TrayIcon(QSystemTrayIcon):
         self._notif_action.setChecked(enabled)
 
     def _on_notifications_toggled(self, checked: bool) -> None:
-        app_settings().setValue("notifications/desktop_enabled", checked)
+        s = app_settings()
+        s.setValue("notifications/desktop_enabled", checked)
+        s.sync()
 
     def _raise_window(self) -> None:
         self._window.show()
