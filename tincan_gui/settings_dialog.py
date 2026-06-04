@@ -96,6 +96,37 @@ class SettingsDialog(QDialog):
 
         layout.addSpacing(20)
 
+        # ── BEHAVIOR section ───────────────────────────────────────────────
+        beh_hdr, beh_sep = _section_header("Behavior")
+        layout.addWidget(beh_hdr)
+        layout.addWidget(beh_sep)
+
+        self._close_to_tray_cb = QCheckBox("Close window to tray")
+        self._close_to_tray_cb.setAccessibleName("Close window to tray")
+        self._close_to_tray_cb.setFont(cb_font)
+        self._close_to_tray_cb.setStyleSheet(
+            "color: #f4f4f5;" if _dark else "color: #111827;"
+        )
+        close_to_tray_enabled = settings.value(
+            "behavior/close_to_tray", True, type=bool
+        )
+        self._close_to_tray_cb.setChecked(close_to_tray_enabled)
+        layout.addWidget(self._close_to_tray_cb)
+
+        ctt_sublabel = QLabel(
+            "When checked, closing the window hides tincan to the tray. "
+            "Uncheck to quit on close."
+        )
+        ctt_sublabel.setWordWrap(True)
+        ctt_sublabel.setFont(sl_font)
+        ctt_sublabel.setStyleSheet(
+            "color: #a1a1aa;" if _dark else "color: #6b7280;"
+        )
+        ctt_sublabel.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        layout.addWidget(ctt_sublabel)
+
+        layout.addSpacing(20)
+
         # ── APPEARANCE section (ghost/placeholder) ─────────────────────────
         app_hdr, app_sep = _section_header("Appearance")
         app_hdr.setStyleSheet("color: #d1d5db;")
@@ -156,14 +187,20 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        # Wire checkbox → persist + emit signal
-        self._desktop_cb.toggled.connect(self._on_toggled)
+        # Wire checkboxes → persist
+        self._desktop_cb.toggled.connect(self._on_notif_toggled)
+        self._close_to_tray_cb.toggled.connect(self._on_close_to_tray_toggled)
 
-    def _on_toggled(self, checked: bool) -> None:
+    def _on_notif_toggled(self, checked: bool) -> None:
         s = app_settings()
         s.setValue("notifications/desktop_enabled", checked)
         s.sync()  # flush immediately so the notifier's next read sees the change
         self.notifications_toggled.emit(checked)
+
+    def _on_close_to_tray_toggled(self, checked: bool) -> None:
+        s = app_settings()
+        s.setValue("behavior/close_to_tray", checked)
+        s.sync()
 
     def checkbox_label_color(self) -> str:
         """Return the hex color applied to the checkbox label (used by a11y tests)."""

@@ -679,10 +679,17 @@ class MainWindow(QMainWindow):
             super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
-        """Hide to tray on window close; only quit via tray menu or QApplication.quit."""
+        """Hide to tray or quit on window close, per behavior/close_to_tray setting."""
         if hasattr(self, "_tray") and self._tray.isSystemTrayAvailable():
-            event.ignore()
-            self.hide()
+            from tincan_gui._settings import app_settings  # noqa: PLC0415
+            close_to_tray = app_settings().value(
+                "behavior/close_to_tray", True, type=bool
+            )
+            if close_to_tray:
+                event.ignore()
+                self.hide()
+            else:
+                QApplication.quit()
         else:
             super().closeEvent(event)
 
