@@ -10,6 +10,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAccessible, QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QAccessibleWidget,
     QFrame,
     QHBoxLayout,
@@ -24,15 +25,26 @@ from tincan_gui.theme import is_dark_theme
 
 _URL_RE = _re.compile(r"(https?://[^\s<>\"']+)")
 
-# Cross-platform emoji font fallback list: Qt tries each family in order for
-# each glyph, so placing the system UI font first keeps text crisp while
-# emoji are rendered by the first available color-emoji font in the list.
-_EMOJI_FALLBACK_FAMILIES = [
-    "system-ui",
-    "Noto Color Emoji",    # Linux (fonts-noto-color-emoji)
-    "Segoe UI Emoji",      # Windows 8.1+
-    "Apple Color Emoji",   # macOS / iOS
-]
+def _emoji_font_families() -> list[str]:
+    """Return font family list: app default first, color-emoji fonts as fallback.
+
+    "system-ui" is a CSS generic name that Qt does not recognise on Linux —
+    passing it as the primary family caused Qt to fall through to Noto Color
+    Emoji, changing the look of all message text (tincan-h9nu).  Instead, we
+    read the actual application default family at runtime and prepend it so
+    only genuine emoji glyphs use the colour-emoji fallback fonts.
+    """
+    app = QApplication.instance()
+    primary = app.font().family() if app is not None else ""
+    families = []
+    if primary:
+        families.append(primary)
+    families.extend([
+        "Noto Color Emoji",   # Linux (fonts-noto-color-emoji)
+        "Segoe UI Emoji",     # Windows 8.1+
+        "Apple Color Emoji",  # macOS / iOS
+    ])
+    return families
 
 
 def _linkify(text: str) -> str:
@@ -125,7 +137,7 @@ class MessageBubble(QWidget):
         # Body unavailable uses canonical plain-language strings (tincan-063z)
         body_label = QLabel()
         body_font = QFont()
-        body_font.setFamilies(_EMOJI_FALLBACK_FAMILIES)
+        body_font.setFamilies(_emoji_font_families())
         body_font.setPointSize(13)
         body_label.setFont(body_font)
         body_label.setWordWrap(True)

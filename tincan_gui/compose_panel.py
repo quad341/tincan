@@ -7,6 +7,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAccessible, QFont, QKeyEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QAccessibleWidget,
     QHBoxLayout,
     QLabel,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui.theme import is_dark_theme
+from tincan_gui.thread_view import _emoji_font_families
 
 _SMS_SINGLE_LIMIT = 160
 
@@ -156,9 +158,7 @@ class ComposePanel(QWidget):
         self._input.setPlaceholderText("Type a message…")
         self._input.setFixedHeight(52)
         _input_font = QFont()
-        _input_font.setFamilies([
-            "system-ui", "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji",
-        ])
+        _input_font.setFamilies(_emoji_font_families())
         _input_font.setPointSize(13)
         self._input.setFont(_input_font)
         self._input.setTabChangesFocus(True)   # Tab moves to Send button
