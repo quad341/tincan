@@ -62,20 +62,31 @@ def get_recent_logs() -> str:
     return _buffer.get_text()
 
 
+def _show_popup(text: str) -> None:
+    """Show a blocking critical dialog for an unhandled exception.
+
+    Extracted to a module-level function so tests can replace it:
+
+        monkeypatch.setattr(debug_log, "_show_popup", lambda t: None)
+    """
+    from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: PLC0415
+    if QApplication.instance():
+        QMessageBox.critical(None, "Unhandled Exception", text[:3000])
+
+
 def install_excepthook() -> None:
     """Override sys.excepthook to show a QMessageBox for unhandled exceptions.
 
     The original hook (stderr print) still fires first so logs are never lost.
+    The popup is delegated to _show_popup() which tests can patch to a no-op.
     """
     _orig = sys.excepthook
 
     def _hook(exc_type: type, exc_value: BaseException, exc_tb: object) -> None:
         _orig(exc_type, exc_value, exc_tb)
         try:
-            from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: PLC0415
-            if QApplication.instance():
-                text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-                QMessageBox.critical(None, "Unhandled Exception", text[:3000])
+            text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            _show_popup(text)
         except Exception:  # noqa: BLE001
             pass  # never recurse into the hook
 
