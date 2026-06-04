@@ -1311,6 +1311,13 @@ class TestHealingToActive:
         backend._attempt_le_rearm()
         mock_service.set_capability.assert_any_call("ancs_needs_repair", False)
 
+    def test_rearm_success_restarts_health_check(self, healing):
+        backend, _, _, _, _, notifying = healing
+        notifying[_NOTIF_SRC_PATH] = True
+        notifying[_DATA_SRC_PATH] = True
+        backend._attempt_le_rearm()
+        assert backend._health_check_id is not None
+
 
 # ---------------------------------------------------------------------------
 # §21 Timer hygiene — stop() and _on_device_disconnected() clear all timers

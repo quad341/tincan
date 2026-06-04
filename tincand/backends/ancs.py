@@ -606,6 +606,7 @@ class ANCSBackend(BackendInterface):
             if self._service is not None:
                 self._service.set_capability("ancs_needs_repair", False)
                 self._service.set_capability("ancs", True)
+            self._health_check_id = GLib.timeout_add(30_000, self._health_check)
             return GLib.SOURCE_REMOVE
 
         # SPIKE-TBD: insert hardware-validated rearm strategy here when spike is complete
