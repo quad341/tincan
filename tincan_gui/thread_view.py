@@ -156,6 +156,7 @@ class MessageBubble(QWidget):
         meta.setStyleSheet(f"color: {self._meta_color};")
         meta.setAlignment(meta_align)
         bubble_layout.addWidget(meta)
+        self._meta_label = meta
 
         bubble.setStyleSheet(
             f"background-color: {bg}; border-radius: 12px;"
@@ -168,6 +169,10 @@ class MessageBubble(QWidget):
 
         if style["align"] == Qt.AlignLeft:
             outer.addStretch()
+
+    def set_send_failed(self) -> None:
+        """Update the meta label to reflect a failed send (outbound bubbles only)."""
+        self._meta_label.setText(f"{self._data.timestamp} · ⚠ Failed")
 
     def metadata_label_color(self) -> str:
         """Return the hex color applied to the metadata label (used by a11y tests)."""
@@ -268,6 +273,7 @@ class ThreadView(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._last_outbound: Optional[MessageBubble] = None
         self._build()
 
     def _build(self) -> None:
@@ -313,6 +319,7 @@ class ThreadView(QWidget):
         message_type: str = "SMS",
     ) -> None:
         self._header.update_contact(name, phone, message_type)
+        self._last_outbound = None  # new thread — prior bubble ref is stale
 
         # Clear existing bubbles; never deleteLater the empty label (keep Python ref valid)
         while self._messages_layout.count():
@@ -364,6 +371,8 @@ class ThreadView(QWidget):
 
         bubble = MessageBubble(msg)
         self._messages_layout.addWidget(bubble)
+        if msg.bubble_type == BubbleType.OUTBOUND:
+            self._last_outbound = bubble
 
         scroll_ref = self._scroll
         sb = scroll_ref.verticalScrollBar()
@@ -377,6 +386,11 @@ class ThreadView(QWidget):
                 except RuntimeError:
                     pass
             QTimer.singleShot(0, _scroll_to_bottom)
+
+    def mark_last_send_failed(self) -> None:
+        """Update the most recently appended outbound bubble to show '⚠ Failed'."""
+        if self._last_outbound is not None:
+            self._last_outbound.set_send_failed()
 
     def show_empty(self) -> None:
         while self._messages_layout.count():
