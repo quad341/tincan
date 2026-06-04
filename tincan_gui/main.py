@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
         self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP inbound echo of self-sends
+        self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs for thread render
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
@@ -391,6 +392,16 @@ class MainWindow(QMainWindow):
         name = conv_data.name if conv_data else conv_id
         raw_msgs = self._dbus_client.get_messages(conv_id)
         messages = [self._msg_dict_to_data(m) for m in raw_msgs]
+        # Merge locally-cached sent messages (iOS MAP sent folder is always empty).
+        cache_key = self._current_phone or conv_id
+        cached_sent = self._sent_cache.get(cache_key, [])
+        if cached_sent:
+            existing_sent_bodies = {
+                m.body for m in messages if m.bubble_type == BubbleType.OUTBOUND
+            }
+            extra = [m for m in cached_sent if m.body not in existing_sent_bodies]
+            if extra:
+                messages = sorted(messages + extra, key=lambda m: m.timestamp)
         self._thread_view.load_thread(name, conv_id, messages, "SMS")
         self._sync_compose_state()
         self._tray.reset_unread()
@@ -419,6 +430,7 @@ class MainWindow(QMainWindow):
         self._messages_ok = False
         self._sent_bodies.clear()
         self._self_echo_guard.clear()
+        self._sent_cache.clear()
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
@@ -568,7 +580,10 @@ class MainWindow(QMainWindow):
             return
         phone = self._current_phone
         ts = datetime.now().strftime("%H:%M")
-        self._thread_view.append_message(MessageData(BubbleType.OUTBOUND, text, "", ts))
+        sent_msg = MessageData(BubbleType.OUTBOUND, text, "", ts)
+        self._thread_view.append_message(sent_msg)
+        # Cache sent message for thread reload (iOS MAP sent folder returns 0 messages).
+        self._sent_cache.setdefault(phone, []).append(sent_msg)
         self._pending_sends.add((phone, text))
         # Guard self-conversations: MAP re-delivers self-sent messages to inbox as inbound.
         self._self_echo_guard.add((phone, text))
