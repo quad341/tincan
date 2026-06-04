@@ -24,6 +24,17 @@ from tincan_gui.thread_view import _emoji_font_families
 
 _SMS_SINGLE_LIMIT = 160
 
+_COMPOSE_HINTS: dict[str, str] = {
+    "phone number unavailable for this thread": "Can't reply — no number for this contact",
+    "messaging unavailable": "Can't reply — messaging unavailable",
+    "not connected": "Can't reply — not connected to device",
+}
+
+
+def _compose_hint(reason: str) -> str:
+    """Return a user-facing hint string for a disabled-compose reason."""
+    return _COMPOSE_HINTS.get(reason, f"Can't reply — {reason}" if reason else "Can't reply")
+
 
 class _ErrorBar(QWidget):
     """Error bar widget — subclassed so the a11y factory can give it AlertMessage role."""
@@ -224,6 +235,7 @@ class ComposePanel(QWidget):
         self._send_btn.setEnabled(enabled)
 
         if enabled:
+            self._input.setPlaceholderText("Type a message…")
             self._input.setStyleSheet("")
             self._send_btn.setStyleSheet(
                 "QPushButton { background-color: #0d9488; color: #ffffff; "
@@ -234,10 +246,17 @@ class ComposePanel(QWidget):
             self._send_btn.setToolTip("")
             self._send_btn.setAccessibleName("Send SMS message")
         else:
-            self._input.setStyleSheet("opacity: 0.4;")
+            hint = _compose_hint(reason)
+            self._input.setPlaceholderText(hint)
+            _dark = is_dark_theme()
+            self._input.setStyleSheet(
+                "QPlainTextEdit { background: #3f3f46; color: #a1a1aa; }"
+                if _dark else
+                "QPlainTextEdit { background: #f3f4f6; color: #6b7280; }"
+            )
             self._send_btn.setStyleSheet(
                 "QPushButton { background-color: #0d9488; color: #ffffff; "
-                "border-radius: 6px; font-size: 14px; opacity: 0.4; }"
+                "border-radius: 6px; font-size: 14px; }"
             )
             tooltip = f"Sending unavailable — {reason}" if reason else "Sending unavailable"
             self._input.setToolTip(tooltip)
