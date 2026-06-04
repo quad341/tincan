@@ -396,6 +396,20 @@ class MainWindow(QMainWindow):
             self._current_phone = conv_id
             self._current_phone_dialable = True
         name = conv_data.name if conv_data else conv_id
+        # Paint the thread header immediately so selection feels snappy, then
+        # fetch messages in the next event-loop tick (defers the D-Bus round trip).
+        self._thread_view.load_thread(name, conv_id, [], "SMS")
+        self._sync_compose_state()
+        self._tray.reset_unread()
+        self._dbus_client.mark_conversation_read(conv_id)
+        self._dbus_client.fetch_contact_photo(conv_id)
+        QTimer.singleShot(0, lambda: self._load_thread_messages(conv_id, name))
+
+    def _load_thread_messages(self, conv_id: str, name: str) -> None:
+        """Populate the thread view with messages (deferred from _on_conversation_selected)."""
+        # Guard: user may have switched conversations during the deferred tick.
+        if self._current_phone and not _same_conv(conv_id, self._current_phone):
+            return
         raw_msgs = self._dbus_client.get_messages(conv_id)
         messages = [self._msg_dict_to_data(m) for m in raw_msgs]
         # Merge locally-cached sent messages (iOS MAP sent folder is always empty).
@@ -409,10 +423,6 @@ class MainWindow(QMainWindow):
             if extra:
                 messages = sorted(messages + extra, key=lambda m: m.timestamp)
         self._thread_view.load_thread(name, conv_id, messages, "SMS")
-        self._sync_compose_state()
-        self._tray.reset_unread()
-        self._dbus_client.mark_conversation_read(conv_id)
-        self._dbus_client.fetch_contact_photo(conv_id)
 
     def _on_daemon_connected(self, device_address: str) -> None:
         status = self._dbus_client.get_status()
