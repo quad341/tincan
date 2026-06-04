@@ -357,10 +357,11 @@ class TestSettingsDialogAccessibility:
             + dlg.findChildren(QLineEdit)
             + dlg.findChildren(QComboBox)
         )
-        # Strip the Desktop notifications checkbox and anything inside the QDialogButtonBox.
+        # Strip the known checkboxes and anything inside the QDialogButtonBox.
+        known = {dlg._desktop_cb, dlg._close_to_tray_cb}
         unexpected = [
             w for w in interactive
-            if w is not dlg._desktop_cb
+            if w not in known
             and not isinstance(w.parent(), QDialogButtonBox)
             and not isinstance(w, QDialogButtonBox)
         ]
