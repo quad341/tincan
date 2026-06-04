@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import warnings
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -286,10 +286,12 @@ class MainWindow(QMainWindow):
             return  # daemon not running — UI stays in default disconnected state
         if status.get("connected"):
             addr = str(status.get("device_name") or status.get("device_address") or "")
+            self._connected_device = addr
             self._title_bar.set_connected(addr)
             self._banner_a.hide()
             caps = status.get("capabilities") or {}
             self._apply_capabilities(caps)
+            self._tray.set_connected(True)
             self._load_conversations()
         else:
             self._title_bar.set_disconnected()
@@ -558,7 +560,7 @@ class MainWindow(QMainWindow):
             self._compose.show_send_error(text)
             return
         phone = self._current_phone
-        ts = datetime.now(tz=timezone.utc).strftime("%H:%M")
+        ts = datetime.now().strftime("%H:%M")
         self._thread_view.append_message(MessageData(BubbleType.OUTBOUND, text, "", ts))
         self._pending_sends.add((phone, text))
         message_id = self._dbus_client.send_message(phone, text)

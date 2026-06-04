@@ -507,3 +507,48 @@ class TestDBusWiring:
 
         assert len(appended) == 1
         assert appended[0].bubble_type == BubbleType.INBOUND
+
+
+# ---------------------------------------------------------------------------
+# §N _sync_daemon_state — cold-start tray.set_connected path (tincan-wb4c)
+# ---------------------------------------------------------------------------
+
+class TestSyncDaemonState:
+    """_sync_daemon_state at startup propagates daemon status to tray and _connected_device."""
+
+    @pytest.fixture(autouse=True)
+    def _no_list_conversations(self, monkeypatch):
+        monkeypatch.setattr(TincandClient, "list_conversations", lambda self: [])
+
+    def test_connected_daemon_sets_tray_connected_true(self, qtbot, monkeypatch):
+        monkeypatch.setattr(
+            TincandClient, "get_status",
+            lambda self: {"connected": True, "device_name": "TestPhone", "capabilities": {}},
+        )
+        window = MainWindow()
+        qtbot.addWidget(window)
+        assert window._tray._connected is True
+
+    def test_connected_daemon_sets_connected_device(self, qtbot, monkeypatch):
+        monkeypatch.setattr(
+            TincandClient, "get_status",
+            lambda self: {"connected": True, "device_name": "AA:BB:CC:DD:EE:FF", "capabilities": {}},
+        )
+        window = MainWindow()
+        qtbot.addWidget(window)
+        assert window._connected_device == "AA:BB:CC:DD:EE:FF"
+
+    def test_disconnected_daemon_tray_connected_stays_false(self, qtbot, monkeypatch):
+        monkeypatch.setattr(
+            TincandClient, "get_status",
+            lambda self: {"connected": False},
+        )
+        window = MainWindow()
+        qtbot.addWidget(window)
+        assert window._tray._connected is False
+
+    def test_no_daemon_response_tray_connected_stays_false(self, qtbot, monkeypatch):
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {})
+        window = MainWindow()
+        qtbot.addWidget(window)
+        assert window._tray._connected is False

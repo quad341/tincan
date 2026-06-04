@@ -227,3 +227,16 @@ class TestTincandClientConstruction:
         # Construction in the normal test environment (D-Bus present, tincand absent)
         TincandClient()
         # Bus is connected; subscribe called; no crash
+
+
+# ---------------------------------------------------------------------------
+# §4 mark_conversation_read — fire-and-forget, no crash when disconnected (tincan-fdvu)
+# ---------------------------------------------------------------------------
+
+class TestMarkConversationRead:
+    """mark_conversation_read does not raise when the bus is disconnected."""
+
+    def test_does_not_raise_when_bus_disconnected(self, _hermetic_dbus):
+        client = TincandClient()
+        client.mark_conversation_read("conv-1")
+        # No exception → test passes

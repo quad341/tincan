@@ -187,3 +187,87 @@ class TestDismissButtonAccessibility:
         qtbot.addWidget(panel)
         dismiss = self._find_dismiss(panel)
         assert dismiss.accessibleName() == "Dismiss send error"
+
+
+# ---------------------------------------------------------------------------
+# §5 Pure functions: _is_ucs2 and _sms_segments (tincan-7qzj)
+# ---------------------------------------------------------------------------
+
+from tincan_gui.compose_panel import _is_ucs2, _sms_segments  # noqa: E402
+
+
+class TestIsUcs2:
+    """_is_ucs2() returns True only when text contains non-GSM-7 characters."""
+
+    def test_empty_string_is_not_ucs2(self):
+        assert _is_ucs2("") is False
+
+    def test_pure_ascii_is_not_ucs2(self):
+        assert _is_ucs2("Hello, world!") is False
+
+    def test_gsm7_euro_sign_is_not_ucs2(self):
+        assert _is_ucs2("€") is False
+
+    def test_gsm7_inverted_exclamation_is_not_ucs2(self):
+        assert _is_ucs2("¡") is False
+
+    def test_gsm7_a_umlaut_is_not_ucs2(self):
+        assert _is_ucs2("ä") is False
+
+    def test_emoji_requires_ucs2(self):
+        assert _is_ucs2("😀") is True
+
+    def test_mixed_ascii_and_emoji_requires_ucs2(self):
+        assert _is_ucs2("Hello 😀") is True
+
+    def test_cjk_character_requires_ucs2(self):
+        assert _is_ucs2("中") is True
+
+
+class TestSmsSegments:
+    """_sms_segments() returns (chars, segments, chars_in_last) with GSM-7 or UCS-2 limits."""
+
+    def test_empty_returns_all_zeros(self):
+        assert _sms_segments("") == (0, 0, 0)
+
+    def test_single_ascii_char_is_one_segment(self):
+        assert _sms_segments("A") == (1, 1, 1)
+
+    def test_exactly_160_ascii_chars_is_one_segment(self):
+        assert _sms_segments("A" * 160) == (160, 1, 160)
+
+    def test_161_ascii_chars_splits_into_two_segments(self):
+        total, parts, last = _sms_segments("A" * 161)
+        assert total == 161
+        assert parts == 2
+        assert last == 8  # 161 - 153
+
+    def test_306_ascii_chars_fills_two_segments_exactly(self):
+        assert _sms_segments("A" * 306) == (306, 2, 153)
+
+    def test_307_ascii_chars_needs_three_segments(self):
+        total, parts, last = _sms_segments("A" * 307)
+        assert total == 307
+        assert parts == 3
+        assert last == 1  # 307 - 2*153
+
+    def test_single_emoji_is_ucs2_one_segment(self):
+        assert _sms_segments("😀") == (1, 1, 1)
+
+    def test_exactly_70_emojis_is_one_segment(self):
+        assert _sms_segments("😀" * 70) == (70, 1, 70)
+
+    def test_71_emojis_splits_into_two_ucs2_segments(self):
+        total, parts, last = _sms_segments("😀" * 71)
+        assert total == 71
+        assert parts == 2
+        assert last == 4  # 71 - 67
+
+    def test_134_emojis_fills_two_ucs2_segments_exactly(self):
+        assert _sms_segments("😀" * 134) == (134, 2, 67)
+
+    def test_135_emojis_needs_three_ucs2_segments(self):
+        total, parts, last = _sms_segments("😀" * 135)
+        assert total == 135
+        assert parts == 3
+        assert last == 1  # 135 - 2*67

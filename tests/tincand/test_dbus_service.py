@@ -12,6 +12,7 @@ Coverage:
   - on_message_received: MessageReceived emitted; ConversationUpdated emitted for known conv_id.
   - on_message_received: unknown conv_id → no ConversationUpdated emitted.
   - Conversation.to_dbus() always includes last_message_preview='' and unread_count=0 as defaults.
+  - MarkConversationRead: resets unread_count and emits ConversationUpdated (tincan-fdvu).
 
 No D-Bus infrastructure needed — TincanService is instantiated with a mocked bus.
 """
@@ -305,3 +306,44 @@ class TestOnMessageReceivedSignals:
             "timestamp": "2024-01-01T11:00:00",
         })
         connected_service.ConversationUpdated.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §N MarkConversationRead (tincan-fdvu)
+# ---------------------------------------------------------------------------
+
+class TestMarkConversationRead:
+    """MarkConversationRead resets unread_count and emits ConversationUpdated."""
+
+    def test_resets_unread_count_to_zero(self, service):
+        service._conversations["conv-1"] = Conversation(
+            id="conv-1", display_name="Alice", unread_count=5,
+        )
+        service.MarkConversationRead("conv-1")
+        assert service._conversations["conv-1"].unread_count == 0
+
+    def test_emits_conversation_updated(self, service):
+        service._conversations["conv-1"] = Conversation(
+            id="conv-1", display_name="Alice", unread_count=3,
+        )
+        service.MarkConversationRead("conv-1")
+        service.ConversationUpdated.assert_called_once()
+
+    def test_emitted_payload_has_zero_unread_count(self, service):
+        service._conversations["conv-1"] = Conversation(
+            id="conv-1", display_name="Alice", unread_count=2,
+        )
+        service.MarkConversationRead("conv-1")
+        args = service.ConversationUpdated.call_args[0][0]
+        assert int(args["unread_count"]) == 0
+
+    def test_noop_when_already_zero_no_signal(self, service):
+        service._conversations["conv-1"] = Conversation(
+            id="conv-1", display_name="Alice", unread_count=0,
+        )
+        service.MarkConversationRead("conv-1")
+        service.ConversationUpdated.assert_not_called()
+
+    def test_noop_for_unknown_conversation_id(self, service):
+        service.MarkConversationRead("no-such-conv")
+        service.ConversationUpdated.assert_not_called()

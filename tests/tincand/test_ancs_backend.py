@@ -177,11 +177,12 @@ class TestBackendInterfaceCompliance:
 
 
 # ---------------------------------------------------------------------------
-# §2 start() — RegisterApplication + RegisterAdvertisement
+# §2 start() — AgentManager1 + LEAdvertisingManager1
 # ---------------------------------------------------------------------------
 
 class TestStart:
-    """start() connects to the system bus and registers both GATT objects."""
+    """start() connects to the system bus, registers the pairing agent (AgentManager1)
+    and the LE advertisement (LEAdvertisingManager1); no local GattApplication is used."""
 
     def test_registers_pairing_agent_exactly_once(self, ctx):
         backend, mock_bus, _, _ = ctx
