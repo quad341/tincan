@@ -118,7 +118,9 @@ class ConversationItem(QWidget):
         name_font.setBold(False)
         self._name_label.setFont(name_font)
         self._name_label.setStyleSheet(
-            "color: #f4f4f5;" if self._dark else "color: #111827;"
+            "background: transparent; color: #f4f4f5;"
+            if self._dark
+            else "background: transparent; color: #111827;"
         )
         top_row.addWidget(self._name_label, stretch=1)
 
@@ -127,7 +129,9 @@ class ConversationItem(QWidget):
         ts_font.setPointSize(11)
         self._ts_label.setFont(ts_font)
         self._ts_label.setStyleSheet(
-            "color: #a1a1aa;" if self._dark else "color: #6b7280;"
+            "background: transparent; color: #a1a1aa;"
+            if self._dark
+            else "background: transparent; color: #6b7280;"
         )
         top_row.addWidget(self._ts_label)
 
@@ -196,14 +200,16 @@ class ConversationItem(QWidget):
             else:
                 display = raw[:36] + "…" if len(raw) > 36 else raw
             self._preview_label.setText(display)
-            self._preview_label.setStyleSheet(f"color: {preview_color};")
+            self._preview_label.setStyleSheet(f"background: transparent; color: {preview_color};")
             f = self._preview_label.font()
             f.setItalic(False)
             self._preview_label.setFont(f)
             self._preview_label.setAccessibleName(raw)
         else:
             self._preview_label.setText("—")
-            self._preview_label.setStyleSheet(f"color: {no_preview_color};")
+            self._preview_label.setStyleSheet(
+                f"background: transparent; color: {no_preview_color};"
+            )
             f = self._preview_label.font()
             f.setItalic(True)
             self._preview_label.setFont(f)
@@ -256,16 +262,20 @@ class ConversationItem(QWidget):
                 " border-radius: 8px; margin: 4px 6px;"
                 " } QLabel { background: transparent; }"
             )
-            self._name_label.setStyleSheet(f"color: {sel_name};")
-            self._ts_label.setStyleSheet(f"color: {sel_muted};")
+            self._name_label.setStyleSheet(f"background: transparent; color: {sel_name};")
+            self._ts_label.setStyleSheet(f"background: transparent; color: {sel_muted};")
             self._apply_preview()
         else:
             self.setStyleSheet("QLabel { background: transparent; }")
             self._name_label.setStyleSheet(
-                "color: #f4f4f5;" if self._dark else "color: #111827;"
+                "background: transparent; color: #f4f4f5;"
+                if self._dark
+                else "background: transparent; color: #111827;"
             )
             self._ts_label.setStyleSheet(
-                "color: #a1a1aa;" if self._dark else "color: #6b7280;"
+                "background: transparent; color: #a1a1aa;"
+                if self._dark
+                else "background: transparent; color: #6b7280;"
             )
             self._apply_preview()
 
