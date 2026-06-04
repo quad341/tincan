@@ -210,16 +210,21 @@ class TincanService(dbus.service.Object):
         """Return stored messages for *conv_id*, oldest first.
 
         Raises NotConnected if no session.  Returns [] for unknown conv_id.
+        Falls back to the normalize_phone key so GUI lookups by name-keyed or
+        differently-formatted phone IDs still find phone-keyed stored messages.
         """
         if not self._connected:
             raise dbus.exceptions.DBusException(
                 "No active Bluetooth session",
                 name="im.tincan.Error.NotConnected",
             )
-        msgs = sorted(
-            self._messages.get(str(conv_id), []),
-            key=lambda m: m.get("timestamp", "") or "",
-        )
+        raw = str(conv_id)
+        raw_msgs = self._messages.get(raw, [])
+        if not raw_msgs:
+            norm = normalize_phone(raw)
+            if norm and len(norm) >= 7 and norm != raw:
+                raw_msgs = self._messages.get(norm, [])
+        msgs = sorted(raw_msgs, key=lambda m: m.get("timestamp", "") or "")
         return [
             dbus.Dictionary(
                 {k: dbus.String(str(v)) for k, v in msg.items()},
@@ -315,9 +320,16 @@ class TincanService(dbus.service.Object):
             ) from exc
         now_iso = datetime.now(tz=timezone.utc).strftime("%H:%M")
         normalized_to = normalize_phone(phone_to)
+        # Route the optimistic send to the same conv_id the GUI uses.
+        # If the caller passed a display name (e.g. "Alice") that still exists as
+        # a conversation key, use it so GetMessages(that_key) finds the message on
+        # thread reload.  Falls back to normalized_to once awrv re-keying has
+        # removed the name-keyed conversation.
+        raw_to = str(to)
+        conv_id_for_send = raw_to if raw_to in self._conversations else normalized_to
         self.on_message_received({
             "id": str(handle),
-            "conversation_id": normalized_to,
+            "conversation_id": conv_id_for_send,
             "direction": "outbound",
             "status": "read",
             "body": str(body),

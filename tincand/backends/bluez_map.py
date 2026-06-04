@@ -323,15 +323,25 @@ class MapBackend(BackendInterface):
         # Try both "sent" and "outbox" — MAP spec says "sent" but some iOS versions
         # or obexd versions surface this as "outbox".
         sent_raw = None
+        _sent_folder_used = None
         for _sent_folder in ("sent", "outbox"):
             try:
                 sent_raw = self._retry(self._msg_access.ListMessages, _sent_folder, {})
+                _sent_folder_used = _sent_folder
                 break
             except dbus.exceptions.DBusException:
                 continue
         if sent_raw is None:
             _log.warning(
-                "MAP sent folder unavailable (tried 'sent' and 'outbox') — no outbound history"
+                "MAP sent folder unavailable (tried 'sent' and 'outbox') — "
+                "iOS does not expose outbound history over MAP; "
+                "sent messages are optimistic-only in the GUI"
+            )
+        elif not sent_raw:
+            _log.warning(
+                "MAP '%s' folder returned 0 messages — "
+                "iOS sent-folder may be empty or unsupported",
+                _sent_folder_used,
             )
         try:
             _first_sent = True

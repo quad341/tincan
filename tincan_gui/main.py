@@ -48,6 +48,25 @@ def _is_dialable(s: str) -> bool:
     return len(_NON_DIGIT_RE.sub("", s)) >= 7
 
 
+def _same_conv(a: str, b: str) -> bool:
+    """True when two conversation IDs refer to the same conversation.
+
+    Normalises phone-shaped strings (strips non-digits, trims to 10 digits for
+    US/CA) so that "+18157916347" and "8157916347" compare equal.  Returns False
+    when either value is name-shaped (fewer than 7 digit chars) to avoid false
+    matches between unrelated name-keyed threads.
+    """
+    if a == b:
+        return True
+    na = _NON_DIGIT_RE.sub("", a)
+    nb = _NON_DIGIT_RE.sub("", b)
+    if len(na) < 7 or len(nb) < 7:
+        return False
+    na = na[-10:] if len(na) > 10 else na
+    nb = nb[-10:] if len(nb) > 10 else nb
+    return na == nb
+
+
 class TitleBar(QWidget):
     """Title bar (h=48, forest teal #0f4c3a): wordmark + gear button + connection status chip."""
 
@@ -421,7 +440,7 @@ class MainWindow(QMainWindow):
         conv_id = str(message.get("conversation_id", ""))
         if conv_id and not self._current_phone:
             return  # no conversation selected; don't append routed messages to thread view
-        if self._current_phone and conv_id and conv_id != self._current_phone:
+        if self._current_phone and conv_id and not _same_conv(conv_id, self._current_phone):
             return  # message is for a different conversation; notification already sent
         direction = str(message.get("direction", "inbound"))
         body = str(message.get("body", ""))
