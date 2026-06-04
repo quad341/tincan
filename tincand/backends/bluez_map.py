@@ -129,6 +129,26 @@ def _norm_phone(s: str) -> str:
     return s
 
 
+def _get_map_datetime(props: dict) -> str:
+    """Return the raw datetime string from MAP ListMessages properties.
+
+    BlueZ obexd versions differ in how they expose the MAP 'datetime' XML
+    attribute in the D-Bus ListMessages response.  Try explicit keys first,
+    then fall back to a case-insensitive scan of all property keys.
+    """
+    for key in ("Datetime", "DateTime", "Date", "datetime", "Timestamp", "timestamp"):
+        val = str(props.get(key, ""))
+        if val:
+            return val
+    dt_keys = frozenset(("datetime", "date", "timestamp"))
+    for k, v in props.items():
+        if str(k).lower() in dt_keys:
+            raw = str(v)
+            if raw:
+                return raw
+    return ""
+
+
 def _parse_map_datetime(dt: str) -> str:
     """Convert MAP Datetime 'YYYYMMDDTHHMMSS[±HHMM]' to 'HH:MM' for GUI display.
 
@@ -277,7 +297,7 @@ class MapBackend(BackendInterface):
         _first_inbox = True
         for msg_path, props in inbox_raw.items():
             if _first_inbox:
-                _log.debug(
+                _log.warning(
                     "MAP inbox props (first message) — raw keys: %s",
                     {str(k): str(v) for k, v in props.items()},
                 )
@@ -289,11 +309,7 @@ class MapBackend(BackendInterface):
             )
             phone = str(props.get("SenderAddressing", props.get("Sender", "")))
             display_name = str(props.get("Sender", phone))
-            raw_dt = str(
-                props.get("Datetime", "")
-                or props.get("DateTime", "")
-                or props.get("Date", "")
-            )
+            raw_dt = _get_map_datetime(props)
             parsed.append({
                 "path": str(msg_path),
                 "sender": phone,
@@ -321,7 +337,7 @@ class MapBackend(BackendInterface):
             _first_sent = True
             for msg_path, props in (sent_raw or {}).items():
                 if _first_sent:
-                    _log.debug(
+                    _log.warning(
                         "MAP sent props (first message) — raw keys: %s",
                         {str(k): str(v) for k, v in props.items()},
                     )
@@ -333,11 +349,7 @@ class MapBackend(BackendInterface):
                 )
                 phone = str(props.get("RecipientAddressing", props.get("Recipient", "")))
                 display_name = str(props.get("Recipient", phone))
-                raw_dt = str(
-                    props.get("Datetime", "")
-                    or props.get("DateTime", "")
-                    or props.get("Date", "")
-                )
+                raw_dt = _get_map_datetime(props)
                 parsed.append({
                     "path": str(msg_path),
                     "sender": phone,
