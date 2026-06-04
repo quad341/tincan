@@ -58,7 +58,7 @@ class SettingsDialog(QDialog):
 
         # Close button accessible name (screen readers)
         if close_btn := self.findChild(QWidget, "qt_dialog_buttonbox_button_close"):
-            close_btn.setAccessibleName("Close")
+            close_btn.setAccessibleName(self.tr("Close"))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -70,8 +70,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(notif_sep)
 
         _dark = is_dark_theme()
-        self._desktop_cb = QCheckBox("Desktop notifications")
-        self._desktop_cb.setAccessibleName("Desktop notifications")
+        self._desktop_cb = QCheckBox(self.tr("Desktop notifications"))
+        self._desktop_cb.setAccessibleName(self.tr("Desktop notifications"))
         cb_font = QFont()
         cb_font.setPointSize(11)
         self._desktop_cb.setFont(cb_font)
@@ -183,7 +183,7 @@ class SettingsDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         close_btn = buttons.button(QDialogButtonBox.StandardButton.Close)
         if close_btn:
-            close_btn.setAccessibleName("Close")
+            close_btn.setAccessibleName(self.tr("Close"))
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
