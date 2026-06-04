@@ -38,6 +38,15 @@ def _parse_args() -> argparse.Namespace:
             "(default: TINCAN_DEVICE env var)."
         ),
     )
+    parser.add_argument(
+        "--with-ancs",
+        action="store_true",
+        dest="with_ancs",
+        help=(
+            "Run the ANCS backend concurrently with the primary backend "
+            "(MAP + ANCS in one process)."
+        ),
+    )
     args = parser.parse_args()
     if args.mock:
         if args.backend and args.backend != "mock":
@@ -86,6 +95,18 @@ def main() -> None:
 
     bus = dbus.SessionBus()
     service = TincanService(bus)
+
+    if args.with_ancs and args.backend == "map":
+        from tincand.backend_manager import BackendManager
+        from tincand.backends.ancs import ANCSBackend
+
+        device_addr = args.device or os.environ.get("TINCAN_DEVICE", "")
+        ancs = ANCSBackend(device_addr=device_addr)
+        backend = BackendManager(primary=backend, secondaries=[ancs])
+        _log.info("tincand: multi-backend mode — MAP (primary) + ANCS (secondary)")
+    elif args.with_ancs:
+        _log.warning("--with-ancs is only supported with --backend map; ignoring")
+
     backend.register_service(service)
     service.register_backend(backend)
 
