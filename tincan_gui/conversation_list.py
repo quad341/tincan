@@ -236,17 +236,19 @@ class ConversationItem(QWidget):
         count = self._data.unread_count
         if count > 0:
             badge = "9+" if count >= 10 else str(count)
-            self.setAccessibleName(f"{base}, Unread: {badge}")
+            self.setAccessibleName(
+                self.tr("{name}, Unread: {badge}").format(name=base, badge=badge)
+            )
         else:
             self.setAccessibleName(base)
         # tincan-298: use "Unread: N" format for unread_count; fall back to plain
         # "Unread" for legacy data using the unread bool flag (unread_count==0).
         if count >= 10:
-            self.setAccessibleDescription("Unread: 9+")
+            self.setAccessibleDescription(self.tr("Unread: 9+"))
         elif count > 0:
-            self.setAccessibleDescription(f"Unread: {count}")
+            self.setAccessibleDescription(self.tr("Unread: {}").format(count))
         elif self._data.unread:
-            self.setAccessibleDescription("Unread")
+            self.setAccessibleDescription(self.tr("Unread"))
         else:
             self.setAccessibleDescription("")
 
