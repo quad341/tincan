@@ -369,7 +369,9 @@ class MainWindow(QMainWindow):
         show_c = not ancs_ok and not ancs_needs_repair
         self._banner_c.setVisible(show_c)
         if self._connected_device:
-            if ancs_ok:
+            # Chip reflects messaging capability (primary), not ANCS notifications
+            # (secondary). ANCS unavailability is surfaced via the State C banner.
+            if self._messages_ok:
                 self._title_bar.set_connected(self._connected_device)
             else:
                 self._title_bar.set_connected_limited(self._connected_device)
