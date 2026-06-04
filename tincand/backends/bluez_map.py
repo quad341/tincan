@@ -151,6 +151,7 @@ class MapBackend(BackendInterface):
         self._device_name: str = ""
         self._seen_handles: set[str] = set()  # handles seen on initial poll — skip notifications
         self._initial_poll_done: bool = False
+        self._failed_handles: set[str] = set()  # handles where GetMessage raised; skip on retry
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -196,6 +197,7 @@ class MapBackend(BackendInterface):
         self._device_name = self._resolve_device_name(device_addr)
         self._seen_handles.clear()
         self._initial_poll_done = False
+        self._failed_handles.clear()
 
         if self._service is not None:
             self._service.Connect(device_addr)  # type: ignore[attr-defined]
@@ -427,6 +429,8 @@ class MapBackend(BackendInterface):
         """GetMessage for *msg_path*, wait for transfer, return parsed body."""
         if self._msg_access is None:
             return None
+        if msg_path in self._failed_handles:
+            return None
         try:
             result = self._retry(
                 self._msg_access.GetMessage,
@@ -440,6 +444,7 @@ class MapBackend(BackendInterface):
             return self._wait_transfer_recv(str(transfer_path))
         except dbus.exceptions.DBusException as exc:
             _log.warning("GetMessage failed for %s: %s", msg_path, exc)
+            self._failed_handles.add(msg_path)
             return None
 
     def _wait_transfer_recv(self, transfer_path: str) -> str | None:
