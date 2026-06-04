@@ -155,6 +155,12 @@ class ComposePanel(QWidget):
         self._input = _MessageInput()
         self._input.setPlaceholderText("Type a message…")
         self._input.setFixedHeight(52)
+        _input_font = QFont()
+        _input_font.setFamilies([
+            "system-ui", "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji",
+        ])
+        _input_font.setPointSize(13)
+        self._input.setFont(_input_font)
         self._input.setTabChangesFocus(True)   # Tab moves to Send button
         self._input.send_requested.connect(self._on_send)
         self._input.textChanged.connect(self._on_text_changed)
