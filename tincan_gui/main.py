@@ -505,6 +505,8 @@ class MainWindow(QMainWindow):
         c.app_notification_received.connect(self._notifier.dispatch_app_notification)
         c.conversation_updated.connect(self._on_conversation_updated)
         c.contact_photo_received.connect(self._on_contact_photo_received)
+        c.message_send_accepted.connect(self._on_send_accepted)
+        c.message_send_failed.connect(self._on_send_failed)
         self.refresh_requested.connect(self._load_conversations)
 
     def _maybe_spawn_daemon(self) -> None:
@@ -881,6 +883,9 @@ class MainWindow(QMainWindow):
             self._compose.show_send_error(text)
             return
         phone = self._current_phone
+        # In-flight guard: prevent double-submit while a send of same (phone, text) is pending.
+        if (phone, text) in self._pending_sends:
+            return
         ts = datetime.now().strftime("%H:%M")
         sent_msg = MessageData(BubbleType.OUTBOUND, text, "", ts)
         self._thread_view.append_message(sent_msg)
@@ -890,16 +895,21 @@ class MainWindow(QMainWindow):
         # Guard self-conversations: MAP re-delivers self-sent messages to inbox as inbound.
         self._self_echo_guard.add((phone, text))
         QTimer.singleShot(10000, lambda: self._self_echo_guard.discard((phone, text)))
-        message_id = self._dbus_client.send_message(phone, text)
+        # Non-blocking send — outcome arrives via _on_send_accepted / _on_send_failed.
+        self._dbus_client.send_message_async(phone, text)
+
+    def _on_send_accepted(self, to: str, body: str, message_id: str) -> None:
         # Defer cleanup so daemon's MessageReceived echo arrives first and is suppressed.
-        QTimer.singleShot(0, lambda: self._pending_sends.discard((phone, text)))
+        QTimer.singleShot(0, lambda: self._pending_sends.discard((to, body)))
         if message_id:
             # Track sent body so MAP-poll echoes (which arrive after _pending_sends
             # is cleared) are suppressed without showing a duplicate bubble.
-            self._sent_bodies.setdefault(phone, set()).add(text)
-        if not message_id:
-            self._thread_view.mark_last_send_failed()
-            self._compose.show_send_error(text)
+            self._sent_bodies.setdefault(to, set()).add(body)
+
+    def _on_send_failed(self, to: str, body: str) -> None:
+        QTimer.singleShot(0, lambda: self._pending_sends.discard((to, body)))
+        self._thread_view.mark_last_send_failed()
+        self._compose.show_send_error(body)
 
     def _on_compose_new(self) -> None:
         """Open the multi-chip New Conversation dialog."""

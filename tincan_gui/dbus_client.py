@@ -14,6 +14,7 @@ from PySide6.QtDBus import (
     QDBusConnection,
     QDBusInterface,
     QDBusMessage,
+    QDBusPendingCallWatcher,
     QDBusReply,
 )
 
@@ -175,6 +176,10 @@ class TincandClient(QObject):
     message_sent = Signal(str)             # message_id
     conversation_updated = Signal(dict)    # conversation a{sv} → dict
     contact_photo_received = Signal(str, bytes)  # (conv_id, photo_bytes)
+
+    # Async send outcome signals (to, body, message_id) / (to, body)
+    message_send_accepted = Signal(str, str, str)
+    message_send_failed = Signal(str, str)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -413,6 +418,32 @@ class TincandClient(QObject):
             _log.warning("SendMessage failed: %s", reply.error().message())
             return ""
         return str(reply.value() or "")
+
+    def send_message_async(self, to: str, body: str) -> None:
+        """Call SendMessage asynchronously; emits message_send_accepted or message_send_failed."""
+        if not self._bus.isConnected():
+            _log.warning("send_message_async: no D-Bus session bus")
+            self.message_send_failed.emit(to, body)
+            return
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
+        if not iface.isValid():
+            _log.warning("send_message_async: tincand not running")
+            self.message_send_failed.emit(to, body)
+            return
+        pending = iface.asyncCall("SendMessage", to, body)
+        watcher = QDBusPendingCallWatcher(pending, self)
+        watcher.finished.connect(lambda w: self._on_send_message_reply(w, to, body))
+
+    def _on_send_message_reply(
+        self, watcher: QDBusPendingCallWatcher, to: str, body: str
+    ) -> None:
+        reply = QDBusReply(watcher.reply())
+        if reply.isValid():
+            self.message_send_accepted.emit(to, body, str(reply.value() or ""))
+        else:
+            _log.warning("SendMessage async failed: %s", reply.error().message())
+            self.message_send_failed.emit(to, body)
+        watcher.deleteLater()
 
     def mark_conversation_read(self, conv_id: str) -> None:
         """Call MarkConversationRead on the daemon (fire-and-forget)."""
