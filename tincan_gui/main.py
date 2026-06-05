@@ -837,58 +837,6 @@ class MainWindow(QMainWindow):
             "Toggle it on, then wait a few seconds for tincan to reconnect.",
         )
 
-    def _on_compose_new(self) -> None:
-        """Open a new-conversation dialog with name/number autocomplete."""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("New Conversation")
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("Recipient (name or number):"))
-
-        line_edit = QLineEdit()
-        line_edit.setMinimumWidth(300)
-        line_edit.setPlaceholderText("Type a name or phone number…")
-
-        # Build autocomplete candidates from known conversations.
-        name_to_phone: dict[str, str] = {}
-        display_items: list[str] = []
-        for conv in self._conversations_by_id.values():
-            phone = conv.phone or conv.id
-            if conv.name and conv.name != phone:
-                name_to_phone[conv.name] = phone
-                display_items.append(conv.name)
-            display_items.append(phone)
-        if display_items:
-            model = QStringListModel(sorted(set(display_items)), dialog)
-            completer = QCompleter(model, dialog)
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            completer.setFilterMode(Qt.MatchFlag.MatchContains)
-            line_edit.setCompleter(completer)
-
-        layout.addWidget(line_edit)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-
-        line_edit.returnPressed.connect(dialog.accept)
-
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        text = line_edit.text().strip()
-        if not text:
-            return
-
-        phone = name_to_phone.get(text, text)
-        self._current_phone = phone
-        self._current_phone_dialable = _is_dialable(phone)
-        self._thread_view.load_thread(phone, phone, [], "SMS")
-        self._sync_compose_state()
-        self._compose._input.setFocus()
-
     def _on_send(self, text: str) -> None:
         self.message_send_requested.emit(text)
         self._compose.hide_send_error()
@@ -935,18 +883,25 @@ class MainWindow(QMainWindow):
         if not phones:
             return
         if len(phones) == 1:
-            self._current_phone = phones[0]
+            phone = phones[0]
+            self._current_phone = phone
+            self._current_phone_dialable = _is_dialable(phone)
             self._thread_view.set_group_mode(False)
             self._compose.set_group_mode(False)
-            self._compose.set_compose_enabled(True)
+            self._thread_view.load_thread(phone, phone, [], "SMS")
+            self._sync_compose_state()
+            self._compose._input.setFocus()
         else:
             conv_id = self._dbus_client.send_message_to_recipients(phones, "")
             if not conv_id:
                 conv_id = phones[0]
             self._current_phone = conv_id
+            self._current_phone_dialable = True
             self._thread_view.set_group_mode(True, phones)
             self._compose.set_group_mode(True)
-            self._compose.set_compose_enabled(True)
+            self._thread_view.load_thread(conv_id, conv_id, [], "MMS")
+            self._sync_compose_state()
+            self._compose._input.setFocus()
 
     def _gather_autocomplete_contacts(self) -> list[dict]:
         """Build autocomplete list from conversation history (PBAP not yet available)."""
