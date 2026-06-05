@@ -124,24 +124,24 @@ class TrayIcon(QSystemTrayIcon):
         menu = QMenu()
         menu.aboutToShow.connect(self._on_menu_about_to_show)
 
-        self._notif_action = QAction("Desktop notifications", menu)
+        self._notif_action = QAction(self.tr("Desktop notifications"), menu)
         self._notif_action.setCheckable(True)
         self._notif_action.triggered.connect(self._on_notifications_toggled)
         menu.addAction(self._notif_action)
 
         menu.addSeparator()
 
-        open_action = QAction("Open tincan", menu)
+        open_action = QAction(self.tr("Open tincan"), menu)
         open_action.triggered.connect(self._raise_window)
         menu.addAction(open_action)
 
-        settings_action = QAction("Settings...", menu)
+        settings_action = QAction(self.tr("Settings..."), menu)
         settings_action.triggered.connect(self._window._open_settings)
         menu.addAction(settings_action)
 
         menu.addSeparator()
 
-        quit_action = QAction("Quit", menu)
+        quit_action = QAction(self.tr("Quit"), menu)
         quit_action.triggered.connect(QApplication.quit)
         menu.addAction(quit_action)
 
@@ -165,13 +165,13 @@ class TrayIcon(QSystemTrayIcon):
     def _update(self) -> None:
         self.setIcon(_make_icon(self._connected, self._unread, self._repair_needed))
         if self._repair_needed:
-            tip = "Tin Can: iPhone notifications unavailable"
+            tip = self.tr("tincan: iPhone notifications unavailable")
         elif self._unread > 0:
-            tip = f"tincan — {self._unread} unread"
+            tip = self.tr("tincan — {} unread").format(self._unread)
         elif self._connected:
-            tip = "tincan — connected"
+            tip = self.tr("tincan — connected")
         else:
-            tip = "tincan — disconnected"
+            tip = self.tr("tincan — disconnected")
         self.setToolTip(tip)
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:

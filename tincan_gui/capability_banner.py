@@ -14,9 +14,9 @@ class CapabilityBanner(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
-        label = QLabel(message)
-        label.setWordWrap(True)
-        layout.addWidget(label)
+        self._label = QLabel(message)
+        self._label.setWordWrap(True)
+        layout.addWidget(self._label)
         self.setAccessibleName(message)
 
 
