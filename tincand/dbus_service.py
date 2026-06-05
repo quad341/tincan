@@ -41,6 +41,7 @@ class Conversation:
     last_message_direction: str = ""
     unread_count: int = 0
     send_target: str = ""  # canonical phone for reply (may differ from id when id is name-keyed)
+    is_group: bool = False
 
     def to_dbus(self) -> dbus.Dictionary:
         return dbus.Dictionary(
@@ -55,6 +56,7 @@ class Conversation:
                 "last_message_direction": dbus.String(self.last_message_direction),
                 "unread_count": dbus.UInt32(self.unread_count),
                 "send_target": dbus.String(self.send_target),
+                "is_group": dbus.Boolean(self.is_group),
             },
             signature="sv",
         )

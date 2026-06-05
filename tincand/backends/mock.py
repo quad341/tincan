@@ -109,6 +109,9 @@ class MockBackend(BackendInterface):
     def send_message(self, to: str, body: str) -> str:
         return f"mock-handle-{to}"
 
+    def send_group_message(self, participants: list[str], body: str) -> str:
+        return f"mock-group-handle-{'-'.join(participants)}"
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

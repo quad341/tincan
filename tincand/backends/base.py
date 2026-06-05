@@ -36,3 +36,7 @@ class BackendInterface(ABC):
     @abstractmethod
     def send_message(self, to: str, body: str) -> str:
         """Send *body* to *to*; return the assigned message handle."""
+
+    @abstractmethod
+    def send_group_message(self, participants: list[str], body: str) -> str:
+        """Send *body* to all *participants*; return the assigned handle or ''."""
