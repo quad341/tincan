@@ -2,7 +2,7 @@
 
 ![tincan](docs/assets/tincan-full.png)
 
-A Linux desktop **phone companion** for the iPhone — like Microsoft Phone Link, but open and for Linux. Tincan talks to an iPhone over **standard Bluetooth profiles** (no jailbreak, no Apple-ID risk), so you can **send and receive SMS from your desktop**, with notifications, calls, and contacts on the roadmap.
+A Linux desktop **phone companion** for the iPhone — like Microsoft Phone Link, but open and for Linux. Tincan talks to an iPhone over **standard Bluetooth profiles** (no jailbreak, no Apple-ID risk), so you can **send and receive SMS and group messages from your desktop**, mirror your phone's app notifications, and see real contact names — with calls on the roadmap.
 
 It's structured as a headless **daemon + a thin GUI over a D-Bus bus**, so other clients — including a future AI "secretary" agent (a separate project) — can drive the same capabilities.
 
@@ -12,13 +12,17 @@ The name: a tin-can telephone — a humble, honest string between two endpoints.
 
 ## Status — working prototype
 
-SMS **send and receive work today**, live-tested against an iPhone over Bluetooth MAP:
+Messaging **sends and receives today**, live-tested against an iPhone over Bluetooth MAP:
 
-- ✅ Receive incoming SMS, with desktop notifications
-- ✅ Send SMS from the GUI — delivered to the recipient's phone
-- ✅ Conversation threads, dark mode, close-to-tray, clickable links
-- 🚧 In progress: contact names & avatars (PBAP), conversation dedup, outbound-bubble polish
-- 🗺️ Planned: full notification mirroring, calls, an MCP API — see the **[roadmap](https://github.com/quad341/tincan/issues?q=is%3Aissue+label%3Aroadmap)**
+- ✅ **SMS** — receive (with desktop notifications) and send from the GUI, delivered to the recipient's phone
+- ✅ **Group MMS** — receive, send, and a dedicated group conversation view
+- ✅ **App notification mirroring (ANCS)** — see notifications from phone apps on your desktop, with per-app filtering
+- ✅ **Message history** — a local SQLite cache, so conversations persist across restarts
+- ✅ **Contact names (PBAP)** — real names on conversations
+- ✅ **Desktop UX** — conversation threads, dark mode, close-to-tray, clickable links, "Delivered ✓", color emoji on Wayland, one-click launch
+- ✅ **Internationalization** — translatable UI (i18n pipeline)
+- 🚧 In progress: contact **avatars & search**, conversation-dedup polish
+- 🗺️ Planned: **phone calls** (HFP audio), **packaging & distribution**, an **MCP API** for agents — see the **[roadmap](https://github.com/quad341/tincan/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap)**
 
 Reference setup: iPhone (iOS 26.x) ↔ Fedora 44, BlueZ 5.86, PipeWire, PySide6, Python 3.14.
 
@@ -31,7 +35,7 @@ iPhone ──Bluetooth (MAP / ANCS / HFP / PBAP)──▶ BlueZ / obexd ──�
                                                                   im.tincan.Daemon    (+ future clients)
 ```
 
-- **`tincand`** — headless daemon that owns the Bluetooth connection (OBEX **MAP** via BlueZ/obexd today; ANCS / HFP / PBAP as features land). Normalizes raw profile data into a clean domain model and exposes a D-Bus session service, `im.tincan.Daemon`.
+- **`tincand`** — headless daemon that owns the Bluetooth connection (OBEX **MAP** messaging, **ANCS** notifications, and **PBAP** contacts via BlueZ/obexd today; **HFP** calls as they land). Normalizes raw profile data into a clean domain model and exposes a D-Bus session service, `im.tincan.Daemon`.
 - **`tincan_gui`** — a PySide6 (Qt) desktop app; a pure client of the daemon.
 
 This repository is **purely the UI + bus**. The AI "secretary" agent that will consume it (Claude integration, call transcription, voice synthesis) lives in a separate project.
