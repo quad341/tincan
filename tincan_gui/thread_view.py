@@ -535,17 +535,25 @@ class ThreadView(QWidget):
             bubble = MessageBubble(msg)
             self._messages_layout.addWidget(bubble)
 
-        # Scroll to latest after Qt recomputes layout geometry
-        scroll_ref = self._scroll
+        # Scroll to bottom once Qt recomputes the content height.
+        # singleShot(0) fires before QScrollArea processes QEvent::LayoutRequest
+        # and updates the scroll range, so the old scroll value was set against
+        # a stale maximum.  rangeChanged fires exactly when the range is updated
+        # (guaranteed post-layout), and we disconnect immediately after the first
+        # fire to act as a one-shot.
+        sb = self._scroll.verticalScrollBar()
 
-        def _scroll_to_bottom() -> None:
+        def _on_range_changed(min_val: int, max_val: int) -> None:
             try:
-                sb = scroll_ref.verticalScrollBar()
-                sb.setValue(sb.maximum())
+                sb.rangeChanged.disconnect(_on_range_changed)
+            except RuntimeError:
+                pass
+            try:
+                sb.setValue(max_val)
             except RuntimeError:
                 pass  # widget deleted before deferred call ran
 
-        QTimer.singleShot(0, _scroll_to_bottom)
+        sb.rangeChanged.connect(_on_range_changed)
 
     def append_message(self, msg: MessageData) -> None:
         """Append a single bubble to the live thread and scroll to bottom.
@@ -573,13 +581,16 @@ class ThreadView(QWidget):
         at_bottom = sb.value() >= sb.maximum() - 4  # 4px tolerance
 
         if at_bottom:
-            def _scroll_to_bottom() -> None:
+            def _on_append_range_changed(min_val: int, max_val: int) -> None:
                 try:
-                    sb = scroll_ref.verticalScrollBar()
-                    sb.setValue(sb.maximum())
+                    sb.rangeChanged.disconnect(_on_append_range_changed)
                 except RuntimeError:
                     pass
-            QTimer.singleShot(0, _scroll_to_bottom)
+                try:
+                    sb.setValue(max_val)
+                except RuntimeError:
+                    pass
+            sb.rangeChanged.connect(_on_append_range_changed)
 
     def mark_last_send_failed(self) -> None:
         """Update the most recently appended outbound bubble to show '⚠ Failed'."""
