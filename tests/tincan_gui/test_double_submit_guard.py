@@ -23,6 +23,7 @@ from unittest.mock import patch
 import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QSystemTrayIcon
+
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
 from tincan_gui.thread_view import BubbleType, MessageBubble, ThreadView

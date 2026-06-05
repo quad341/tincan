@@ -763,7 +763,8 @@ class TestMapBackendBtConnect:
         with patch("tincand.backends.bluez_map.dbus.SystemBus",
                    return_value=mock_sys_bus) as mock_sys_cls, \
              patch("tincand.backends.bluez_map.dbus.SessionBus") as mock_ses_cls, \
-             patch("tincand.backends.bluez_map.dbus.Interface", side_effect=lambda o, i: mock_obj_mgr):
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   side_effect=lambda o, i: mock_obj_mgr):
             backend._bt_connect(_ADDR)
 
         mock_sys_cls.assert_called_once()
