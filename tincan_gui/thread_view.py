@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import datetime
 import html as _html
 import re as _re
 from dataclasses import dataclass
@@ -158,6 +159,76 @@ def _linkify(text: str, emoji_size: int = 13) -> str:
             _break_long_words(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(after)))
         )
     return "".join(parts)
+
+
+def _get_today() -> datetime.date:
+    """Return today's date. Isolated for test patching."""
+    return datetime.date.today()
+
+
+def _date_label_text(sort_key: str, today: datetime.date | None = None) -> str:
+    """Convert a sort_key (YYYYMMDDTHHMMSS) to a human-readable date label.
+
+    Returns "Today", "Yesterday", or abbreviated date (e.g. "Thu Jun  5").
+    Returns "" for empty or malformed sort_key.
+    """
+    if not sort_key or len(sort_key) < 8:
+        return ""
+    try:
+        msg_date = datetime.date(
+            int(sort_key[:4]), int(sort_key[4:6]), int(sort_key[6:8])
+        )
+    except ValueError:
+        return ""
+    ref = today if today is not None else _get_today()
+    if msg_date == ref:
+        return "Today"
+    if msg_date == ref - datetime.timedelta(days=1):
+        return "Yesterday"
+    return msg_date.strftime("%a %b %e").strip()
+
+
+def _date_label_for_sort_key(sort_key: str, today: "datetime.date | None" = None) -> "str | None":
+    """Return 'Today', 'Yesterday', or abbreviated date for a sort_key's date.
+
+    Returns None for empty or malformed sort_key so callers can skip separators cleanly.
+    """
+    label = _date_label_text(sort_key, today=today)
+    return label if label else None
+
+
+class DateSeparatorWidget(QWidget):
+    """Full-width centered date separator row between message bubbles."""
+
+    _is_date_separator = True  # marker for test detection
+
+    def __init__(self, text: str, parent: "Optional[QWidget]" = None) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(8)
+        self._label = QLabel(text)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setStyleSheet("color: #888; font-size: 11px;")
+        self._label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        left_line = QFrame()
+        left_line.setFrameShape(QFrame.Shape.HLine)
+        left_line.setStyleSheet("color: #ddd;")
+        right_line = QFrame()
+        right_line.setFrameShape(QFrame.Shape.HLine)
+        right_line.setStyleSheet("color: #ddd;")
+        layout.addWidget(left_line, stretch=1)
+        layout.addWidget(self._label)
+        layout.addWidget(right_line, stretch=1)
+        self.setAccessibleName(text)
+
+    def label_text(self) -> str:
+        """Return the date label text (e.g. 'Today', 'Yesterday', 'Jun 2')."""
+        return self._label.text()
+
+    def text(self) -> str:
+        """Alias for label_text() — satisfies duck-typing in tests."""
+        return self._label.text()
 
 
 class BubbleType(Enum):
@@ -466,6 +537,7 @@ class ThreadView(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._last_outbound: Optional[MessageBubble] = None
+        self._last_date_key: str = ""  # YYYYMMDD of the most recently rendered message
         self._is_group = False
         self._participants: list[str] = []
         self._build()
@@ -538,7 +610,13 @@ class ThreadView(QWidget):
             return
 
         self._messages_layout.addStretch()
+        self._last_date_key = ""
         for msg in messages:
+            date_key = msg.sort_key[:8] if msg.sort_key else ""
+            if date_key and date_key != self._last_date_key:
+                label_text = _date_label_text(msg.sort_key)
+                self._messages_layout.addWidget(DateSeparatorWidget(label_text))
+                self._last_date_key = date_key
             bubble = MessageBubble(msg)
             self._messages_layout.addWidget(bubble)
 
@@ -577,6 +655,12 @@ class ThreadView(QWidget):
                     w.deleteLater()
             self._empty_label.hide()
             self._messages_layout.addStretch()
+
+        date_key = msg.sort_key[:8] if msg.sort_key else ""
+        if date_key and date_key != self._last_date_key:
+            label_text = _date_label_text(msg.sort_key)
+            self._messages_layout.addWidget(DateSeparatorWidget(label_text))
+            self._last_date_key = date_key
 
         bubble = MessageBubble(msg)
         self._messages_layout.addWidget(bubble)

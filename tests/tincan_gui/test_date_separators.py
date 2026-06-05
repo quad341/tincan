@@ -34,6 +34,7 @@ from tincan_gui.thread_view import (
     MessageData,
     ThreadView,
     _date_label_text,
+    _get_today,
 )
 
 _TODAY = datetime.date(2026, 6, 5)
@@ -97,12 +98,12 @@ class TestDateLabelText:
 # ---------------------------------------------------------------------------
 
 def _count_date_separator_labels(view: ThreadView) -> list[str]:
-    """Return the text of all date-separator QLabel widgets in the thread view."""
+    """Return the text of all date separator widgets in the thread view."""
     layout = view._messages_layout
     labels = []
     for i in range(layout.count()):
         w = layout.itemAt(i).widget()
-        if isinstance(w, QLabel) and getattr(w, "_is_date_separator", False):
+        if w is not None and getattr(w, "_is_date_separator", False):
             labels.append(w.text())
     return labels
 
@@ -113,8 +114,7 @@ class TestLoadThreadSeparators:
     def test_single_message_has_no_separator(self, qtbot):
         view = ThreadView()
         qtbot.addWidget(view)
-        with patch("tincan_gui.thread_view.datetime") as mock_dt:
-            mock_dt.date.today.return_value = _TODAY
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", [_msg("hi", _TODAY)])
         seps = _count_date_separator_labels(view)
         assert seps == [], f"Expected no separators, got: {seps}"
@@ -123,8 +123,7 @@ class TestLoadThreadSeparators:
         view = ThreadView()
         qtbot.addWidget(view)
         msgs = [_msg("a", _TODAY, 9), _msg("b", _TODAY, 10), _msg("c", _TODAY, 11)]
-        with patch("tincan_gui.thread_view.datetime") as mock_dt:
-            mock_dt.date.today.return_value = _TODAY
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", msgs)
         seps = _count_date_separator_labels(view)
         assert seps == [], f"Expected no separators for same-day messages, got: {seps}"
@@ -133,8 +132,7 @@ class TestLoadThreadSeparators:
         view = ThreadView()
         qtbot.addWidget(view)
         msgs = [_msg("old", _YESTERDAY), _msg("new", _TODAY)]
-        with patch("tincan_gui.thread_view.datetime") as mock_dt:
-            mock_dt.date.today.return_value = _TODAY
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", msgs)
         seps = _count_date_separator_labels(view)
         assert len(seps) == 1, f"Expected 1 separator, got {len(seps)}: {seps}"
@@ -147,8 +145,7 @@ class TestLoadThreadSeparators:
             _msg("mid", _YESTERDAY),
             _msg("new", _TODAY),
         ]
-        with patch("tincan_gui.thread_view.datetime") as mock_dt:
-            mock_dt.date.today.return_value = _TODAY
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", msgs)
         seps = _count_date_separator_labels(view)
         assert len(seps) == 2, f"Expected 2 separators, got {len(seps)}: {seps}"
@@ -165,8 +162,7 @@ class TestLoadThreadSeparatorText:
         view = ThreadView()
         qtbot.addWidget(view)
         msgs = [_msg("old", _YESTERDAY), _msg("new", _TODAY)]
-        with patch("tincan_gui.thread_view.datetime") as mock_dt:
-            mock_dt.date.today.return_value = _TODAY
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", msgs)
         seps = _count_date_separator_labels(view)
         assert "Today" in seps, f"Expected 'Today' among separators, got: {seps}"
@@ -175,8 +171,7 @@ class TestLoadThreadSeparatorText:
         view = ThreadView()
         qtbot.addWidget(view)
         msgs = [_msg("old", _TWO_DAYS_AGO), _msg("mid", _YESTERDAY)]
-        with patch("tincan_gui.thread_view.datetime") as mock_dt:
-            mock_dt.date.today.return_value = _TODAY
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", msgs)
         seps = _count_date_separator_labels(view)
         assert "Yesterday" in seps, f"Expected 'Yesterday' among separators, got: {seps}"
@@ -192,8 +187,7 @@ class TestAppendMessageSeparator:
     def test_same_day_append_no_separator(self, qtbot):
         view = ThreadView()
         qtbot.addWidget(view)
-        with patch("tincan_gui.thread_view.datetime") as mock_dt:
-            mock_dt.date.today.return_value = _TODAY
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", [_msg("morning", _TODAY, 8)])
             view.append_message(_msg("noon", _TODAY, 12))
         seps = _count_date_separator_labels(view)
@@ -202,8 +196,7 @@ class TestAppendMessageSeparator:
     def test_new_day_append_inserts_separator(self, qtbot):
         view = ThreadView()
         qtbot.addWidget(view)
-        with patch("tincan_gui.thread_view.datetime") as mock_dt:
-            mock_dt.date.today.return_value = _TODAY
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", [_msg("yesterday msg", _YESTERDAY)])
             view.append_message(_msg("today msg", _TODAY))
         seps = _count_date_separator_labels(view)
