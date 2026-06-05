@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import warnings
+from dataclasses import replace as dc_replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -889,6 +890,20 @@ class MainWindow(QMainWindow):
         # Guard self-conversations: MAP re-delivers self-sent messages to inbox as inbound.
         self._self_echo_guard.add((phone, text))
         QTimer.singleShot(10000, lambda: self._self_echo_guard.discard((phone, text)))
+        # Update conversation-list preview immediately. iOS MAP sent folder never populates
+        # last_message_preview for outbound messages, so we must push it from the GUI.
+        _preview_conv = next(
+            (c for c in self._conversations_by_id.values()
+             if c.phone == phone or _same_conv(c.id, phone)),
+            None,
+        )
+        if _preview_conv is not None:
+            _updated = dc_replace(
+                _preview_conv, preview=text, timestamp=ts, preview_direction="outbound",
+                unread=False, unread_count=0,
+            )
+            self._conversations_by_id[_preview_conv.id] = _updated
+            self._conv_list.update_item(_preview_conv.id, _updated)
         # Non-blocking send — outcome arrives via _on_send_accepted / _on_send_failed.
         self._dbus_client.send_message_async(phone, text)
 
