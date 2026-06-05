@@ -1,0 +1,170 @@
+"""Tests: dead '+' icons consolidated; new-conversation flow opens thread (tincan-nwp7p).
+
+Coverage:
+  - ConversationListWidget exposes exactly ONE compose '+' button in the header.
+  - That button emits compose_new_requested exactly once per click.
+  - The compose button is a QToolButton with tooltip "New conversation".
+  - _on_compose_new in MainWindow calls load_thread after the dialog is accepted.
+"""
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+from PySide6.QtWidgets import QPushButton, QSystemTrayIcon, QToolButton
+
+from tincan_gui.conversation_list import ConversationListWidget
+
+
+@pytest.fixture(autouse=True)
+def _no_tray_show():
+    with patch.object(QSystemTrayIcon, "show"):
+        yield
+
+
+# ---------------------------------------------------------------------------
+# §1  ConversationListWidget — single compose button
+# ---------------------------------------------------------------------------
+
+class TestComposeButtonCount:
+    """The conversation list header must have exactly ONE '+' / compose button."""
+
+    def test_exactly_one_compose_toolbutton(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+
+        # Find all QToolButton descendants with text "+"
+        plus_buttons = [
+            b for b in w.findChildren(QToolButton)
+            if b.text() == "+"
+        ]
+        assert len(plus_buttons) == 1, (
+            f"Expected 1 '+' QToolButton, found {len(plus_buttons)}"
+        )
+
+    def test_no_pushbutton_compose_duplicate(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+
+        # Should be no QPushButton with text "+" (old duplicate)
+        plus_push = [
+            b for b in w.findChildren(QPushButton)
+            if b.text() == "+"
+        ]
+        assert len(plus_push) == 0, (
+            f"Found {len(plus_push)} duplicate QPushButton '+' — should be 0"
+        )
+
+    def test_compose_button_has_correct_tooltip(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+
+        plus_buttons = [
+            b for b in w.findChildren(QToolButton)
+            if b.text() == "+"
+        ]
+        assert plus_buttons, "No '+' QToolButton found"
+        assert plus_buttons[0].toolTip() == "New conversation"
+
+    def test_compose_button_emits_signal_once(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+        w.show()
+
+        signals = []
+        w.compose_new_requested.connect(lambda: signals.append(1))
+
+        plus_buttons = [
+            b for b in w.findChildren(QToolButton)
+            if b.text() == "+"
+        ]
+        assert plus_buttons
+        plus_buttons[0].click()
+
+        assert signals == [1], f"Expected 1 signal, got {len(signals)}"
+
+    def test_compose_button_is_accessible(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+
+        plus_buttons = [
+            b for b in w.findChildren(QToolButton)
+            if b.text() == "+"
+        ]
+        assert plus_buttons
+        assert plus_buttons[0].accessibleName() == "New conversation"
+
+
+# ---------------------------------------------------------------------------
+# §2  _on_compose_new — thread loads after dialog accepted
+# ---------------------------------------------------------------------------
+
+class TestOnComposeNewLoadsThread:
+    """After the new-conversation dialog is accepted, the thread view must be loaded."""
+
+    def _make_main(self):
+        from tincan_gui.main import MainWindow
+        win = MainWindow.__new__(MainWindow)
+        win._conversations_by_id = {}
+        win._messages_ok = True
+        win._current_phone = ""
+        win._current_phone_dialable = False
+        win._pending_sends = set()
+        win._self_echo_guard = set()
+        win._sent_bodies = {}
+        win._sent_cache = {}
+        win._dbus_client = MagicMock()
+        win._dbus_client.list_conversations.return_value = []
+        win._thread_view = MagicMock()
+        win._compose = MagicMock()
+        win._compose.send_button = MagicMock()
+        win._conv_list = MagicMock()
+        return win
+
+    def test_load_thread_called_for_single_phone(self):
+        win = self._make_main()
+        contacts = [{"name": "Alice", "phone": "+14155550001"}]
+
+        with patch("tincan_gui.main.NewConversationDialog") as MockDlg:
+            dlg = MockDlg.return_value
+            dlg.exec.return_value = 1  # QDialog.Accepted
+            dlg.selected_phones.return_value = ["+14155550001"]
+            win._on_compose_new()
+
+        win._thread_view.load_thread.assert_called_once()
+        call_args = win._thread_view.load_thread.call_args
+        assert "+14155550001" in call_args.args or "+14155550001" in str(call_args)
+
+    def test_current_phone_set_on_accept(self):
+        win = self._make_main()
+
+        with patch("tincan_gui.main.NewConversationDialog") as MockDlg:
+            dlg = MockDlg.return_value
+            dlg.exec.return_value = 1
+            dlg.selected_phones.return_value = ["+14155550002"]
+            win._on_compose_new()
+
+        assert win._current_phone == "+14155550002"
+
+    def test_load_thread_not_called_on_cancel(self):
+        win = self._make_main()
+
+        with patch("tincan_gui.main.NewConversationDialog") as MockDlg:
+            dlg = MockDlg.return_value
+            dlg.exec.return_value = 0  # QDialog.Rejected
+            dlg.selected_phones.return_value = []
+            win._on_compose_new()
+
+        win._thread_view.load_thread.assert_not_called()
+
+    def test_current_phone_not_changed_on_cancel(self):
+        win = self._make_main()
+        win._current_phone = "+19995550000"
+
+        with patch("tincan_gui.main.NewConversationDialog") as MockDlg:
+            dlg = MockDlg.return_value
+            dlg.exec.return_value = 0
+            dlg.selected_phones.return_value = []
+            win._on_compose_new()
+
+        assert win._current_phone == "+19995550000"
