@@ -613,9 +613,10 @@ class ThreadView(QWidget):
         self._last_date_key = ""
         for msg in messages:
             date_key = msg.sort_key[:8] if msg.sort_key else ""
-            if date_key and date_key != self._last_date_key:
+            if date_key and self._last_date_key and date_key != self._last_date_key:
                 label_text = _date_label_text(msg.sort_key)
                 self._messages_layout.addWidget(DateSeparatorWidget(label_text))
+            if date_key:
                 self._last_date_key = date_key
             bubble = MessageBubble(msg)
             self._messages_layout.addWidget(bubble)
