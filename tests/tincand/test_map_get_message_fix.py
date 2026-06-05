@@ -169,3 +169,127 @@ class TestMessage1GetBackoffCache:
             backend.poll_inbox()
             result = backend.poll_inbox()
         assert result[0]["body"] == "Subject body"
+
+
+# ---------------------------------------------------------------------------
+# §3 End-to-end: real BlueZ 5.66+ scenario — GetMessage=UnknownMethod (tincan-taa2x)
+# ---------------------------------------------------------------------------
+
+_TRANSFER_PATH = "/org/bluez/obex/client/session1/transfer42"
+
+_INBOX_PROPS = {
+    "Sender": "Alice",
+    "SenderAddressing": "+12025551234",
+    "Datetime": "20260605T100000",
+    "Read": False,
+    "Subject": "Subject fallback",
+}
+
+_SINGLE_BMSG = "BEGIN:MSG\r\nHello from live device\r\nEND:MSG\r\n"
+_MULTI_BMSG = (
+    "BEGIN:MSG\r\n"
+    "Segment one of long SMS\r\n"
+    "END:MSG\r\n"
+    "BEGIN:MSG\r\n"
+    "segment two continues here\r\n"
+    "END:MSG\r\n"
+)
+
+
+class TestBlueZ566ForcedMessage1GetPath:
+    """End-to-end: GetMessage=UnknownMethod (real BlueZ 5.66+), Message1.Get is the only path.
+
+    Emulates real hardware per tincan-taa2x: MessageAccess1 does NOT expose
+    GetMessage.  The daemon must route through Message1.Get and extract body —
+    including multipart SMS with multiple BEGIN:MSG segments.
+    """
+
+    @pytest.fixture()
+    def _success(self):
+        backend = MapBackend()
+        mock_access = MagicMock(name="MessageAccess1")
+        mock_access.GetMessage.side_effect = _dbus_unknown_method()
+        mock_access.ListMessages.side_effect = (
+            lambda folder, opts={}: {_MSG_PATH: dict(_INBOX_PROPS)} if folder == "inbox" else {}
+        )
+        backend._msg_access = mock_access
+        mock_msg1 = MagicMock(name="Message1")
+        mock_msg1.Get.return_value = (_TRANSFER_PATH, {})
+        yield backend, mock_access, mock_msg1
+
+    def test_singlepart_body_retrieved(self, _success):
+        backend, _, mock_msg1 = _success
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_msg1), \
+             patch.object(backend, "_wait_transfer_recv_raw", return_value=_SINGLE_BMSG):
+            result = backend.poll_inbox()
+        assert result, "poll_inbox must return at least one message"
+        assert result[0]["body"] == "Hello from live device"
+
+    def test_multipart_segments_joined(self, _success):
+        """Two BEGIN:MSG segments must be concatenated into one body string."""
+        backend, _, mock_msg1 = _success
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_msg1), \
+             patch.object(backend, "_wait_transfer_recv_raw", return_value=_MULTI_BMSG):
+            result = backend.poll_inbox()
+        assert result, "poll_inbox must return at least one message"
+        body = result[0]["body"]
+        assert "Segment one" in body
+        assert "segment two" in body
+
+    def test_get_message_not_called_on_bluez566(self, _success):
+        """GetMessage must never be invoked when it raises UnknownMethod."""
+        backend, mock_access, mock_msg1 = _success
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_msg1), \
+             patch.object(backend, "_wait_transfer_recv_raw", return_value=_SINGLE_BMSG):
+            backend.poll_inbox()
+        mock_access.GetMessage.assert_not_called()
+
+    def test_failed_handles_not_polluted_on_success(self, _success):
+        """Handle must NOT appear in _failed_handles after a successful Get."""
+        backend, _, mock_msg1 = _success
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_msg1), \
+             patch.object(backend, "_wait_transfer_recv_raw", return_value=_SINGLE_BMSG):
+            backend.poll_inbox()
+        assert _MSG_PATH not in backend._failed_handles
+
+
+# ---------------------------------------------------------------------------
+# §4 _failed_handles doesn't block retrieval (tincan-taa2x)
+# ---------------------------------------------------------------------------
+
+class TestFailedHandlesDoesNotBlockRetrieval:
+    """_failed_handles must not permanently prevent body retrieval.
+
+    A transient Get failure caches the handle; connect() clears the cache so
+    the next poll can succeed — 'check _failed_handles doesn't block it'.
+    """
+
+    def test_pre_populated_failed_handle_skips_get(self):
+        """Handle in _failed_handles must short-circuit _fetch_raw_bmsg to None."""
+        backend, _ = _make_backend_with_mock_access()
+        backend._failed_handles.add(_MSG_PATH)
+        mock_msg1 = MagicMock(name="Message1")
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_msg1):
+            result = backend._fetch_raw_bmsg(_MSG_PATH)
+        assert result is None
+        mock_msg1.Get.assert_not_called()
+
+    def test_cleared_failed_handles_allows_successful_get(self):
+        """After _failed_handles.clear() (connect()), body is retrieved normally."""
+        backend, _ = _make_backend_with_mock_access()
+        backend._failed_handles.add(_MSG_PATH)
+        backend._failed_handles.clear()
+        mock_msg1 = MagicMock(name="Message1")
+        mock_msg1.Get.return_value = (_TRANSFER_PATH, {})
+        bmsg = "BEGIN:MSG\r\nPost-reconnect body\r\nEND:MSG\r\n"
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_msg1), \
+             patch.object(backend, "_wait_transfer_recv_raw", return_value=bmsg):
+            result = backend._fetch_raw_bmsg(_MSG_PATH)
+        assert result == bmsg
+        mock_msg1.Get.assert_called_once()
