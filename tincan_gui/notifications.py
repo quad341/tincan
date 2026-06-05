@@ -79,7 +79,7 @@ class DesktopNotifier:
             if self._on_mark_read and conv_id:
                 self._on_mark_read(conv_id)
         elif action_id in ("default", "open", "reply"):
-            if self._on_action_invoked and conv_id:
+            if self._on_action_invoked and nid in self._notif_to_conv:
                 self._on_action_invoked(conv_id)
 
     def dispatch(self, message: dict) -> None:

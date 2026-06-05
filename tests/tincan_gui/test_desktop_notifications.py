@@ -286,13 +286,24 @@ class TestActionInvokedSignalHandler:
         assert received == []
 
     def test_unknown_notif_id_does_not_invoke_callback(self):
-        # conv_id="" is falsy — the implementation guards with `if conv_id:` so no call.
+        # notif ID 99 is not in _notif_to_conv — spurious signal is ignored.
         received = []
         notifier = DesktopNotifier(on_action_invoked=lambda cid: received.append(cid))
 
         notifier._on_action_invoked_signal(99, "default")
 
         assert received == []
+
+    def test_open_action_on_app_notification_invokes_callback(self):
+        # Regression: 'Open' on an ANCS app notification must raise the window
+        # even though conv_id == "" (no conversation to select).
+        received = []
+        notifier = DesktopNotifier(on_action_invoked=lambda cid: received.append(cid))
+        notifier._notif_to_conv[42] = ""  # app notification: known ID, no conv
+
+        notifier._on_action_invoked_signal(42, "open")
+
+        assert received == [""]
 
     def test_no_callback_does_not_raise(self):
         notifier = DesktopNotifier(on_action_invoked=None)
