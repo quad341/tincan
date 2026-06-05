@@ -214,6 +214,7 @@ class MessageBubble(QWidget):
     def __init__(self, data: MessageData, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._data = data
+        self._bubble_widget: Optional[QWidget] = None
         self._build()
         self._update_accessible()
 
@@ -313,11 +314,17 @@ class MessageBubble(QWidget):
         ml = style["margin_left"]
         mr = style["margin_right"]
         outer.setContentsMargins(ml, 0, mr, 0)
+        self._bubble_widget = bubble
         col.addWidget(bubble)
         outer.addLayout(col)
 
         if style["align"] == Qt.AlignLeft:
             outer.addStretch()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._bubble_widget and self.width() > 0:
+            self._bubble_widget.setMaximumWidth(int(self.width() * 0.72))
 
     def set_send_failed(self) -> None:
         """Update the meta label to reflect a failed send (outbound bubbles only)."""
