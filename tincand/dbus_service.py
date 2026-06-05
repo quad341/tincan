@@ -21,6 +21,7 @@ import dbus.exceptions
 import dbus.service
 
 from tincand.contact_store import ContactStore, normalize_phone
+from tincand.notification_filter import NotificationFilter, SeenAppsRegistry
 
 _log = logging.getLogger(__name__)
 
@@ -83,6 +84,8 @@ class TincanService(dbus.service.Object):
         self._backend: object | None = None
         self._contact_store = ContactStore()
         self._pbap: object | None = None  # set by __main__ after construction
+        self._notification_filter = NotificationFilter()
+        self._seen_apps = SeenAppsRegistry()
 
     # ------------------------------------------------------------------
     # im.tincan.Daemon — lifecycle and status
@@ -156,6 +159,10 @@ class TincanService(dbus.service.Object):
 
     @dbus.service.signal(IFACE_DAEMON, signature="sb")
     def CapabilityChanged(self, feature: str, available: bool) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_DAEMON, signature="a{sv}")
+    def AppNotificationReceived(self, payload: dbus.Dictionary) -> None:  # noqa: N802
         pass
 
     _KNOWN_CAPABILITIES = frozenset({
@@ -372,6 +379,87 @@ class TincanService(dbus.service.Object):
     def FetchContactPhoto(self, conversation_id: str) -> None:  # noqa: N802
         if self._pbap is not None:
             self._pbap.fetch_photo(str(conversation_id))
+
+    # ------------------------------------------------------------------
+    # im.tincan.Daemon — notification filter API (tincan-9kav)
+    # ------------------------------------------------------------------
+
+    @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="a{sv}")
+    def GetNotificationFilter(self) -> dbus.Dictionary:  # noqa: N802
+        """Return {enabled: b, apps: a{sa{sv}}} with current filter state."""
+        enabled = self._notification_filter.is_enabled()
+        app_filters = self._notification_filter.get_all_filters()
+        apps_dict = dbus.Dictionary(
+            {
+                app_id: dbus.Dictionary(
+                    {"action": dbus.String(action)}, signature="sv"
+                )
+                for app_id, action in app_filters.items()
+            },
+            signature="sa{sv}",
+        )
+        return dbus.Dictionary(
+            {"enabled": dbus.Boolean(enabled), "apps": apps_dict},
+            signature="sv",
+        )
+
+    @dbus.service.method(IFACE_DAEMON, in_signature="b", out_signature="")
+    def SetNotificationsEnabled(self, enabled: bool) -> None:  # noqa: N802
+        """Persist the global app notification mirroring toggle."""
+        self._notification_filter.set_enabled(bool(enabled))
+
+    @dbus.service.method(IFACE_DAEMON, in_signature="ss", out_signature="")
+    def SetAppFilter(self, app_id: str, action: str) -> None:  # noqa: N802
+        """Persist allow/deny for app_id. Raises InvalidArgument on bad action."""
+        if str(action) not in ("allow", "deny"):
+            raise dbus.exceptions.DBusException(
+                f"Invalid action {action!r}; must be 'allow' or 'deny'",
+                name="im.tincan.Error.InvalidArgument",
+            )
+        self._notification_filter.set_filter(str(app_id), str(action))
+
+    @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="aa{sv}")
+    def GetSeenApps(self) -> list:  # noqa: N802
+        """Return [{app_id: s, label_hint: s}] sorted by app_id."""
+        return [
+            dbus.Dictionary(
+                {
+                    "app_id": dbus.String(r["app_id"]),
+                    "label_hint": dbus.String(r["label_hint"]),
+                },
+                signature="sv",
+            )
+            for r in self._seen_apps.list()
+        ]
+
+    def on_app_notification_received(self, notif: dict) -> None:
+        """Handle a non-SMS iOS app notification from the ANCS backend.
+
+        Applies the filter, registers the app in SeenAppsRegistry, then
+        emits AppNotificationReceived with a normalized 7-key payload.
+        """
+        app_id = str(notif.get("app_id", ""))
+        if not self._notification_filter.is_enabled():
+            _log.debug("app mirroring disabled — skipping %s", app_id)
+            return
+        if not self._notification_filter.is_allowed(app_id):
+            _log.debug("app %s denied — skipping", app_id)
+            return
+        title = str(notif.get("title", ""))
+        self._seen_apps.register(app_id, label_hint=title)
+        payload = dbus.Dictionary(
+            {
+                "app_id": dbus.String(app_id),
+                "title": dbus.String(title),
+                "subtitle": dbus.String(str(notif.get("subtitle", ""))),
+                "body": dbus.String(str(notif.get("body", ""))),
+                "category": dbus.String(str(notif.get("category", ""))),
+                "category_id": dbus.UInt32(int(notif.get("category_id", 0))),
+                "event_flags": dbus.UInt32(int(notif.get("event_flags", 0))),
+            },
+            signature="sv",
+        )
+        self.AppNotificationReceived(payload)
 
     # ------------------------------------------------------------------
     # Internal helpers called by Bluetooth adapters

@@ -49,6 +49,15 @@ class NotificationFilter:
         s.setValue(f"notifications/app_filter/{app_id}", action)
         s.sync()
 
+    def get_all_filters(self) -> dict:
+        """Return {app_id: action} for all explicitly-configured apps."""
+        s = app_settings()
+        s.beginGroup("notifications/app_filter")
+        keys = s.childKeys()
+        result = {k: str(s.value(k, "allow")) for k in keys}
+        s.endGroup()
+        return result
+
 
 class SeenAppsRegistry:
     """Track which app_ids have produced notifications, keyed by app_id.
