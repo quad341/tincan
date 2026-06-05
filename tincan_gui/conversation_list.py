@@ -1,7 +1,7 @@
 """Conversation list sidebar: ConversationItem, ConversationListWidget."""
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tincan_gui.avatar import AvatarWidget
+from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
 from tincan_gui.theme import is_dark_theme
 
 
@@ -44,6 +44,10 @@ class ConversationData:
     participant_count: int = 1
     unread_count: int = 0  # tincan-bxs: from daemon Conversation dict
     preview_direction: str = ""  # 'outbound' → show 'You: …' prefix in preview
+    is_group: bool = False
+    participants: list = field(default_factory=list)
+    group_name: str = ""
+    preview_sender: str = ""  # sender name prefix for group preview
 
 
 class ConversationItem(QWidget):
@@ -65,6 +69,8 @@ class ConversationItem(QWidget):
     _CARD_BORDER = "#e5e7eb"
     _CARD_BG_DARK = "#18181b"
     _CARD_BORDER_DARK = "#3f3f46"
+    _GROUP_SELECTED_BG = "#3f3f46"
+    _GROUP_SELECTED_BORDER = "#0d9488"
 
     def __init__(self, data: ConversationData, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -100,8 +106,14 @@ class ConversationItem(QWidget):
         frame_layout.setContentsMargins(8, 8, 8, 8)
         frame_layout.setSpacing(8)
 
-        # Avatar (40×40 circle — initials until PBAP photo set)
-        self._avatar = AvatarWidget(self._data.name)
+        # Avatar: group uses two stacked circles; 1:1 uses single circle
+        if self._data.is_group:
+            names = self._data.participants
+            back_name = names[0] if len(names) > 0 else self._data.name
+            front_name = names[1] if len(names) > 1 else self._data.name
+            self._avatar = GroupAvatarWidget(back_name, front_name)
+        else:
+            self._avatar = AvatarWidget(self._data.name)
         frame_layout.addWidget(self._avatar, alignment=Qt.AlignVCenter)
 
         text_col = QVBoxLayout()
@@ -111,20 +123,37 @@ class ConversationItem(QWidget):
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
 
-        name = self._data.name
-        if self._data.participant_count > 1:
-            name = f"{name} [{self._data.participant_count}]"
+        if self._data.is_group:
+            participants = self._data.participants
+            if len(participants) >= 3:
+                name = f"{participants[0]}, {participants[1]} & {len(participants) - 2} more"
+            elif len(participants) == 2:
+                name = f"{participants[0]}, {participants[1]}"
+            else:
+                name = self._data.group_name or self._data.name
+        else:
+            name = self._data.name
+            if self._data.participant_count > 1:
+                name = f"{name} [{self._data.participant_count}]"
 
         self._name_label = QLabel(name)
         name_font = QFont()
-        name_font.setPointSize(14)
-        name_font.setBold(False)
+        if self._data.is_group:
+            name_font.setPointSize(13)
+        else:
+            name_font.setPointSize(14)
+            name_font.setBold(True)
         self._name_label.setFont(name_font)
-        self._name_label.setStyleSheet(
-            "background: transparent; border: none; outline: none; color: #f4f4f5;"
-            if self._dark
-            else "background: transparent; border: none; outline: none; color: #111827;"
-        )
+        if self._data.is_group:
+            self._name_label.setStyleSheet(
+                "background: transparent; border: none; outline: none; color: #f4f4f5;"
+            )
+        else:
+            self._name_label.setStyleSheet(
+                "background: transparent; border: none; outline: none; color: #f4f4f5;"
+                if self._dark
+                else "background: transparent; border: none; outline: none; color: #111827;"
+            )
         self._name_label.setFocusPolicy(Qt.NoFocus)
         self._name_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         top_row.addWidget(self._name_label, stretch=1)
@@ -203,16 +232,24 @@ class ConversationItem(QWidget):
             no_preview_color = "#71717a" if self._dark else "#9ca3af"
         if raw:
             direction = getattr(self._data, "preview_direction", "")
-            if direction == "outbound":
+            if self._data.is_group and self._data.preview_sender:
+                body = raw[:40] + "…" if len(raw) > 40 else raw
+                display = f"{self._data.preview_sender}: {body}"
+                color = "#a1a1aa"
+            elif direction == "outbound":
                 body = raw[:30] + "…" if len(raw) > 30 else raw
                 display = f"You: {body}"
+                color = "#6b7280"
             else:
                 display = raw[:36] + "…" if len(raw) > 36 else raw
+                color = "#6b7280"
             self._preview_label.setText(display)
             self._preview_label.setStyleSheet(
                 f"background: transparent; border: none; outline: none; color: {preview_color};"
             )
             f = self._preview_label.font()
+            if self._data.is_group:
+                f.setPointSize(11)
             f.setItalic(False)
             self._preview_label.setFont(f)
             self._preview_label.setAccessibleName(raw)
@@ -228,19 +265,23 @@ class ConversationItem(QWidget):
 
     def _update_accessible(self) -> None:
         full_preview = self._data.preview or ""
-        base = (
-            f"Conversation with {self._data.name}, "
-            f"last message: {full_preview}, "
-            f"{self._data.timestamp}"
-        )
         count = self._data.unread_count
-        if count > 0:
-            badge = "9+" if count >= 10 else str(count)
-            self.setAccessibleName(
-                self.tr("{name}, Unread: {badge}").format(name=base, badge=badge)
-            )
+        if self._data.is_group:
+            participant_str = ", ".join(self._data.participants)
+            base = f"Group conversation with {participant_str}"
+            unread_str = f". {count} unread." if count > 0 else "."
+            self.setAccessibleName(base + unread_str)
         else:
-            self.setAccessibleName(base)
+            base = (
+                f"Conversation with {self._data.name}, "
+                f"last message: {full_preview}, "
+                f"{self._data.timestamp}"
+            )
+            if count > 0:
+                badge = "9+" if count >= 10 else str(count)
+                self.setAccessibleName(f"{base}, Unread: {badge}")
+            else:
+                self.setAccessibleName(base)
         # tincan-298: use "Unread: N" format for unread_count; fall back to plain
         # "Unread" for legacy data using the unread bool flag (unread_count==0).
         if count >= 10:
@@ -270,10 +311,16 @@ class ConversationItem(QWidget):
                 self._SELECTED_MUTED_COLOR_DARK if self._dark else self._SELECTED_MUTED_COLOR
             )
             self.setStyleSheet("background: transparent; QLabel { background: transparent; }")
-            self._frame.setStyleSheet(
-                f"QFrame {{ background: {sel_bg}; border: 2px solid {sel_border};"
-                " border-radius: 4px; }}"
-            )
+            if self._data.is_group:
+                self._frame.setStyleSheet(
+                    f"QFrame {{ background: {self._GROUP_SELECTED_BG};"
+                    f" border: 2px solid {self._GROUP_SELECTED_BORDER}; border-radius: 4px; }}"
+                )
+            else:
+                self._frame.setStyleSheet(
+                    f"QFrame {{ background: {sel_bg}; border: 2px solid {sel_border};"
+                    " border-radius: 4px; }"
+                )
             self._name_label.setStyleSheet(
                 f"background: transparent; border: none; outline: none; color: {sel_name};"
             )
@@ -417,6 +464,18 @@ class ConversationListWidget(QWidget):
         self._compose_btn.setToolTip("New conversation")
         self._compose_btn.setAccessibleName("New conversation")
         self._compose_btn.setStyleSheet(_btn_style)
+        self._compose_btn.clicked.connect(self.compose_new_requested.emit)
+        header_layout.addWidget(self._compose_btn)
+
+        from PySide6.QtWidgets import QPushButton  # noqa: PLC0415
+        self._compose_btn = QPushButton("+")
+        self._compose_btn.setFixedSize(24, 24)
+        self._compose_btn.setStyleSheet(
+            "QPushButton { background: #0d9488; color: #ffffff; border-radius: 12px;"
+            " font-size: 16px; font-weight: bold; border: none; }"
+            "QPushButton:hover { background: #0f766e; }"
+        )
+        self._compose_btn.setAccessibleName("New conversation")
         self._compose_btn.clicked.connect(self.compose_new_requested.emit)
         header_layout.addWidget(self._compose_btn)
 

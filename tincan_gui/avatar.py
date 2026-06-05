@@ -7,6 +7,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
 
+_GROUP_AVATAR_W = 52
+_GROUP_AVATAR_H = 52
+_GROUP_FRONT_X = 12
+_GROUP_FRONT_Y = 12
+
 _AVATAR_SIZE = 40
 _PALETTE = [
     "#0369a1", "#7c3aed", "#db2777", "#b45309",
@@ -69,6 +74,44 @@ def _make_photo_pixmap(data: bytes, size: int) -> QPixmap:
     p.drawEllipse(0, 0, size, size)
     p.end()
     return result
+
+
+class GroupAvatarWidget(QWidget):
+    """52×52 stacked-circles avatar for group conversations.
+
+    Back circle at (0, 0); front circle at (_GROUP_FRONT_X, _GROUP_FRONT_Y).
+    Front circle shows PBAP photo if available; both fall back to initials.
+    """
+
+    def __init__(
+        self,
+        back_name: str,
+        front_name: str,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._back_name = back_name
+        self._front_name = front_name
+        self._front_photo: bytes | None = None
+        self.setFixedSize(_GROUP_AVATAR_W, _GROUP_AVATAR_H)
+
+    def set_front_photo(self, data: bytes) -> None:
+        self._front_photo = data
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        back_px = _make_initials_pixmap(self._back_name, _AVATAR_SIZE)
+        painter.drawPixmap(0, 0, back_px)
+        if self._front_photo:
+            front_px = _make_photo_pixmap(self._front_photo, _AVATAR_SIZE)
+            if front_px.isNull():
+                front_px = _make_initials_pixmap(self._front_name, _AVATAR_SIZE)
+        else:
+            front_px = _make_initials_pixmap(self._front_name, _AVATAR_SIZE)
+        painter.drawPixmap(_GROUP_FRONT_X, _GROUP_FRONT_Y, front_px)
+        painter.end()
 
 
 class AvatarWidget(QLabel):

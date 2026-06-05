@@ -19,13 +19,19 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
+    QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
+
+from tincan_gui.avatar import _color_for_name
 
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
@@ -156,6 +162,219 @@ class TitleBar(QWidget):
         self._status_chip.setText("○ Disconnected")
         self._status_chip.setStyleSheet("color: #fca5a5;")
         self._status_chip.setAccessibleName("Connection status: Disconnected")
+
+
+class _ChipWidget(QWidget):
+    """Single contact chip (26px height) with × dismiss button."""
+
+    dismissed = Signal(str)  # emits phone
+
+    def __init__(self, display: str, phone: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._phone = phone
+        color = _color_for_name(display)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 2, 4, 2)
+        layout.setSpacing(4)
+
+        label = QLabel(display)
+        label_font = QFont()
+        label_font.setPointSize(11)
+        label.setFont(label_font)
+        label.setStyleSheet("color: #ffffff; background: transparent;")
+        layout.addWidget(label)
+
+        dismiss = QPushButton("×")
+        dismiss.setFlat(True)
+        dismiss.setStyleSheet("color: #ffffff; border: none; font-size: 14px;")
+        dismiss.setFixedSize(18, 18)
+        dismiss.clicked.connect(lambda: self.dismissed.emit(self._phone))
+        layout.addWidget(dismiss)
+
+        self.setStyleSheet(
+            f"background: {color}; border-radius: 4px;"
+        )
+        self.setFixedHeight(26)
+        self.setAccessibleName(f"{display}, press Delete to remove")
+
+    @property
+    def phone(self) -> str:
+        return self._phone
+
+
+class NewConversationDialog(QDialog):
+    """Multi-chip compose dialog for starting a new 1:1 or group conversation."""
+
+    def __init__(
+        self,
+        contacts: list[dict],
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("New Conversation")
+        self.setMinimumWidth(480)
+        self.setStyleSheet("background: #18181b; color: #f4f4f5;")
+        self._contacts = contacts
+        self._chips: list[_ChipWidget] = []
+        self._build()
+        self._refresh_autocomplete("")
+
+    def _build(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+
+        to_label = QLabel("To:")
+        to_font = QFont()
+        to_font.setPointSize(12)
+        to_label.setFont(to_font)
+        layout.addWidget(to_label)
+
+        # Chip area + text input inside a scroll area
+        self._chip_scroll = QScrollArea()
+        self._chip_scroll.setWidgetResizable(True)
+        self._chip_scroll.setFixedHeight(80)
+        self._chip_scroll.setStyleSheet(
+            "QScrollArea { border: 2px solid #3b82f6; border-radius: 4px; background: #18181b; }"
+        )
+
+        self._chip_container = QWidget()
+        self._chip_flow = QHBoxLayout(self._chip_container)
+        self._chip_flow.setContentsMargins(4, 4, 4, 4)
+        self._chip_flow.setSpacing(4)
+        self._chip_flow.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+
+        self._text_input = QLineEdit()
+        self._text_input.setPlaceholderText("Add recipient…")
+        self._text_input.setStyleSheet(
+            "QLineEdit { background: transparent; border: none; color: #f4f4f5; font-size: 13px; }"
+        )
+        self._text_input.textChanged.connect(self._refresh_autocomplete)
+        self._text_input.installEventFilter(self)
+        self._chip_flow.addWidget(self._text_input, stretch=1)
+
+        self._chip_scroll.setWidget(self._chip_container)
+        layout.addWidget(self._chip_scroll)
+
+        # Autocomplete list
+        self._autocomplete = QListWidget()
+        self._autocomplete.setStyleSheet(
+            "QListWidget { background: #27272a; color: #f4f4f5; border: none; }"
+            "QListWidget::item:selected { background: #3f3f46; }"
+            "QListWidget::item:hover { background: #3f3f46; }"
+        )
+        self._autocomplete.setMaximumHeight(120)
+        self._autocomplete.itemActivated.connect(self._on_autocomplete_selected)
+        self._autocomplete.setAccessibleName("Autocomplete suggestions")
+        layout.addWidget(self._autocomplete)
+
+        # Buttons
+        self._btn_box = QDialogButtonBox()
+        self._cancel_btn = self._btn_box.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self._ok_btn = self._btn_box.addButton("Start", QDialogButtonBox.AcceptRole)
+        self._ok_btn.setEnabled(False)
+        self._ok_btn.setStyleSheet(
+            "QPushButton { background: #0d9488; color: #ffffff; border-radius: 4px; padding: 4px 12px; }"
+        )
+        self._btn_box.accepted.connect(self.accept)
+        self._btn_box.rejected.connect(self.reject)
+        layout.addWidget(self._btn_box)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._text_input and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            text = self._text_input.text().strip()
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab, Qt.Key.Key_Comma):
+                if text:
+                    self._add_chip(text, text)
+                    self._text_input.clear()
+                    return True
+                elif self._autocomplete.currentItem():
+                    self._on_autocomplete_selected(self._autocomplete.currentItem())
+                    return True
+            elif key == Qt.Key.Key_Backspace and not text and self._chips:
+                self._remove_chip(self._chips[-1].phone)
+                return True
+            elif key == Qt.Key.Key_Down:
+                self._autocomplete.setFocus()
+                if self._autocomplete.count():
+                    self._autocomplete.setCurrentRow(0)
+                return True
+        if obj is self._autocomplete and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                item = self._autocomplete.currentItem()
+                if item:
+                    self._on_autocomplete_selected(item)
+                    self._text_input.setFocus()
+                    return True
+            elif event.key() == Qt.Key.Key_Up:
+                if self._autocomplete.currentRow() == 0:
+                    self._text_input.setFocus()
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _add_chip(self, display: str, phone: str) -> None:
+        chipped_phones = {c.phone for c in self._chips}
+        if phone in chipped_phones:
+            return
+        chip = _ChipWidget(display, phone)
+        chip.dismissed.connect(self._remove_chip)
+        self._chips.append(chip)
+        idx = self._chip_flow.count() - 1  # insert before text input stretch
+        self._chip_flow.insertWidget(idx, chip)
+        self._update_ok_button()
+        self._refresh_autocomplete(self._text_input.text())
+
+    def _remove_chip(self, phone: str) -> None:
+        for chip in list(self._chips):
+            if chip.phone == phone:
+                self._chips.remove(chip)
+                self._chip_flow.removeWidget(chip)
+                chip.deleteLater()
+                break
+        self._update_ok_button()
+        self._refresh_autocomplete(self._text_input.text())
+
+    def _refresh_autocomplete(self, query: str) -> None:
+        self._autocomplete.clear()
+        chipped_phones = {c.phone for c in self._chips}
+        query = query.strip().lower()
+        for contact in self._contacts:
+            name = str(contact.get("name", ""))
+            phone = str(contact.get("phone", ""))
+            if phone in chipped_phones:
+                continue
+            if query and query not in name.lower() and query not in phone.lower():
+                continue
+            display = f"{name}  {phone}" if name else phone
+            item = QListWidgetItem(display)
+            item.setData(Qt.UserRole, {"name": name, "phone": phone})
+            if phone in chipped_phones:
+                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+            self._autocomplete.addItem(item)
+        count = self._autocomplete.count()
+        self._autocomplete.setVisible(count > 0)
+        self._autocomplete.setAccessibleName(f"{count} suggestions")
+
+    def _on_autocomplete_selected(self, item: QListWidgetItem) -> None:
+        data = item.data(Qt.UserRole)
+        if data:
+            display = data.get("name") or data.get("phone", "")
+            phone = data.get("phone", "")
+            if phone:
+                self._add_chip(display, phone)
+                self._text_input.clear()
+
+    def _update_ok_button(self) -> None:
+        n = len(self._chips)
+        self._ok_btn.setEnabled(n >= 1)
+        if n >= 2:
+            self._ok_btn.setText("Start Group")
+        else:
+            self._ok_btn.setText("Start")
+
+    def selected_phones(self) -> list[str]:
+        return [c.phone for c in self._chips]
 
 
 class MainWindow(QMainWindow):
@@ -411,6 +630,13 @@ class MainWindow(QMainWindow):
             self._current_phone = conv_id
             self._current_phone_dialable = True
         name = conv_data.name if conv_data else conv_id
+
+        # Set group mode on thread + compose before loading messages.
+        is_group = bool(conv_data and conv_data.is_group)
+        participants: list[str] = list(conv_data.participants) if conv_data and conv_data.is_group else []
+        self._thread_view.set_group_mode(is_group, participants)
+        self._compose.set_group_mode(is_group)
+
         # Paint the thread header immediately so selection feels snappy, then
         # fetch messages in the next event-loop tick (defers the D-Bus round trip).
         self._thread_view.load_thread(name, conv_id, [], "SMS")
@@ -672,6 +898,41 @@ class MainWindow(QMainWindow):
         if not message_id:
             self._thread_view.mark_last_send_failed()
             self._compose.show_send_error(text)
+
+    def _on_compose_new(self) -> None:
+        """Open the multi-chip New Conversation dialog."""
+        contacts = self._gather_autocomplete_contacts()
+        dlg = NewConversationDialog(contacts, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        phones = dlg.selected_phones()
+        if not phones:
+            return
+        if len(phones) == 1:
+            self._current_phone = phones[0]
+            self._thread_view.set_group_mode(False)
+            self._compose.set_group_mode(False)
+            self._compose.set_compose_enabled(True)
+        else:
+            conv_id = self._dbus_client.send_message_to_recipients(phones, "")
+            if not conv_id:
+                conv_id = phones[0]
+            self._current_phone = conv_id
+            self._thread_view.set_group_mode(True, phones)
+            self._compose.set_group_mode(True)
+            self._compose.set_compose_enabled(True)
+
+    def _gather_autocomplete_contacts(self) -> list[dict]:
+        """Build autocomplete list from conversation history (PBAP not yet available)."""
+        contacts: list[dict] = []
+        seen: set[str] = set()
+        for conv in self._dbus_client.list_conversations():
+            phone = str(conv.get("id", ""))
+            name = str(conv.get("display_name", phone))
+            if phone and phone not in seen:
+                seen.add(phone)
+                contacts.append({"name": name if name != phone else "", "phone": phone})
+        return contacts
 
     def _activate_and_focus(self, widget) -> None:
         with warnings.catch_warnings():
