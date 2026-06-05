@@ -12,6 +12,7 @@ Coverage:
   - MainWindow._on_notification_clicked(): raises window, calls select_conversation
   - TrayIcon.sync_notifications_action(): checkbox state synchronization
   - TrayIcon._on_menu_about_to_show(): reads desktop_enabled from QSettings on open
+  - §11 Actionable notifications (tincan-5ptsg): reply + mark-read action buttons
 """
 from __future__ import annotations
 
@@ -719,3 +720,105 @@ class TestMessageReceivedTriggersNotification:
                 window._on_message_received(self._INBOUND_UNREAD)
 
         mock_iface.Notify.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# §11 Actionable notifications — reply + mark-read buttons (tincan-5ptsg)
+# ---------------------------------------------------------------------------
+
+class TestActionableNotifications:
+    """Notifications expose 'reply' and 'mark-read' action buttons; each fires the right callback.
+    """
+
+    # --- action buttons appear in Notify() call ---
+
+    def test_notify_call_includes_reply_action(self):
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        mock_iface.Notify.return_value = 1
+        notifier, mock_bus = _make_notifier_with_mock_bus()
+        mock_bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+                notifier.dispatch(_INBOUND_NEW)
+
+        actions = mock_iface.Notify.call_args[0][5]
+        assert "reply" in actions, f"'reply' action id missing from {actions}"
+
+    def test_notify_call_includes_mark_read_action(self):
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        mock_iface.Notify.return_value = 1
+        notifier, mock_bus = _make_notifier_with_mock_bus()
+        mock_bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+                notifier.dispatch(_INBOUND_NEW)
+
+        actions = mock_iface.Notify.call_args[0][5]
+        assert "mark-read" in actions, f"'mark-read' action id missing from {actions}"
+
+    # --- action callbacks ---
+
+    def test_reply_action_invokes_on_action_invoked_callback(self):
+        received = []
+        notifier = DesktopNotifier(on_action_invoked=lambda cid: received.append(cid))
+        notifier._notif_to_conv[10] = "conv-alice"
+
+        notifier._on_action_invoked_signal(10, "reply")
+
+        assert received == ["conv-alice"]
+
+    def test_mark_read_action_invokes_on_mark_read_callback(self):
+        marked = []
+        notifier = DesktopNotifier(
+            on_action_invoked=lambda cid: None,
+            on_mark_read=lambda cid: marked.append(cid),
+        )
+        notifier._notif_to_conv[10] = "conv-alice"
+
+        notifier._on_action_invoked_signal(10, "mark-read")
+
+        assert marked == ["conv-alice"]
+
+    def test_mark_read_callback_not_called_for_other_actions(self):
+        marked = []
+        notifier = DesktopNotifier(
+            on_mark_read=lambda cid: marked.append(cid),
+        )
+        notifier._notif_to_conv[10] = "conv-alice"
+
+        notifier._on_action_invoked_signal(10, "default")
+        notifier._on_action_invoked_signal(10, "reply")
+        notifier._on_action_invoked_signal(10, "close")
+
+        assert marked == []
+
+    def test_mark_read_no_callback_does_not_raise(self):
+        notifier = DesktopNotifier(on_mark_read=None)
+        notifier._notif_to_conv[10] = "conv-alice"
+
+        notifier._on_action_invoked_signal(10, "mark-read")
+        # must not raise
+
+    # --- MainWindow wiring ---
+
+    def test_main_window_mark_read_callback_calls_dbus_client(self, qtbot):
+        """on_mark_read wired in MainWindow calls dbus_client.mark_conversation_read."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+        marked = []
+        window._dbus_client.mark_conversation_read = lambda cid: marked.append(cid)
+
+        window._on_notification_mark_read("conv-alice")
+
+        assert marked == ["conv-alice"]
+
+    def test_main_window_notifier_has_mark_read_wired(self, qtbot):
+        """DesktopNotifier constructed with on_mark_read pointing to MainWindow method."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+
+        assert window._notifier._on_mark_read is not None

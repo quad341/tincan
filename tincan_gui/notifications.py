@@ -36,10 +36,15 @@ class DesktopNotifier:
     clicks a notification (ActionInvoked with action_id='default').
     """
 
-    def __init__(self, on_action_invoked: Callable[[str], None] | None = None) -> None:
+    def __init__(
+        self,
+        on_action_invoked: Callable[[str], None] | None = None,
+        on_mark_read: Callable[[str], None] | None = None,
+    ) -> None:
         self._seen: dict[str, set[tuple[str, str]]] = {}
         self._notif_to_conv: dict[int, str] = {}
         self._on_action_invoked = on_action_invoked
+        self._on_mark_read = on_mark_read
         self._action_sub = None
         self._bus = None
         self._repair_notif_id: int = 0
@@ -69,12 +74,13 @@ class DesktopNotifier:
             if action_id == "default" and self._repair_on_reconnect:
                 self._repair_on_reconnect()
             return
-        if (
-            action_id in ("default", "open")
-            and self._on_action_invoked
-            and nid in self._notif_to_conv
-        ):
-            self._on_action_invoked(self._notif_to_conv.get(nid, ""))
+        conv_id = self._notif_to_conv.get(nid, "")
+        if action_id == "mark-read":
+            if self._on_mark_read and conv_id:
+                self._on_mark_read(conv_id)
+        elif action_id in ("default", "open", "reply"):
+            if self._on_action_invoked and conv_id:
+                self._on_action_invoked(conv_id)
 
     def dispatch(self, message: dict) -> None:
         """Send a desktop notification if the message warrants one."""
@@ -171,7 +177,10 @@ class DesktopNotifier:
         status = str(message.get("status", ""))
         if status not in ("unread", "new"):
             if not message.get("is_new"):
-                _log.debug("_should_notify: skip — status=%r is_new=%r", status, message.get("is_new"))
+                _log.debug(
+                    "_should_notify: skip — status=%r is_new=%r",
+                    status, message.get("is_new"),
+                )
                 return False
 
         conv_id = str(
@@ -218,7 +227,10 @@ class DesktopNotifier:
                 _ICON_PATH,
                 summary,
                 body,
-                dbus.Array(["default", "Open"], signature="s"),
+                dbus.Array(
+                    ["default", "Open", "reply", "Reply", "mark-read", "Mark as Read"],
+                    signature="s",
+                ),
                 dbus.Dictionary({}, signature="sv"),
                 dbus.Int32(0),
             )
