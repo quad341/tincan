@@ -81,7 +81,6 @@ class ConversationItem(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setFocusPolicy(Qt.StrongFocus)
         self._build()
-        self._frame = self  # tests check _frame.styleSheet() for selected state
         self._update_accessible()
         # When used as a top-level widget (e.g. in unit tests without a parent window),
         # show() is needed so isVisible() on children reflects setVisible() state rather
@@ -145,11 +144,16 @@ class ConversationItem(QWidget):
             name_font.setPointSize(14)
             name_font.setBold(True)
         self._name_label.setFont(name_font)
-        self._name_label.setStyleSheet(
-            "background: transparent; border: none; outline: none; color: #f4f4f5;"
-            if self._dark
-            else "background: transparent; border: none; outline: none; color: #111827;"
-        )
+        if self._data.is_group:
+            self._name_label.setStyleSheet(
+                "background: transparent; border: none; outline: none; color: #f4f4f5;"
+            )
+        else:
+            self._name_label.setStyleSheet(
+                "background: transparent; border: none; outline: none; color: #f4f4f5;"
+                if self._dark
+                else "background: transparent; border: none; outline: none; color: #111827;"
+            )
         self._name_label.setFocusPolicy(Qt.NoFocus)
         self._name_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         top_row.addWidget(self._name_label, stretch=1)
@@ -315,7 +319,7 @@ class ConversationItem(QWidget):
             else:
                 self._frame.setStyleSheet(
                     f"QFrame {{ background: {sel_bg}; border: 2px solid {sel_border};"
-                    " border-radius: 4px; }}"
+                    " border-radius: 4px; }"
                 )
             self._name_label.setStyleSheet(
                 f"background: transparent; border: none; outline: none; color: {sel_name};"
