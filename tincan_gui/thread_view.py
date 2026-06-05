@@ -215,6 +215,10 @@ class MessageBubble(QWidget):
         """Update the meta label to reflect a failed send (outbound bubbles only)."""
         self._meta_label.setText(f"{self._data.timestamp} · ⚠ Failed")
 
+    def set_send_delivered(self) -> None:
+        """Update the meta label to show confirmed delivery (outbound bubbles only)."""
+        self._meta_label.setText(f"{self._data.timestamp} · Delivered ✓")
+
     def metadata_label_color(self) -> str:
         """Return the hex color applied to the metadata label (used by a11y tests)."""
         return self._meta_color
@@ -473,6 +477,11 @@ class ThreadView(QWidget):
         """Update the most recently appended outbound bubble to show '⚠ Failed'."""
         if self._last_outbound is not None:
             self._last_outbound.set_send_failed()
+
+    def mark_last_send_delivered(self) -> None:
+        """Update the most recently appended outbound bubble to show 'Delivered ✓'."""
+        if self._last_outbound is not None:
+            self._last_outbound.set_send_delivered()
 
     def show_empty(self) -> None:
         while self._messages_layout.count():

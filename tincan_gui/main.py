@@ -744,8 +744,10 @@ class MainWindow(QMainWindow):
             return
         # Suppress MAP inbound echo of a self-sent message: iOS MAP delivers messages
         # sent to yourself back to the inbox with direction="inbound".
+        # Use the echo arrival as a delivery confirmation (tincan-f2xy7).
         if direction == "inbound" and (conv_id, body) in self._self_echo_guard:
             self._self_echo_guard.discard((conv_id, body))
+            self._thread_view.mark_last_send_delivered()
             return
         sender = str(message.get("sender", "") or message.get("from", ""))
         timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM
