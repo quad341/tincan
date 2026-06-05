@@ -56,8 +56,8 @@ _NON_DIGIT_RE = re.compile(r"\D")
 
 
 def _is_dialable(s: str) -> bool:
-    """Return True when *s* contains ≥7 digits (resolvable phone number)."""
-    return len(_NON_DIGIT_RE.sub("", s)) >= 7
+    """Return True for 4-6 digit short codes or ≥7 digit phone numbers."""
+    return len(_NON_DIGIT_RE.sub("", s)) >= 4
 
 
 def _same_conv(a: str, b: str) -> bool:
