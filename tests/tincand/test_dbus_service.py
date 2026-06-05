@@ -42,6 +42,7 @@ def service():
     svc.MessageReceived = MagicMock()
     svc.MessageSent = MagicMock()
     svc.ConversationUpdated = MagicMock()
+    svc.AppNotificationReceived = MagicMock()
     return svc
 
 
@@ -347,3 +348,128 @@ class TestMarkConversationRead:
     def test_noop_for_unknown_conversation_id(self, service):
         service.MarkConversationRead("no-such-conv")
         service.ConversationUpdated.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §N AppNotificationReceived signal + filter API (tincan-9kav TDD spec)
+# ---------------------------------------------------------------------------
+
+_APP_NOTIF = {
+    "app_id": "com.whatsapp.WhatsApp",
+    "title": "Alice",
+    "subtitle": "",
+    "body": "Hey!",
+    "category": "",
+    "category_id": 0,
+    "event_flags": 0,
+}
+
+
+@pytest.fixture
+def notif_service(service):
+    """service fixture with filter enabled+allowed by default."""
+    service._notification_filter = MagicMock()
+    service._notification_filter.is_enabled.return_value = True
+    service._notification_filter.is_allowed.return_value = True
+    service._notification_filter.get_all_filters.return_value = {}
+    service._seen_apps = MagicMock()
+    return service
+
+
+class TestOnAppNotificationReceivedAllowed:
+    """§N1: filter enabled+allowed → AppNotificationReceived emitted."""
+
+    def test_signal_emitted_when_allowed(self, notif_service):
+        notif_service.on_app_notification_received(_APP_NOTIF)
+        notif_service.AppNotificationReceived.assert_called_once()
+
+    def test_seen_apps_registered_when_allowed(self, notif_service):
+        notif_service.on_app_notification_received(_APP_NOTIF)
+        notif_service._seen_apps.register.assert_called_once_with(
+            "com.whatsapp.WhatsApp", label_hint="Alice"
+        )
+
+
+class TestOnAppNotificationReceivedGlobalDisabled:
+    """§N2: global mirroring disabled → signal NOT emitted, no registry write."""
+
+    def test_signal_not_emitted_when_disabled(self, notif_service):
+        notif_service._notification_filter.is_enabled.return_value = False
+        notif_service.on_app_notification_received(_APP_NOTIF)
+        notif_service.AppNotificationReceived.assert_not_called()
+
+    def test_no_registry_write_when_disabled(self, notif_service):
+        notif_service._notification_filter.is_enabled.return_value = False
+        notif_service.on_app_notification_received(_APP_NOTIF)
+        notif_service._seen_apps.register.assert_not_called()
+
+
+class TestOnAppNotificationReceivedAppDenied:
+    """§N3/N7: app denied → signal NOT emitted, register() NOT called."""
+
+    def test_signal_not_emitted_when_denied(self, notif_service):
+        notif_service._notification_filter.is_allowed.return_value = False
+        notif_service.on_app_notification_received(_APP_NOTIF)
+        notif_service.AppNotificationReceived.assert_not_called()
+
+    def test_register_not_called_when_denied(self, notif_service):
+        """Denied app must NOT appear in seen-apps list (UX correctness constraint)."""
+        notif_service._notification_filter.is_allowed.return_value = False
+        notif_service.on_app_notification_received(_APP_NOTIF)
+        notif_service._seen_apps.register.assert_not_called()
+
+
+class TestGetNotificationFilter:
+    """§N4: GetNotificationFilter returns {enabled: bool, apps: dict}."""
+
+    def test_returns_enabled_bool(self, notif_service):
+        notif_service._notification_filter.is_enabled.return_value = True
+        result = notif_service.GetNotificationFilter()
+        assert bool(result["enabled"]) is True
+
+    def test_returns_apps_dict(self, notif_service):
+        notif_service._notification_filter.get_all_filters.return_value = {
+            "com.foo.App": "deny"
+        }
+        result = notif_service.GetNotificationFilter()
+        assert "apps" in result
+        assert "com.foo.App" in result["apps"]
+        assert str(result["apps"]["com.foo.App"]["action"]) == "deny"
+
+
+class TestSetAppFilterInvalidArgument:
+    """§N5: SetAppFilter with invalid action raises im.tincan.Error.InvalidArgument."""
+
+    def test_invalid_action_raises_dbus_exception(self, notif_service):
+        import dbus.exceptions
+        with pytest.raises(dbus.exceptions.DBusException) as exc_info:
+            notif_service.SetAppFilter("com.foo.App", "badvalue")
+        assert "InvalidArgument" in str(exc_info.value)
+
+    def test_valid_action_allow_does_not_raise(self, notif_service):
+        notif_service.SetAppFilter("com.foo.App", "allow")  # must not raise
+
+    def test_valid_action_deny_does_not_raise(self, notif_service):
+        notif_service.SetAppFilter("com.foo.App", "deny")  # must not raise
+
+
+class TestAppNotificationPayloadKeys:
+    """§N6: emitted signal dict always contains all 7 required keys."""
+
+    def test_payload_has_all_7_keys(self, notif_service):
+        notif_service.on_app_notification_received(_APP_NOTIF)
+        payload = notif_service.AppNotificationReceived.call_args[0][0]
+        required = {
+            "app_id", "title", "subtitle", "body", "category", "category_id", "event_flags"
+        }
+        assert required <= set(payload.keys())
+
+    def test_missing_optional_fields_default_to_empty(self, notif_service):
+        minimal = {"app_id": "com.foo.App", "title": ""}
+        notif_service.on_app_notification_received(minimal)
+        payload = notif_service.AppNotificationReceived.call_args[0][0]
+        assert str(payload["subtitle"]) == ""
+        assert str(payload["body"]) == ""
+        assert str(payload["category"]) == ""
+        assert int(payload["category_id"]) == 0
+        assert int(payload["event_flags"]) == 0

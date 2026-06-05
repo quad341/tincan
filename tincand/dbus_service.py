@@ -447,6 +447,14 @@ class TincanService(dbus.service.Object):
             return
         title = str(notif.get("title", ""))
         self._seen_apps.register(app_id, label_hint=title)
+        try:
+            category_id = int(notif.get("category_id", 0))
+        except (TypeError, ValueError):
+            category_id = 0
+        try:
+            event_flags = int(notif.get("event_flags", 0))
+        except (TypeError, ValueError):
+            event_flags = 0
         payload = dbus.Dictionary(
             {
                 "app_id": dbus.String(app_id),
@@ -454,8 +462,8 @@ class TincanService(dbus.service.Object):
                 "subtitle": dbus.String(str(notif.get("subtitle", ""))),
                 "body": dbus.String(str(notif.get("body", ""))),
                 "category": dbus.String(str(notif.get("category", ""))),
-                "category_id": dbus.UInt32(int(notif.get("category_id", 0))),
-                "event_flags": dbus.UInt32(int(notif.get("event_flags", 0))),
+                "category_id": dbus.UInt32(category_id),
+                "event_flags": dbus.UInt32(event_flags),
             },
             signature="sv",
         )

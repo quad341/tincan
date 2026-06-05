@@ -53,10 +53,11 @@ class NotificationFilter:
         """Return {app_id: action} for all explicitly-configured apps."""
         s = app_settings()
         s.beginGroup("notifications/app_filter")
-        keys = s.childKeys()
-        result = {k: str(s.value(k, "allow")) for k in keys}
-        s.endGroup()
-        return result
+        try:
+            keys = s.childKeys()
+            return {k: str(s.value(k, "allow")) for k in keys}
+        finally:
+            s.endGroup()
 
 
 class SeenAppsRegistry:
