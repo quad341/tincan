@@ -71,16 +71,61 @@ class DesktopNotifier:
             if action_id == "default" and self._repair_on_reconnect:
                 self._repair_on_reconnect()
             return
-        if action_id == "default" and self._on_action_invoked:
-            conv_id = self._notif_to_conv.get(nid, "")
-            if conv_id:
-                self._on_action_invoked(conv_id)
+        if (
+            action_id in ("default", "open")
+            and self._on_action_invoked
+            and nid in self._notif_to_conv
+        ):
+            self._on_action_invoked(self._notif_to_conv.get(nid, ""))
 
     def dispatch(self, message: dict) -> None:
         """Send a desktop notification if the message warrants one."""
         if not self._should_notify(message):
             return
         self._notify(message)
+
+    def dispatch_app_notification(self, notif: dict) -> None:
+        """Send a desktop notification for a non-SMS iOS app notification."""
+        import dbus
+
+        app_id = str(notif.get("app_id", ""))
+        title = str(notif.get("title", ""))
+        subtitle = str(notif.get("subtitle", ""))
+        body_text = str(notif.get("body", ""))
+
+        key = (app_id, title, body_text)
+        seen = self._seen.setdefault("__app__", set())
+        if key in seen:
+            return
+        seen.add(key)
+
+        summary = title if title else f"Notification from {app_id}"
+        if subtitle:
+            body = f"{subtitle}: {body_text}" if body_text else subtitle
+        elif body_text:
+            body = body_text
+        else:
+            body = "New notification"
+
+        try:
+            bus = self._ensure_bus()
+            if bus is None:
+                bus = dbus.SessionBus()
+            proxy = bus.get_object(_NOTIF_SERVICE, _NOTIF_PATH)
+            iface = dbus.Interface(proxy, _NOTIF_IFACE)
+            notif_id = iface.Notify(
+                "tincan",
+                dbus.UInt32(0),
+                _ICON_PATH,
+                _truncate(summary, 30),
+                _truncate(body, 100),
+                dbus.Array(["open", "Open"], signature="s"),
+                dbus.Dictionary({}, signature="sv"),
+                dbus.Int32(0),
+            )
+            self._notif_to_conv[int(notif_id)] = ""  # no conv to select; raises window only
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("App notification failed: %s", exc)
 
     def dispatch_repair(self, on_reconnect: Callable[[], None] | None = None) -> None:
         """Send ANCS repair notification with Reconnect and Dismiss actions.
@@ -141,7 +186,10 @@ class DesktopNotifier:
         import dbus
 
         display_name = str(
-            message.get("display_name") or message.get("from") or message.get("conversation_id") or ""
+            message.get("display_name")
+            or message.get("from")
+            or message.get("conversation_id")
+            or ""
         ).strip()
         summary = _truncate(display_name, 30) if display_name else "tincan"
 

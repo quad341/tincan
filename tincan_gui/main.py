@@ -280,6 +280,7 @@ class MainWindow(QMainWindow):
         c.disconnected.connect(self._on_daemon_disconnected)
         c.capability_changed.connect(self._on_capability_changed)
         c.message_received.connect(self._on_message_received)
+        c.app_notification_received.connect(self._notifier.dispatch_app_notification)
         c.conversation_updated.connect(self._on_conversation_updated)
         c.contact_photo_received.connect(self._on_contact_photo_received)
         self.refresh_requested.connect(self._load_conversations)

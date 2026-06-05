@@ -318,6 +318,41 @@ class SettingsDialog(QDialog):
 
         layout.addSpacing(20)
 
+        # ── BLUETOOTH section ──────────────────────────────────────────────
+        bt_hdr, bt_sep = _section_header("Bluetooth")
+        layout.addWidget(bt_hdr)
+        layout.addWidget(bt_sep)
+
+        bt_label = QLabel("ANCS Adapter")
+        bt_label.setFont(cb_font)
+        bt_label.setStyleSheet("color: #a1a1aa;" if self._dark else "color: #6b7280;")
+        bt_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        layout.addWidget(bt_label)
+
+        import os as _os  # noqa: PLC0415
+        adapter_val = _os.environ.get("TINCAN_ANCS_ADAPTER", "")
+        self._adapter_field = QLabel(adapter_val if adapter_val else "/org/bluez/hci0")
+        self._adapter_field.setFont(cb_font)
+        if adapter_val:
+            self._adapter_field.setStyleSheet(
+                "color: #f4f4f5;" if self._dark else "color: #111827;"
+            )
+        else:
+            adapter_font = QFont()
+            adapter_font.setPointSize(11)
+            adapter_font.setItalic(True)
+            self._adapter_field.setFont(adapter_font)
+            self._adapter_field.setStyleSheet(
+                "color: #a1a1aa;" if self._dark else "color: #6b7280;"
+            )
+        self._adapter_field.setToolTip(
+            "Set TINCAN_ANCS_ADAPTER=<path> in your systemd unit or launcher script."
+        )
+        self._adapter_field.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        layout.addWidget(self._adapter_field)
+
+        layout.addSpacing(20)
+
         # ── APPEARANCE section (ghost/placeholder) ─────────────────────────
         app_hdr, app_sep = _section_header("Appearance")
         app_hdr.setStyleSheet("color: #d1d5db;")
