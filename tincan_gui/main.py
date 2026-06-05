@@ -978,7 +978,7 @@ class MainWindow(QMainWindow):
         conversations = []
         self._conversations_by_id = {}
         for c in raw:
-            ts = str(c.get("last_message_at", ""))[:5]
+            ts = _ts_display(str(c.get("last_message_at", "")))
             unread = int(c.get("unread_count", 0))
             data = ConversationData(
                 id=str(c.get("id", "")),
