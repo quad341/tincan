@@ -20,6 +20,7 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from tincand.pairing import FailureReason, PairingOrchestrator, PairingState
 
 # ---------------------------------------------------------------------------

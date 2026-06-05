@@ -10,11 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QStringListModel, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
-    QCompleter,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -33,7 +32,6 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui.avatar import _color_for_name
-
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.daemon_config import load_daemon_config
@@ -287,7 +285,8 @@ class NewConversationDialog(QDialog):
         self._ok_btn = self._btn_box.addButton("Start", QDialogButtonBox.AcceptRole)
         self._ok_btn.setEnabled(False)
         self._ok_btn.setStyleSheet(
-            "QPushButton { background: #0d9488; color: #ffffff; border-radius: 4px; padding: 4px 12px; }"
+            "QPushButton { background: #0d9488; color: #ffffff;"
+            " border-radius: 4px; padding: 4px 12px; }"
         )
         self._btn_box.accepted.connect(self.accept)
         self._btn_box.rejected.connect(self.reject)
@@ -650,7 +649,9 @@ class MainWindow(QMainWindow):
 
         # Set group mode on thread + compose before loading messages.
         is_group = bool(conv_data and conv_data.is_group)
-        participants: list[str] = list(conv_data.participants) if conv_data and conv_data.is_group else []
+        participants: list[str] = (
+            list(conv_data.participants) if conv_data and conv_data.is_group else []
+        )
         self._thread_view.set_group_mode(is_group, participants)
         self._compose.set_group_mode(is_group)
 
@@ -882,11 +883,15 @@ class MainWindow(QMainWindow):
             return
         now = datetime.now()
         ts = now.strftime("%H:%M")
-        sent_msg = MessageData(BubbleType.OUTBOUND, text, "", ts, sort_key=now.strftime("%Y%m%dT%H%M%S"))
+        sent_msg = MessageData(
+            BubbleType.OUTBOUND, text, "", ts, sort_key=now.strftime("%Y%m%dT%H%M%S")
+        )
         self._thread_view.append_message(sent_msg)
         # Cache sent message for thread reload (iOS MAP sent folder returns 0 messages).
         self._sent_cache.setdefault(phone, []).append(sent_msg)
-        self._msg_cache.add_message(phone, "outbound", text, "", sent_msg.sort_key, sent_msg.sort_key)
+        self._msg_cache.add_message(
+            phone, "outbound", text, "", sent_msg.sort_key, sent_msg.sort_key
+        )
         self._pending_sends.add((phone, text))
         # Guard self-conversations: MAP re-delivers self-sent messages to inbox as inbound.
         self._self_echo_guard.add((phone, text))

@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from tincan_gui.conversation_list import ConversationData, ConversationListWidget
+from tincan_gui.conversation_list import ConversationData
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
 

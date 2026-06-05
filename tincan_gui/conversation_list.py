@@ -235,14 +235,11 @@ class ConversationItem(QWidget):
             if self._data.is_group and self._data.preview_sender:
                 body = raw[:40] + "…" if len(raw) > 40 else raw
                 display = f"{self._data.preview_sender}: {body}"
-                color = "#a1a1aa"
             elif direction == "outbound":
                 body = raw[:30] + "…" if len(raw) > 30 else raw
                 display = f"You: {body}"
-                color = "#6b7280"
             else:
                 display = raw[:36] + "…" if len(raw) > 36 else raw
-                color = "#6b7280"
             self._preview_label.setText(display)
             self._preview_label.setStyleSheet(
                 f"background: transparent; border: none; outline: none; color: {preview_color};"

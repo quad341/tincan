@@ -171,7 +171,10 @@ class DesktopNotifier:
         status = str(message.get("status", ""))
         if status not in ("unread", "new"):
             if not message.get("is_new"):
-                _log.debug("_should_notify: skip — status=%r is_new=%r", status, message.get("is_new"))
+                _log.debug(
+                    "_should_notify: skip — status=%r is_new=%r",
+                    status, message.get("is_new"),
+                )
                 return False
 
         conv_id = str(
