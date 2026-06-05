@@ -51,7 +51,8 @@ _TRANSFER_TIMEOUT = 15.0
 _RETRY_MAX = 3
 _RETRY_BACKOFF = 0.5
 _POLL_INTERVAL_SECONDS = 5
-_RECONNECT_INTERVAL_SECONDS = 10
+_RECONNECT_INITIAL_INTERVAL_SECONDS = 10
+_RECONNECT_MAX_INTERVAL_SECONDS = 300
 
 # UpdateInbox raising UnknownObject means the OBEX session object is gone — dead session.
 # Contrast: UnknownMethod from Message1.Get is a BlueZ API gap (tincan-572zo) — handled by
@@ -232,6 +233,7 @@ class MapBackend(BackendInterface):
         self._msg_access: object | None = None
         self._poll_source_id: int | None = None
         self._reconnect_source_id: int | None = None
+        self._reconnect_attempt: int = 0  # exponential backoff counter
         self._device_addr: str = ""
         self._device_name: str = ""
         self._store: MessageStore | None = message_store  # SQLite-backed seen-handle cache
@@ -258,6 +260,7 @@ class MapBackend(BackendInterface):
         if self._reconnect_source_id is not None:
             GLib.source_remove(self._reconnect_source_id)
             self._reconnect_source_id = None
+        self._reconnect_attempt = 0
         bus = dbus.SessionBus()
         client = dbus.Interface(
             bus.get_object(_OBEX_CLIENT, _OBEX_CLIENT_PATH),
@@ -605,10 +608,11 @@ class MapBackend(BackendInterface):
             _log.info(
                 "Scheduling MAP reconnect to %s in %ds",
                 self._device_addr,
-                _RECONNECT_INTERVAL_SECONDS,
+                _RECONNECT_INITIAL_INTERVAL_SECONDS,
             )
+            self._reconnect_attempt = 0
             self._reconnect_source_id = GLib.timeout_add_seconds(
-                _RECONNECT_INTERVAL_SECONDS, self._reconnect_tick
+                _RECONNECT_INITIAL_INTERVAL_SECONDS, self._reconnect_tick
             )
 
     def _handle_session_dead(self) -> None:
@@ -618,23 +622,77 @@ class MapBackend(BackendInterface):
         self._poll_source_id = None
         self.disconnect()
         if self._device_addr:
+            self._reconnect_attempt = 0
             self._reconnect_source_id = GLib.timeout_add_seconds(
-                _RECONNECT_INTERVAL_SECONDS, self._reconnect_tick
+                _RECONNECT_INITIAL_INTERVAL_SECONDS, self._reconnect_tick
             )
 
     def _reconnect_tick(self) -> bool:
-        """GLib timer callback — attempt to re-establish the MAP session."""
+        """GLib timer callback — attempt to re-establish the MAP session.
+
+        Calls Device1.Connect() first to bring up the BT Classic ACL link
+        (no sudo — bluetooth group or polkit local-active-user policy is
+        sufficient).  Then creates the OBEX MAP session.  On failure, cancels
+        this timer and schedules a new one with exponential backoff capped at
+        _RECONNECT_MAX_INTERVAL_SECONDS.
+        """
         if not self._device_addr:
             self._reconnect_source_id = None
             return GLib.SOURCE_REMOVE
+
+        try:
+            self._bt_connect(self._device_addr)
+        except Exception as exc:
+            _log.debug("BT-level connect attempt: %s", exc)
+
         try:
             self.connect(self._device_addr)
-            _log.info("MAP session reconnected to %s", self._device_addr)
-            self._reconnect_source_id = None
+            _log.info(
+                "MAP session reconnected to %s after %d attempt(s)",
+                self._device_addr,
+                self._reconnect_attempt + 1,
+            )
+            # connect() already cleared _reconnect_source_id and _reconnect_attempt.
             return GLib.SOURCE_REMOVE
         except Exception as exc:
-            _log.debug("MAP reconnect attempt failed (will retry): %s", exc)
-            return GLib.SOURCE_CONTINUE
+            self._reconnect_attempt += 1
+            delay = min(
+                _RECONNECT_INITIAL_INTERVAL_SECONDS * (2 ** (self._reconnect_attempt - 1)),
+                _RECONNECT_MAX_INTERVAL_SECONDS,
+            )
+            _log.debug(
+                "MAP reconnect attempt %d failed, retry in %ds: %s",
+                self._reconnect_attempt,
+                delay,
+                exc,
+            )
+            self._reconnect_source_id = None
+            self._reconnect_source_id = GLib.timeout_add_seconds(delay, self._reconnect_tick)
+            return GLib.SOURCE_REMOVE
+
+    def _bt_connect(self, device_addr: str) -> None:
+        """Call org.bluez.Device1.Connect() to (re)establish the Classic BT ACL link.
+
+        Requires the daemon process to run under a user with bluetooth-group
+        membership (or a polkit rule granting org.bluez.connect).  No sudo
+        needed for a properly configured system.  Silently no-ops if the
+        device is not present in GetManagedObjects().
+        """
+        sys_bus = dbus.SystemBus()
+        obj_mgr = dbus.Interface(
+            sys_bus.get_object(_BLUEZ_SERVICE, _BLUEZ_ROOT),
+            _OBJ_MANAGER_IFACE,
+        )
+        for path, interfaces in obj_mgr.GetManagedObjects().items():
+            dev = interfaces.get(_DEVICE_IFACE, {})
+            if str(dev.get("Address", "")) == device_addr:
+                device = dbus.Interface(
+                    sys_bus.get_object(_BLUEZ_SERVICE, path),
+                    _DEVICE_IFACE,
+                )
+                device.Connect()
+                return
+        _log.debug("_bt_connect: device %s not found in managed objects", device_addr)
 
     def _retry(self, fn: object, *args: object) -> object:
         """Call *fn(*args)*, retrying on transient obexd errors."""

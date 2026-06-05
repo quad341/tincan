@@ -671,3 +671,323 @@ class TestMapBackendFailedHandleBackoff:
              patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_client):
             backend.connect("AA:BB:CC:DD:EE:FF")
         assert "/msg/7" not in backend._failed_handles
+
+
+# ---------------------------------------------------------------------------
+# §14 MapBackend self-heal reconnect — BT-level reconnect + backoff (tincan-8u3xl)
+#
+# Acceptance: pull the link → daemon calls Device1.Connect() (no sudo) then
+# retries the OBEX session with exponential backoff.
+#
+# Timer pattern: GLib mocked; _reconnect_tick invoked directly (no real timing).
+#   delay = min(10 * 2**(attempt-1), 300) for attempt ≥ 1
+#   1st failure → 10s, 2nd → 20s, 3rd → 40s, 4th → 80s, 5th → 160s, 6th+ → 300s
+# ---------------------------------------------------------------------------
+
+_BLUEZ_SVC = "org.bluez"
+_BLUEZ_ROOT = "/"
+_DEV_IFACE = "org.bluez.Device1"
+_OBJ_MGR_IFACE = "org.freedesktop.DBus.ObjectManager"
+_ADDR = "AA:BB:CC:DD:EE:FF"
+_DEV_PATH_14 = "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"
+
+
+def _make_managed_objects_14(addr: str = _ADDR) -> dict:
+    return {_DEV_PATH_14: {_DEV_IFACE: {"Address": addr}}}
+
+
+def _make_reconnect_backend(*, addr: str = _ADDR) -> tuple:
+    """Return (backend, mock_glib, timers) with GLib mocked and reconnect armed.
+
+    backend._device_addr = addr
+    timers: dict mapping source_id → callback
+    """
+    backend = MapBackend()
+    backend._device_addr = addr
+
+    timers: dict = {}
+    _next_id = [0]
+
+    mock_glib = MagicMock(name="GLib")
+    mock_glib.SOURCE_REMOVE = False
+    mock_glib.SOURCE_CONTINUE = True
+
+    def _add_seconds(interval, cb):
+        _next_id[0] += 1
+        tid = _next_id[0]
+        timers[tid] = cb
+        return tid
+
+    mock_glib.timeout_add_seconds.side_effect = _add_seconds
+    mock_glib.source_remove.side_effect = lambda tid: timers.pop(tid, None)
+
+    return backend, mock_glib, timers
+
+
+class TestMapBackendBtConnect:
+    """_bt_connect() calls Device1.Connect() on the BlueZ system bus."""
+
+    def _run_bt_connect(self, managed_objects, *, addr: str = _ADDR,
+                        device_exc=None):
+        """Call _bt_connect with mocked system bus; return mock_device."""
+        backend = MapBackend()
+        mock_sys_bus = MagicMock(name="SystemBus")
+        mock_obj_mgr = MagicMock(name="ObjectManager")
+        mock_obj_mgr.GetManagedObjects.return_value = managed_objects
+        mock_device = MagicMock(name="Device1")
+        if device_exc:
+            mock_device.Connect.side_effect = device_exc
+
+        def _iface(obj, iface):
+            if iface == _OBJ_MGR_IFACE:
+                return mock_obj_mgr
+            if iface == _DEV_IFACE:
+                return mock_device
+            return MagicMock()
+
+        with patch("tincand.backends.bluez_map.dbus.SystemBus",
+                   return_value=mock_sys_bus), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   side_effect=_iface):
+            backend._bt_connect(addr)
+
+        return mock_device
+
+    def test_bt_connect_calls_device1_connect(self):
+        device = self._run_bt_connect(_make_managed_objects_14())
+        device.Connect.assert_called_once()
+
+    def test_bt_connect_no_args_to_device1_connect(self):
+        device = self._run_bt_connect(_make_managed_objects_14())
+        device.Connect.assert_called_once_with()
+
+    def test_bt_connect_no_matching_device_does_not_raise(self):
+        """Device not in managed objects → no-op, no exception."""
+        backend = MapBackend()
+        mock_sys_bus = MagicMock(name="SystemBus")
+        mock_obj_mgr = MagicMock(name="ObjectManager")
+        mock_obj_mgr.GetManagedObjects.return_value = {}
+
+        with patch("tincand.backends.bluez_map.dbus.SystemBus",
+                   return_value=mock_sys_bus), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   return_value=mock_obj_mgr):
+            backend._bt_connect("11:22:33:44:55:66")  # must not raise
+
+    def test_bt_connect_system_bus_not_session_bus(self):
+        """_bt_connect must use SystemBus, not SessionBus (no polkit elevation)."""
+        backend = MapBackend()
+        mock_sys_bus = MagicMock(name="SystemBus")
+        mock_obj_mgr = MagicMock(name="ObjectManager")
+        mock_obj_mgr.GetManagedObjects.return_value = _make_managed_objects_14()
+        mock_iface = MagicMock()
+        mock_iface.return_value = mock_obj_mgr
+
+        with patch("tincand.backends.bluez_map.dbus.SystemBus",
+                   return_value=mock_sys_bus) as mock_sys_cls, \
+             patch("tincand.backends.bluez_map.dbus.SessionBus") as mock_ses_cls, \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   side_effect=lambda o, i: mock_obj_mgr):
+            backend._bt_connect(_ADDR)
+
+        mock_sys_cls.assert_called_once()
+        mock_ses_cls.assert_not_called()
+
+
+class TestMapBackendReconnectCallsBtConnect:
+    """_reconnect_tick calls _bt_connect before self.connect (OBEX session)."""
+
+    def _run_reconnect_tick_with_obex_fail(self, *, addr: str = _ADDR):
+        """Run _reconnect_tick with OBEX always failing; capture _bt_connect calls."""
+        backend, mock_glib, timers = _make_reconnect_backend(addr=addr)
+
+        bt_connect_calls = []
+        obex_connect_calls = []
+
+        def _mock_bt_connect(a):
+            bt_connect_calls.append(a)
+
+        def _mock_connect(a):
+            obex_connect_calls.append(a)
+            raise dbus.exceptions.DBusException(name="org.bluez.obex.Error.Failed")
+
+        backend._bt_connect = _mock_bt_connect
+        backend.connect = _mock_connect
+
+        with patch("tincand.backends.bluez_map.GLib", mock_glib):
+            backend._reconnect_tick()
+
+        return bt_connect_calls, obex_connect_calls
+
+    def test_reconnect_tick_calls_bt_connect(self):
+        bt_calls, _ = self._run_reconnect_tick_with_obex_fail()
+        assert len(bt_calls) == 1
+
+    def test_reconnect_tick_calls_bt_connect_before_obex_connect(self):
+        """bt_connect must be called; OBEX connect must also be called."""
+        bt_calls, obex_calls = self._run_reconnect_tick_with_obex_fail()
+        assert len(bt_calls) == 1
+        assert len(obex_calls) == 1
+
+    def test_reconnect_tick_attempts_obex_even_when_bt_connect_raises(self):
+        """_bt_connect failure must not prevent self.connect() from being called."""
+        backend, mock_glib, timers = _make_reconnect_backend()
+        obex_calls = []
+
+        def _bt_fail(a):
+            raise Exception("BT gone")
+
+        def _mock_connect(a):
+            obex_calls.append(a)
+            raise dbus.exceptions.DBusException(name="org.bluez.obex.Error.Failed")
+
+        backend._bt_connect = _bt_fail
+        backend.connect = _mock_connect
+
+        with patch("tincand.backends.bluez_map.GLib", mock_glib):
+            backend._reconnect_tick()  # must not raise
+
+        assert len(obex_calls) == 1
+
+
+class TestMapBackendReconnectBackoff:
+    """Exponential backoff: delay = min(10 * 2^(attempt-1), 300) per failure.
+
+    Timer pattern: call _reconnect_tick() directly as if GLib fired it; the
+    backed-off delay is observed via mock_glib.timeout_add_seconds call args.
+    """
+
+    def _make_always_failing_backend(self):
+        """Backend where connect() always raises and _bt_connect is a no-op."""
+        backend, mock_glib, timers = _make_reconnect_backend()
+
+        def _bt_noop(a):
+            pass
+
+        def _connect_fail(a):
+            raise dbus.exceptions.DBusException(name="org.bluez.obex.Error.Failed")
+
+        backend._bt_connect = _bt_noop
+        backend.connect = _connect_fail
+        return backend, mock_glib, timers
+
+    def _tick(self, backend, mock_glib):
+        with patch("tincand.backends.bluez_map.GLib", mock_glib):
+            return backend._reconnect_tick()
+
+    def test_first_failure_schedules_10s_timer(self):
+        backend, mock_glib, _ = self._make_always_failing_backend()
+        self._tick(backend, mock_glib)
+        intervals = [c.args[0] for c in mock_glib.timeout_add_seconds.call_args_list]
+        assert 10 in intervals
+
+    def test_second_failure_schedules_20s_timer(self):
+        backend, mock_glib, _ = self._make_always_failing_backend()
+        self._tick(backend, mock_glib)
+        mock_glib.timeout_add_seconds.reset_mock()
+        self._tick(backend, mock_glib)
+        intervals = [c.args[0] for c in mock_glib.timeout_add_seconds.call_args_list]
+        assert 20 in intervals
+
+    def test_third_failure_schedules_40s_timer(self):
+        backend, mock_glib, _ = self._make_always_failing_backend()
+        self._tick(backend, mock_glib)
+        self._tick(backend, mock_glib)
+        mock_glib.timeout_add_seconds.reset_mock()
+        self._tick(backend, mock_glib)
+        intervals = [c.args[0] for c in mock_glib.timeout_add_seconds.call_args_list]
+        assert 40 in intervals
+
+    def test_sixth_failure_capped_at_300s(self):
+        backend, mock_glib, _ = self._make_always_failing_backend()
+        for _ in range(5):
+            self._tick(backend, mock_glib)
+        mock_glib.timeout_add_seconds.reset_mock()
+        self._tick(backend, mock_glib)
+        intervals = [c.args[0] for c in mock_glib.timeout_add_seconds.call_args_list]
+        assert max(intervals) <= 300
+
+    def test_failure_returns_source_remove(self):
+        backend, mock_glib, _ = self._make_always_failing_backend()
+        result = self._tick(backend, mock_glib)
+        assert result == mock_glib.SOURCE_REMOVE
+
+    def test_reconnect_attempt_increments_on_failure(self):
+        backend, mock_glib, _ = self._make_always_failing_backend()
+        assert backend._reconnect_attempt == 0
+        self._tick(backend, mock_glib)
+        assert backend._reconnect_attempt == 1
+        self._tick(backend, mock_glib)
+        assert backend._reconnect_attempt == 2
+
+    def test_success_returns_source_remove(self):
+        backend, mock_glib, _ = _make_reconnect_backend()
+        mock_client = MagicMock(name="Client1")
+        mock_client.CreateSession.return_value = "/org/obex/session1"
+        backend._bt_connect = lambda a: None
+
+        with patch("tincand.backends.bluez_map.GLib", mock_glib), \
+             patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   return_value=mock_client):
+            result = backend._reconnect_tick()
+
+        assert result == mock_glib.SOURCE_REMOVE
+
+    def test_success_resets_reconnect_attempt_to_zero(self):
+        backend, mock_glib, _ = _make_reconnect_backend()
+        backend._reconnect_attempt = 3  # simulate prior failures
+        mock_client = MagicMock(name="Client1")
+        mock_client.CreateSession.return_value = "/org/obex/session1"
+        backend._bt_connect = lambda a: None
+
+        with patch("tincand.backends.bluez_map.GLib", mock_glib), \
+             patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   return_value=mock_client):
+            backend._reconnect_tick()
+
+        assert backend._reconnect_attempt == 0
+
+    def test_success_does_not_schedule_reconnect_timer(self):
+        """connect() schedules a poll timer — that's expected.  No reconnect timer."""
+        backend, mock_glib, _ = _make_reconnect_backend()
+        mock_client = MagicMock(name="Client1")
+        mock_client.CreateSession.return_value = "/org/obex/session1"
+        backend._bt_connect = lambda a: None
+
+        with patch("tincand.backends.bluez_map.GLib", mock_glib), \
+             patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   return_value=mock_client):
+            backend._reconnect_tick()
+
+        reconnect_timer_calls = [
+            c for c in mock_glib.timeout_add_seconds.call_args_list
+            if c.args[1] is backend._reconnect_tick
+        ]
+        assert len(reconnect_timer_calls) == 0
+
+
+class TestMapBackendReconnectAttemptReset:
+    """_handle_session_dead and schedule_reconnect reset _reconnect_attempt."""
+
+    def test_handle_session_dead_resets_reconnect_attempt(self):
+        backend, mock_glib, timers = _make_reconnect_backend()
+        backend._reconnect_attempt = 4  # simulate prior failures
+
+        with patch("tincand.backends.bluez_map.GLib", mock_glib), \
+             patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface"):
+            backend._handle_session_dead()
+
+        assert backend._reconnect_attempt == 0
+
+    def test_schedule_reconnect_resets_reconnect_attempt(self):
+        backend, mock_glib, timers = _make_reconnect_backend()
+        backend._reconnect_attempt = 2
+
+        with patch("tincand.backends.bluez_map.GLib", mock_glib):
+            backend.schedule_reconnect()
+
+        assert backend._reconnect_attempt == 0
