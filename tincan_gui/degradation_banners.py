@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QCoreApplication, Signal
 from PySide6.QtGui import QAccessible, QFont
 from PySide6.QtWidgets import (
     QAccessibleWidget,
@@ -23,16 +23,19 @@ from tincan_gui.capability_banner import CapabilityBanner
 class StateABanner(CapabilityBanner):
     """Full-width disconnected banner (h=56, red border). Design: tincan-s42 §2 State A."""
 
-    MSG = (
-        "⊗ Connection lost — Bluetooth out of range"
-        " · Showing cached conversations · reconnecting…"
-    )
-
     def __init__(self, last_seen: str = "", parent: Optional[QWidget] = None) -> None:
-        msg = self.MSG if not last_seen else (
-            f"⊗ Connection lost — last seen {last_seen} · "
-            "Bluetooth out of range · reconnecting…"
-        )
+        if not last_seen:
+            msg = QCoreApplication.translate(
+                "StateABanner",
+                "⊗ Connection lost — Bluetooth out of range"
+                " · Showing cached conversations · reconnecting…",
+            )
+        else:
+            msg = QCoreApplication.translate(
+                "StateABanner",
+                "⊗ Connection lost — last seen {last_seen}"
+                " · Bluetooth out of range · reconnecting…",
+            ).format(last_seen=last_seen)
         super().__init__(message=msg, parent=parent)
         self.setFixedHeight(56)
         self.setStyleSheet(
@@ -49,26 +52,26 @@ class StateBBanner(QWidget):
 
     show_me_how_clicked = Signal()
 
-    MSG_TITLE = "⚠ Messaging unavailable"
-    MSG_BODY = (
-        "Enable 'Show Notifications' on iPhone:"
-        " Settings → Bluetooth → [device] → Show Notifications"
-    )
-
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(80)
         self.setStyleSheet(
             "background-color: #fffbeb; border: 1px solid #f59e0b;"
         )
-        self.setAccessibleName(f"{self.MSG_TITLE} — {self.MSG_BODY}")
+
+        msg_title = self.tr("⚠ Messaging unavailable")
+        msg_body = self.tr(
+            "Enable 'Show Notifications' on iPhone:"
+            " Settings → Bluetooth → [device] → Show Notifications"
+        )
+        self.setAccessibleName(f"{msg_title} — {msg_body}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(4)
 
         top_row = QHBoxLayout()
-        title = QLabel(self.MSG_TITLE)
+        title = QLabel(msg_title)
         title_font = QFont()
         title_font.setPointSize(14)
         title_font.setBold(True)
@@ -76,7 +79,7 @@ class StateBBanner(QWidget):
         title.setStyleSheet("color: #92400e;")
         top_row.addWidget(title, stretch=1)
 
-        show_btn = QPushButton("Show me how")
+        show_btn = QPushButton(self.tr("Show me how"))
         show_btn.setStyleSheet(
             "QPushButton { color: #92400e; background: transparent; "
             "border: 1px solid #f59e0b; border-radius: 4px; padding: 2px 8px; }"
@@ -86,7 +89,7 @@ class StateBBanner(QWidget):
         top_row.addWidget(show_btn)
         layout.addLayout(top_row)
 
-        body = QLabel(self.MSG_BODY)
+        body = QLabel(msg_body)
         body_font = QFont()
         body_font.setPointSize(11)
         body.setFont(body_font)
@@ -104,24 +107,27 @@ class ANCSRepairBanner(QWidget):
 
     reconnect_clicked = Signal()
 
-    MSG = "iPhone notifications unavailable - authorization lost, tap Reconnect to restore"
-    ACCESSIBLE_NAME = (
-        "iPhone notifications unavailable - authorization lost. "
-        "Activate Reconnect to restore."
-    )
-
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(56)
         self.setStyleSheet(
             "background-color: #fff7ed; border: 1px solid #f97316;"
         )
-        self.setAccessibleName(self.ACCESSIBLE_NAME)
+
+        msg = self.tr(
+            "iPhone notifications unavailable - authorization lost,"
+            " tap Reconnect to restore"
+        )
+        accessible_name = self.tr(
+            "iPhone notifications unavailable - authorization lost."
+            " Activate Reconnect to restore."
+        )
+        self.setAccessibleName(accessible_name)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 8, 0)
 
-        label = QLabel(self.MSG)
+        label = QLabel(msg)
         label_font = QFont()
         label_font.setPointSize(11)
         label.setFont(label_font)
@@ -129,9 +135,9 @@ class ANCSRepairBanner(QWidget):
         label.setWordWrap(True)
         layout.addWidget(label, stretch=1)
 
-        reconnect_btn = QPushButton("Reconnect...")
+        reconnect_btn = QPushButton(self.tr("Reconnect..."))
         reconnect_btn.setMinimumWidth(100)
-        reconnect_btn.setAccessibleName("Reconnect")
+        reconnect_btn.setAccessibleName(self.tr("Reconnect"))
         reconnect_btn.setStyleSheet(
             "QPushButton { color: #c2410c; background: #ffffff; font-size: 12pt;"
             " border: 1px solid #f97316; border-radius: 4px; padding: 2px 8px; }"
@@ -151,37 +157,37 @@ class StateCBanner(QWidget):
 
     refresh_clicked = Signal()
 
-    MSG = (
-        "ℹ Real-time push notifications unavailable"
-        " · New messages appear after manual refresh."
-        " · Send and conversation list still work."
-    )
-    # tincan-5en: accessible name uses plain-text form per spec §5
-    ACCESSIBLE_NAME = (
-        "Real-time push notifications unavailable. "
-        "New messages appear after manual refresh. "
-        "Send and conversation list still work."
-    )
-
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(32)
         self.setStyleSheet(
             "background-color: #f7fee7; border: 1px solid #84cc16;"
         )
-        self.setAccessibleName(self.ACCESSIBLE_NAME)
+
+        # tincan-5en: accessible name uses plain-text form per spec §5
+        msg = self.tr(
+            "ℹ Real-time push notifications unavailable"
+            " · New messages appear after manual refresh."
+            " · Send and conversation list still work."
+        )
+        accessible_name = self.tr(
+            "Real-time push notifications unavailable."
+            " New messages appear after manual refresh."
+            " Send and conversation list still work."
+        )
+        self.setAccessibleName(accessible_name)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 8, 0)
 
-        label = QLabel(self.MSG)
+        label = QLabel(msg)
         label_font = QFont()
         label_font.setPointSize(11)
         label.setFont(label_font)
         label.setStyleSheet("color: #365314;")
         layout.addWidget(label, stretch=1)
 
-        refresh_btn = QPushButton("↻ Refresh")
+        refresh_btn = QPushButton(self.tr("↻ Refresh"))
         refresh_btn.setFixedWidth(80)
         refresh_btn.setStyleSheet(
             "QPushButton { color: #365314; background: transparent; "
@@ -199,28 +205,28 @@ class StateCBanner(QWidget):
 class ContactsEmptyBanner(QWidget):
     """Slim informational banner shown when PBAP loads 0 contacts (h=32, blue)."""
 
-    MSG = (
-        "ℹ No contacts loaded — on iPhone: Settings › Bluetooth › "
-        "[device] › Sync Contacts"
-    )
-    ACCESSIBLE_NAME = (
-        "No contacts loaded. "
-        "To see contact names, enable Sync Contacts in iPhone Settings, "
-        "Bluetooth, then tap your device name."
-    )
-
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(32)
         self.setStyleSheet(
             "background-color: #eff6ff; border: 1px solid #93c5fd;"
         )
-        self.setAccessibleName(self.ACCESSIBLE_NAME)
+
+        msg = self.tr(
+            "ℹ No contacts loaded — on iPhone: Settings › Bluetooth › "
+            "[device] › Sync Contacts"
+        )
+        accessible_name = self.tr(
+            "No contacts loaded."
+            " To see contact names, enable Sync Contacts in iPhone Settings,"
+            " Bluetooth, then tap your device name."
+        )
+        self.setAccessibleName(accessible_name)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 12, 0)
 
-        label = QLabel(self.MSG)
+        label = QLabel(msg)
         label_font = QFont()
         label_font.setPointSize(11)
         label.setFont(label_font)

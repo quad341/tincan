@@ -86,7 +86,7 @@ class AvatarWidget(QLabel):
     def _show_initials(self) -> None:
         px = _make_initials_pixmap(self._name, _AVATAR_SIZE)
         self.setPixmap(px)
-        self.setAccessibleName(f"Contact photo for {self._name}")
+        self.setAccessibleName(self.tr("Contact photo for {}").format(self._name))
 
     def set_photo(self, data: bytes) -> None:
         """Display PBAP photo (raw JPEG/PNG bytes). Falls back to initials on decode error."""
@@ -95,4 +95,4 @@ class AvatarWidget(QLabel):
             self._show_initials()
         else:
             self.setPixmap(px)
-        self.setAccessibleName(f"Contact photo for {self._name}")
+        self.setAccessibleName(self.tr("Contact photo for {}").format(self._name))

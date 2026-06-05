@@ -168,6 +168,7 @@ class TincandClient(QObject):
     connected = Signal(str)           # device_address
     disconnected = Signal()
     capability_changed = Signal(str, bool)  # feature, available
+    app_notification_received = Signal(dict)  # AppNotificationReceived a{sv} → dict
 
     # Messages interface
     message_received = Signal(dict)        # message a{sv} → dict
@@ -196,6 +197,8 @@ class TincandClient(QObject):
                       self, "1_on_disconnected()"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_DAEMON, "CapabilityChanged",
                       self, "1_on_capability_changed(QString,bool)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_DAEMON, "AppNotificationReceived",
+                      self, "1_on_app_notification_received(QVariantMap)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, "MessageReceived",
                       self, "1_on_message_received(QVariantMap)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, "MessageSent",
@@ -208,7 +211,7 @@ class TincandClient(QObject):
         if not all(_ok):
             _log.warning("tincan D-Bus: some signal subscriptions failed: %s", _ok)
         else:
-            _log.debug("tincan D-Bus: all 7 signal subscriptions registered")
+            _log.debug("tincan D-Bus: all 8 signal subscriptions registered")
 
     # ------------------------------------------------------------------
     # D-Bus signal → Qt signal bridges
@@ -228,6 +231,11 @@ class TincandClient(QObject):
     def _on_capability_changed(self, feature: str, available: bool) -> None:
         _log.debug("tincand: CapabilityChanged(%s, %s)", feature, available)
         self.capability_changed.emit(str(feature), bool(available))
+
+    @Slot("QVariantMap")
+    def _on_app_notification_received(self, payload) -> None:
+        _log.debug("tincand: AppNotificationReceived")
+        self.app_notification_received.emit(_demarshal_map(payload))
 
     @Slot("QVariantMap")
     def _on_message_received(self, message) -> None:
@@ -379,6 +387,109 @@ class TincandClient(QObject):
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
         if iface.isValid():
             iface.call("FetchContactPhoto", str(conv_id))
+
+    # ------------------------------------------------------------------
+    # Notification filter methods (im.tincan.Daemon)
+    # ------------------------------------------------------------------
+
+    def get_notification_filter(self) -> dict:
+        """Call GetNotificationFilter. Returns safe default when daemon is absent."""
+        _default: dict = {"enabled": True, "apps": {}}
+        if not self._bus.isConnected():
+            return _default
+        result = self._dbus_call(_IFACE_DAEMON, "GetNotificationFilter")
+        if result is not None:
+            enabled = bool(result.get("enabled", True)) if hasattr(result, "get") else True
+            apps_raw = result.get("apps", {}) if hasattr(result, "get") else {}
+            apps: dict = {}
+            if hasattr(apps_raw, "items"):
+                for app_id, app_data in apps_raw.items():
+                    if hasattr(app_data, "get"):
+                        action = str(app_data.get("action", "allow"))
+                    else:
+                        action = "allow"
+                    apps[str(app_id)] = action
+            return {"enabled": enabled, "apps": apps}
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+        if not iface.isValid():
+            return _default
+        raw = iface.call("GetNotificationFilter")
+        if isinstance(raw, QDBusMessage):
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.warning("GetNotificationFilter failed: %s", raw.errorMessage())
+                return _default
+            args = raw.arguments()
+            data = _demarshal_map(args[0] if args else {})
+        else:
+            reply = _wrap_reply(raw)
+            if not reply.isValid():
+                _log.warning("GetNotificationFilter failed: %s", reply.error().message())
+                return _default
+            data = _demarshal_map(reply.value())
+        enabled = bool(data.get("enabled", True))
+        apps_raw = data.get("apps", {})
+        apps = {}
+        if isinstance(apps_raw, dict):
+            for app_id, app_data in apps_raw.items():
+                if isinstance(app_data, dict):
+                    apps[str(app_id)] = str(app_data.get("action", "allow"))
+                else:
+                    apps[str(app_id)] = "allow"
+        return {"enabled": enabled, "apps": apps}
+
+    def set_notifications_enabled(self, enabled: bool) -> None:
+        """Call SetNotificationsEnabled on the daemon (fire-and-forget)."""
+        if not self._bus.isConnected():
+            return
+        result = self._dbus_call(_IFACE_DAEMON, "SetNotificationsEnabled", bool(enabled))
+        if result is None:
+            iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+            if iface.isValid():
+                iface.call("SetNotificationsEnabled", bool(enabled))
+
+    def get_seen_apps(self) -> list[dict]:
+        """Call GetSeenApps. Returns [] when daemon is absent."""
+        if not self._bus.isConnected():
+            return []
+        result = self._dbus_call(_IFACE_DAEMON, "GetSeenApps")
+        if result is not None:
+            return [
+                {
+                    "app_id": str(r.get("app_id", "")) if hasattr(r, "get") else "",
+                    "label_hint": str(r.get("label_hint", "")) if hasattr(r, "get") else "",
+                }
+                for r in result
+            ]
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+        if not iface.isValid():
+            return []
+        raw = iface.call("GetSeenApps")
+        if isinstance(raw, QDBusMessage):
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.warning("GetSeenApps failed: %s", raw.errorMessage())
+                return []
+            args = raw.arguments()
+            items = _demarshal_list_of_maps(args[0] if args else [])
+        else:
+            reply = _wrap_reply(raw)
+            if not reply.isValid():
+                _log.warning("GetSeenApps failed: %s", reply.error().message())
+                return []
+            items = _demarshal_list_of_maps(reply.value())
+        return [
+            {"app_id": str(item.get("app_id", "")), "label_hint": str(item.get("label_hint", ""))}
+            for item in items
+        ]
+
+    def set_app_filter(self, app_id: str, action: str) -> None:
+        """Call SetAppFilter on the daemon (fire-and-forget)."""
+        if not self._bus.isConnected():
+            return
+        result = self._dbus_call(_IFACE_DAEMON, "SetAppFilter", str(app_id), str(action))
+        if result is None:
+            iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+            if iface.isValid():
+                iface.call("SetAppFilter", str(app_id), str(action))
 
     def _on_contact_photo_received(self, conv_id, photo) -> None:
         _log.debug("tincand: ContactPhotoReceived(%s)", conv_id)

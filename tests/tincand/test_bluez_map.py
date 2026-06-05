@@ -450,3 +450,85 @@ class TestMapBackendDatetimeKeyFallback:
 
     def test_no_datetime_key_present_yields_empty_timestamp(self):
         assert self._poll_timestamp() == ""
+
+
+# ---------------------------------------------------------------------------
+# §7 _emit_messages — PBAP-resolved name preferred over MAP Sender field
+# Bead: tincan-tpomn / tincan-drj4
+# ---------------------------------------------------------------------------
+
+class TestEmitMessagesPbapNameResolution:
+    """_emit_messages uses _contact_store name when available (tincan-tpomn).
+
+    Root cause: PBAP runs before MAP first poll, so _contact_store is populated
+    but _conversations is empty at update_contact() time.  _emit_messages must
+    prefer the already-resolved PBAP name over the raw MAP Sender field.
+
+    Coverage:
+      §7.1 phone-keyed sender with resolved PBAP name → display_name = PBAP name
+      §7.2 phone-keyed sender without PBAP entry → display_name = MAP Sender
+      §7.3 name-keyed sender (not phone) → display_name unchanged (no store lookup)
+    """
+
+    def _make_backend_with_service(self):
+        from unittest.mock import patch
+
+        import dbus
+        import dbus.service
+
+        from tincand.dbus_service import TincanService
+
+        with patch("dbus.service.BusName", return_value=MagicMock()), \
+             patch.object(dbus.service.Object, "__init__", return_value=None):
+            svc = TincanService(MagicMock())
+        svc.Connected = MagicMock()
+        svc.Disconnected = MagicMock()
+        svc.CapabilityChanged = MagicMock()
+        svc.MessageReceived = MagicMock()
+        svc.MessageSent = MagicMock()
+        svc.ConversationUpdated = MagicMock()
+        svc.ContactPhotoReceived = MagicMock()
+
+        backend = MapBackend()
+        backend._service = svc
+        backend._store = None
+        backend._initial_poll_done = True  # skip first-poll branch
+        return backend, svc
+
+    def _make_msg(self, sender: str, display_name: str, read: bool = True) -> dict:
+        return {
+            "path": f"/msg/{sender}",
+            "sender": sender,
+            "display_name": display_name,
+            "timestamp": "10:00",
+            "read": read,
+            "body": "hi",
+            "direction": "inbound",
+        }
+
+    def test_pbap_name_used_when_contact_store_resolved(self):
+        """§7.1 phone-keyed sender: PBAP name in _contact_store wins over MAP Sender."""
+        backend, svc = self._make_backend_with_service()
+        svc._contact_store.upsert("5550101234", "Alice")
+        backend._emit_messages([self._make_msg("+15550101234", "+15550101234")], notify=False)
+        conv = svc._conversations.get("5550101234")
+        assert conv is not None
+        assert conv.display_name == "Alice"
+
+    def test_map_sender_used_when_no_pbap_entry(self):
+        """§7.2 phone-keyed sender: MAP Sender used when contact store has no entry."""
+        backend, svc = self._make_backend_with_service()
+        # _contact_store is empty — no PBAP data
+        backend._emit_messages([self._make_msg("+15550101234", "Bob")], notify=False)
+        conv = svc._conversations.get("5550101234")
+        assert conv is not None
+        assert conv.display_name == "Bob"
+
+    def test_name_keyed_sender_not_looked_up_in_store(self):
+        """§7.3 name-shaped sender: store lookup skipped, display_name from MAP."""
+        backend, svc = self._make_backend_with_service()
+        svc._contact_store.upsert("5550101234", "Alice")  # unrelated entry
+        backend._emit_messages([self._make_msg("Carol", "Carol")], notify=False)
+        conv = svc._conversations.get("Carol")
+        assert conv is not None
+        assert conv.display_name == "Carol"

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=tincan
+Comment=Bluetooth messages from your iPhone
+Exec=@PYTHON@ -m tincan_gui
+Icon=utilities-terminal
+Categories=Network;Communication;
+StartupNotify=true
+Terminal=false

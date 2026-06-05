@@ -227,6 +227,39 @@ class TestDispatch:
 
 
 # ---------------------------------------------------------------------------
+# §2b DispatchAppNotification — dedup (tincan-qt852 AC 8)
+# ---------------------------------------------------------------------------
+
+class TestDispatchAppNotification:
+    """dispatch_app_notification() dedups on (app_id, title, body) triple."""
+
+    def test_duplicate_triple_suppressed(self):
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        mock_iface.Notify.return_value = 1
+        notifier, mock_bus = _make_notifier_with_mock_bus()
+        mock_bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+        notif = {"app_id": "com.foo.App", "title": "Title", "body": "Hello"}
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            notifier.dispatch_app_notification(notif)
+            notifier.dispatch_app_notification(notif)
+        assert mock_iface.Notify.call_count == 1
+
+    def test_distinct_body_passes_through(self):
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        mock_iface.Notify.return_value = 1
+        notifier, mock_bus = _make_notifier_with_mock_bus()
+        mock_bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+        notif1 = {"app_id": "com.foo.App", "title": "Title", "body": "First"}
+        notif2 = {"app_id": "com.foo.App", "title": "Title", "body": "Second"}
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            notifier.dispatch_app_notification(notif1)
+            notifier.dispatch_app_notification(notif2)
+        assert mock_iface.Notify.call_count == 2
+
+
+# ---------------------------------------------------------------------------
 # §3 ActionInvoked signal handler
 # ---------------------------------------------------------------------------
 
@@ -357,10 +390,11 @@ class TestSettingsDialogAccessibility:
             + dlg.findChildren(QLineEdit)
             + dlg.findChildren(QComboBox)
         )
-        # Strip the Desktop notifications checkbox and anything inside the QDialogButtonBox.
+        # Strip the known checkboxes and anything inside the QDialogButtonBox.
+        known = {dlg._desktop_cb, dlg._mirror_cb, dlg._close_to_tray_cb}
         unexpected = [
             w for w in interactive
-            if w is not dlg._desktop_cb
+            if w not in known
             and not isinstance(w.parent(), QDialogButtonBox)
             and not isinstance(w, QDialogButtonBox)
         ]

@@ -204,22 +204,28 @@ class MessageBubble(QWidget):
     def _update_accessible(self) -> None:
         btype = self._data.bubble_type
         if btype == BubbleType.OUTBOUND:
-            # Outbound has no "from" — announce direction + body + time only
             self.setAccessibleName(
-                f"Outbound: {self._data.body} — sent at {self._data.timestamp}"
+                self.tr("Outbound: {body} — sent at {time}").format(
+                    body=self._data.body, time=self._data.timestamp
+                )
             )
         elif btype == BubbleType.BODY_UNAVAILABLE:
             self.setAccessibleName(
-                f"Inbound: content unavailable — from {self._data.sender}"
-                f" at {self._data.timestamp}"
+                self.tr("Inbound: content unavailable — from {sender} at {time}").format(
+                    sender=self._data.sender, time=self._data.timestamp
+                )
             )
         elif btype == BubbleType.GROUP_UNKNOWN_SENDER:
             self.setAccessibleName(
-                f"Inbound: {self._data.body} — from {self._data.sender} at {self._data.timestamp}"
+                self.tr("Inbound: {body} — from {sender} at {time}").format(
+                    body=self._data.body, sender=self._data.sender, time=self._data.timestamp
+                )
             )
         else:  # INBOUND
             self.setAccessibleName(
-                f"Inbound: {self._data.body} — from {self._data.sender} at {self._data.timestamp}"
+                self.tr("Inbound: {body} — from {sender} at {time}").format(
+                    body=self._data.body, sender=self._data.sender, time=self._data.timestamp
+                )
             )
 
 
@@ -332,13 +338,13 @@ class ThreadView(QWidget):
         self._empty_label.setFont(empty_font)
         self._empty_label.setStyleSheet("color: #9ca3af;")
         self._empty_label.setAlignment(Qt.AlignCenter)
-        self._empty_label.setAccessibleName("No conversation selected")
+        self._empty_label.setAccessibleName(self.tr("No conversation selected"))
         self._messages_layout.addStretch()
         self._messages_layout.addWidget(self._empty_label, alignment=Qt.AlignCenter)
         self._messages_layout.addStretch()
 
         self._scroll.setWidget(self._messages_container)
-        self.setAccessibleName("No conversation selected")
+        self.setAccessibleName(self.tr("No conversation selected"))
         layout.addWidget(self._scroll, stretch=1)
 
     def load_thread(

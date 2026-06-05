@@ -134,20 +134,23 @@ class _SolicitAdvertisement(dbus.service.Object):
 # ---------------------------------------------------------------------------
 
 
-def run(device_addr: str | None) -> None:
+def run(device_addr: str | None, adapter_path: str | None = None) -> None:
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
     loop = GLib.MainLoop()
 
-    # Find the BlueZ adapter
-    obj_mgr = dbus.Interface(bus.get_object("org.bluez", "/"), _OBJ_MANAGER_IFACE)
-    objects = obj_mgr.GetManagedObjects()
-    adapter_path = next(
-        (str(p) for p, ifaces in objects.items() if _ADAPTER_IFACE in ifaces), None
-    )
-    if adapter_path is None:
-        sys.exit("ERROR: No BlueZ adapter found. Is bluetooth running?")
-    print(f"Adapter: {adapter_path}")
+    # Find the BlueZ adapter (use provided path or discover from managed objects)
+    if adapter_path:
+        print(f"Adapter: {adapter_path} (from --adapter flag)")
+    else:
+        obj_mgr = dbus.Interface(bus.get_object("org.bluez", "/"), _OBJ_MANAGER_IFACE)
+        objects = obj_mgr.GetManagedObjects()
+        adapter_path = next(
+            (str(p) for p, ifaces in objects.items() if _ADAPTER_IFACE in ifaces), None
+        )
+        if adapter_path is None:
+            sys.exit("ERROR: No BlueZ adapter found. Is bluetooth running?")
+        print(f"Adapter: {adapter_path}")
 
     # 1. Register pairing agent
     agent = _PairingAgent(bus)  # noqa: F841
@@ -384,12 +387,18 @@ def _parse_args() -> argparse.Namespace:
         metavar="ADDR",
         help="Bluetooth device address to filter on (or set DEVICE_ADDR env var)",
     )
+    parser.add_argument(
+        "--adapter",
+        default=os.environ.get("ADAPTER_PATH", "/org/bluez/hci0"),
+        metavar="PATH",
+        help="BlueZ adapter object path (default /org/bluez/hci0)",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
-    run(args.device)
+    run(args.device, adapter_path=args.adapter)
 
 
 if __name__ == "__main__":

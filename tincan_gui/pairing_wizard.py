@@ -48,7 +48,7 @@ class _WizardPage(QWizardPage):
         bar.setMaximum(total)
         bar.setValue(step)
         bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color}; }}")
-        bar.setAccessibleName(f"Step {step} of {total}")
+        bar.setAccessibleName(self.tr("Step {step} of {total}").format(step=step, total=total))
         return bar
 
 
@@ -191,7 +191,9 @@ class MapConsentPage(_WizardPage):
         layout.addWidget(self._body_label)
 
         self.continue_button = QPushButton("Continue →")
-        self.continue_button.setAccessibleName("Continue — confirm message access granted")
+        self.continue_button.setAccessibleName(
+            self.tr("Continue — confirm message access granted")
+        )
         self.continue_button.setStyleSheet(
             "QPushButton { background-color: #0d9488; color: white; "
             "font-size: 14pt; min-height: 44px; border-radius: 4px; }"
@@ -211,7 +213,7 @@ class SuccessPage(_WizardPage):
         self.setTitle("Set up your iPhone  ·  Complete!")
         layout = QVBoxLayout(self)
         bar = self._progress(8, color="#16a34a")
-        bar.setAccessibleName("Setup complete")
+        bar.setAccessibleName(self.tr("Setup complete"))
         layout.addWidget(bar)
         layout.addWidget(self._heading("You're all set!", color="#16a34a"))
         self._body_label = self._body(
@@ -284,7 +286,7 @@ class FailurePage(_WizardPage):
         layout.addStretch()
 
         self.retry_button = QPushButton("Try again")
-        self.retry_button.setAccessibleName("Try again — restart the setup wizard")
+        self.retry_button.setAccessibleName(self.tr("Try again — restart the setup wizard"))
         self.retry_button.setStyleSheet(
             "QPushButton { background-color: #0d9488; color: white; "
             "font-size: 14pt; min-height: 44px; border-radius: 4px; }"
@@ -292,7 +294,7 @@ class FailurePage(_WizardPage):
         layout.addWidget(self.retry_button)
 
         self.cancel_button = QPushButton("Close")
-        self.cancel_button.setAccessibleName("Close the setup wizard")
+        self.cancel_button.setAccessibleName(self.tr("Close the setup wizard"))
         self.cancel_button.setStyleSheet(
             "QPushButton { background-color: #f9fafb; color: #374151; "
             "font-size: 14pt; min-height: 44px; border-radius: 4px; "

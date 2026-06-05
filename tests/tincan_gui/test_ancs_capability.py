@@ -218,17 +218,32 @@ class TestApplyCapabilitiesStateCBanner:
 
 
 class TestStateCBannerStatusChip:
-    """Status chip shows 'limited' text when connected device has ANCS unavailable."""
+    """Status chip reflects messaging capability (primary), not ANCS (secondary).
 
-    def test_chip_shows_connected_limited_when_ancs_false(self, qtbot):
+    When MAP messaging works (messages=True), chip shows Connected regardless of ANCS.
+    ANCS unavailability is surfaced via the State C banner, not the chip (tincan-o90z2).
+    """
+
+    def test_chip_shows_connected_when_messages_true_ancs_false(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        # Simulate a connected device
         window._connected_device = "AA:BB:CC:DD:EE:FF"
         window._title_bar.set_connected("AA:BB:CC:DD:EE:FF")
 
         window._apply_capabilities({"messages": True, "contacts": True, "ancs": False})
+
+        assert "limited" not in window._title_bar._status_chip.text().lower()
+        assert "Connected" in window._title_bar._status_chip.text()
+
+    def test_chip_shows_connected_limited_when_messages_false(self, qtbot):
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+        window._connected_device = "AA:BB:CC:DD:EE:FF"
+        window._title_bar.set_connected("AA:BB:CC:DD:EE:FF")
+
+        window._apply_capabilities({"messages": False, "contacts": True, "ancs": False})
 
         assert "limited" in window._title_bar._status_chip.text().lower()
 

@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -30,6 +29,8 @@ from PySide6.QtWidgets import (
 
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
+from tincan_gui.daemon_config import load_daemon_config
+from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
     ANCSRepairBanner,
@@ -172,13 +173,14 @@ class MainWindow(QMainWindow):
         self._current_phone: str = ""     # phone for the open conversation
         self._current_phone_dialable: bool = True  # False when phone is unresolvable name
         self._connected_device: str = ""  # human-readable name or address of connected BT device
+        self._daemon_spawn_attempted: bool = False
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
-        self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP inbound echo of self-sends
-        self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs for thread render
+        self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP echo of self-sends
+        self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs; thread render
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
@@ -281,15 +283,28 @@ class MainWindow(QMainWindow):
         c.disconnected.connect(self._on_daemon_disconnected)
         c.capability_changed.connect(self._on_capability_changed)
         c.message_received.connect(self._on_message_received)
+        c.app_notification_received.connect(self._notifier.dispatch_app_notification)
         c.conversation_updated.connect(self._on_conversation_updated)
         c.contact_photo_received.connect(self._on_contact_photo_received)
         self.refresh_requested.connect(self._load_conversations)
+
+    def _maybe_spawn_daemon(self) -> None:
+        """Spawn tincand if config has a device and no spawn has been attempted yet."""
+        if self._daemon_spawn_attempted:
+            return
+        self._daemon_spawn_attempted = True
+        config = load_daemon_config()
+        if not config.device:
+            return
+        spawn_daemon(config.backend, config.device)
+        QTimer.singleShot(2000, self._sync_daemon_state)
 
     def _sync_daemon_state(self) -> None:
         """Query tincand at startup and sync UI to current daemon state."""
         status = self._dbus_client.get_status()
         if not status:
-            return  # daemon not running — UI stays in default disconnected state
+            self._maybe_spawn_daemon()
+            return
         if status.get("connected"):
             addr = str(status.get("device_name") or status.get("device_address") or "")
             self._connected_device = addr
@@ -564,7 +579,7 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         from tincan_gui.settings_dialog import SettingsDialog
-        dlg = SettingsDialog(self)
+        dlg = SettingsDialog(self, client=self._dbus_client)
         if hasattr(self, "_tray"):
             dlg.notifications_toggled.connect(self._tray.sync_notifications_action)
         dlg.exec()
@@ -680,11 +695,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Hide to tray or quit on window close, per behavior/close_to_tray setting."""
+        from tincan_gui._settings import app_settings  # noqa: PLC0415
+        s = app_settings()
+        s.sync()  # flush before exit so prefs survive crashes/kills
         if hasattr(self, "_tray") and self._tray.isSystemTrayAvailable():
-            from tincan_gui._settings import app_settings  # noqa: PLC0415
-            close_to_tray = app_settings().value(
-                "behavior/close_to_tray", True, type=bool
-            )
+            close_to_tray = s.value("behavior/close_to_tray", True, type=bool)
             if close_to_tray:
                 event.ignore()
                 self.hide()

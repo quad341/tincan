@@ -137,7 +137,7 @@ class PairIPhonePage(_TincanPage):
         """Display pairing PIN; sets accessible name digit-by-digit."""
         self._pin_label.setText(pin)
         spaced = " ".join(list(pin))
-        self._pin_label.setAccessibleName(f"Pairing code: {spaced}")
+        self._pin_label.setAccessibleName(self.tr("Pairing code: {}").format(spaced))
 
 
 # ---------------------------------------------------------------------------

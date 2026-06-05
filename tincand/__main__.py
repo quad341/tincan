@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import pathlib
 import signal
 import sys
 
@@ -75,8 +76,14 @@ def _select_backend(args: argparse.Namespace) -> object:
         return ANCSBackend(device_addr=device_addr)
     if name == "map":
         from tincand.backends.bluez_map import MapBackend
+        from tincand.message_store import MessageStore
 
-        return MapBackend()
+        db_path = pathlib.Path(
+            os.environ.get("TINCAN_DB", "")
+            or pathlib.Path.home() / ".local" / "share" / "tincan" / "messages.db"
+        )
+        store = MessageStore(db_path)
+        return MapBackend(message_store=store)
     choices = ", ".join(sorted(_BACKENDS))
     sys.exit(f"Unknown backend {name!r}. Must be one of: {choices}")
 
