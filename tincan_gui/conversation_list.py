@@ -467,18 +467,6 @@ class ConversationListWidget(QWidget):
         self._compose_btn.clicked.connect(self.compose_new_requested.emit)
         header_layout.addWidget(self._compose_btn)
 
-        from PySide6.QtWidgets import QPushButton  # noqa: PLC0415
-        self._compose_btn = QPushButton("+")
-        self._compose_btn.setFixedSize(24, 24)
-        self._compose_btn.setStyleSheet(
-            "QPushButton { background: #0d9488; color: #ffffff; border-radius: 12px;"
-            " font-size: 16px; font-weight: bold; border: none; }"
-            "QPushButton:hover { background: #0f766e; }"
-        )
-        self._compose_btn.setAccessibleName("New conversation")
-        self._compose_btn.clicked.connect(self.compose_new_requested.emit)
-        header_layout.addWidget(self._compose_btn)
-
         layout.addWidget(header)
 
         # Search / filter input (clears on Escape via _SearchLineEdit subclass)
