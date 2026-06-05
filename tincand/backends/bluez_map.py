@@ -694,6 +694,12 @@ class MapBackend(BackendInterface):
             latest = max(msgs, key=lambda m: m["timestamp"] or "")
             display_name = latest.get("display_name", sender) or sender
             is_phone_key = len(_NON_DIGIT_RE.sub("", sender)) >= 7
+            # Prefer PBAP-resolved name over MAP Sender when contact store is populated
+            if is_phone_key:
+                cs = getattr(svc, "_contact_store", None)
+                pbap_name = cs.resolve_name(sender) if cs else None
+                if pbap_name:
+                    display_name = pbap_name
             send_target = sender if is_phone_key else (
                 phone_by_display.get(display_name.lower())
                 or self._name_to_phone.get(display_name.lower(), "")
