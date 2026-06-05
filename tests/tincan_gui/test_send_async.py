@@ -12,7 +12,7 @@ Coverage:
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
@@ -68,7 +68,9 @@ class TestSendMessageAsyncFallbackBusDisconnected:
     def test_does_not_emit_send_accepted_when_bus_disconnected(self):
         client = TincandClient()
         accepted = []
-        client.message_send_accepted.connect(lambda to, body, mid: accepted.append((to, body, mid)))
+        client.message_send_accepted.connect(
+            lambda to, body, mid: accepted.append((to, body, mid))
+        )
 
         client.send_message_async("+15550001111", "hello")
 
@@ -99,7 +101,9 @@ class TestSendMessageAsyncFallbackIfaceInvalid:
     def test_does_not_emit_send_accepted_when_interface_invalid(self):
         client = TincandClient()
         accepted = []
-        client.message_send_accepted.connect(lambda to, body, mid: accepted.append((to, body, mid)))
+        client.message_send_accepted.connect(
+            lambda to, body, mid: accepted.append((to, body, mid))
+        )
 
         client.send_message_async("+15550001111", "world")
 
@@ -152,7 +156,9 @@ class TestMainWindowSendHandlers:
         window = MainWindow()
         qtbot.addWidget(window)
         called = []
-        monkeypatch.setattr(window._thread_view, "mark_last_send_failed", lambda: called.append(True))
+        monkeypatch.setattr(
+            window._thread_view, "mark_last_send_failed", lambda: called.append(True)
+        )
 
         window._on_send_failed("+15550001111", "failed")
 
@@ -180,8 +186,12 @@ class TestOnSendUsesAsync:
 
         sync_calls = []
         async_calls = []
-        monkeypatch.setattr(window._dbus_client, "send_message", lambda *a: sync_calls.append(a) or "")
-        monkeypatch.setattr(window._dbus_client, "send_message_async", lambda *a: async_calls.append(a))
+        monkeypatch.setattr(
+            window._dbus_client, "send_message", lambda *a: sync_calls.append(a) or ""
+        )
+        monkeypatch.setattr(
+            window._dbus_client, "send_message_async", lambda *a: async_calls.append(a)
+        )
 
         window._on_send("hello async")
 
@@ -195,7 +205,9 @@ class TestOnSendUsesAsync:
         window._current_phone_dialable = True
 
         async_calls = []
-        monkeypatch.setattr(window._dbus_client, "send_message_async", lambda *a: async_calls.append(a))
+        monkeypatch.setattr(
+            window._dbus_client, "send_message_async", lambda *a: async_calls.append(a)
+        )
 
         window._on_send("my message")
 
