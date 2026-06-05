@@ -123,6 +123,18 @@ MAP.** Polling `UpdateInbox`/`ListMessages` is a further fallback.
 scripts; unfinished Librem5 / Sailfish attempts that never reported iOS success).
 Tincan builds on the obexd D-Bus API directly.
 
+**RCS is not exposed over MAP (R7).** iOS handles RCS in the Messages app's
+IP-based stack, not the MAP MSE, so RCS messages do not appear in the MAP inbox —
+Bluetooth accessories see SMS/MMS only, regardless of MAP version (1.2 → 1.4).
+That means RCS **delivery/read receipts, typing indicators, and message edits are
+unobtainable** over MAP: the MAP-Event-Report machinery that *would* carry them
+(`DeliverySuccess`, `ReadStatusChanged`, the MAP-IM `ParticipantChatStateChanged`)
+is never populated for RCS, and rides the MNS path Tincan already avoids. ANCS
+can't substitute — receipts/typing post no notification, so ANCS never sees them.
+Reaching RCS metadata would require proprietary protocols (CarPlay's MFi-gated
+channel, or iMessage reverse-engineering), both out of scope. See
+[LIMITATIONS.md](LIMITATIONS.md).
+
 Sources:
 - iOS MAP behavior (folders, live updates, "Show Notifications" required): <https://developer.apple.com/forums/thread/732226>
 - iOS bMessage body, sent-folder bug, group-text quirk: <https://developer.apple.com/forums/thread/709921>
@@ -131,6 +143,10 @@ Sources:
 - obex-api.txt (Message1 Get, PushMessage, properties): <https://github.com/pauloborges/bluez/blob/master/doc/obex-api.txt>
 - obexd MAP listing flakiness (BlueZ 5.65): <https://github.com/bluez/bluez/issues/1301>
 - MAP v1.4.3 spec: <https://www.bluetooth.com/wp-content/uploads/2025/04/MAP_v1.4.3_showing_changes_from_MAP_v1.4.2.pdf>
+- MAP-Event-Report types incl. `DeliverySuccess` / `ReadStatusChanged` (HTML spec): <https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/MAP_v1.4.3/out/en/index-en.html>
+- RCS does not traverse Bluetooth MAP (car-kit reports, Android + iPhone): <https://support.google.com/messages/thread/198326358/get-rcs-messaging-to-work-over-bluetooth>, <https://www.mazda3revolution.com/threads/bluetooth-text-messages-dont-work-w-rcs-chat-features-enabled.241694/>
+- iOS RCS feature set + how to enable (read/delivery receipts, typing): <https://support.apple.com/en-us/122195>, <https://support.apple.com/en-us/104972>
+- iOS 26.x RCS Universal Profile 3.0 (edit/unsend, E2EE) timeline: <https://www.macrumors.com/2026/01/13/ios-26-rcs-3-future-benefits/>
 
 ---
 
