@@ -206,8 +206,10 @@ class TestPixelVisibility:
             calls.append((emoji, ps))
             return real_cairo(emoji, ps)
 
-        with patch("tincan_gui.thread_view._render_emoji_cairo", side_effect=tracking_cairo):
-            _emoji_to_img_tag("😀", 16)
+        _EMOJI_CACHE.clear()
+        with patch("tincan_gui.thread_view._has_visible_pixels", return_value=False):
+            with patch("tincan_gui.thread_view._render_emoji_cairo", side_effect=tracking_cairo):
+                _emoji_to_img_tag("😀", 16)
 
         assert len(calls) == 1, (
             "Expected _render_emoji_cairo to be called once when Qt render is transparent"
