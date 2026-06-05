@@ -45,6 +45,7 @@ from tincan_gui.degradation_banners import (
     StateBBanner,
     StateCBanner,
 )
+from tincan_gui.message_cache import MessageCache
 from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.theme import is_dark_theme
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
@@ -410,6 +411,7 @@ class MainWindow(QMainWindow):
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
         self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP echo of self-sends
         self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs; thread render
+        self._msg_cache = MessageCache()
         self._notifier = DesktopNotifier(on_action_invoked=self._on_notification_clicked)
         self._build()
         self._wire()
@@ -664,17 +666,33 @@ class MainWindow(QMainWindow):
         if self._current_phone and not _same_conv(conv_id, self._current_phone):
             return
         raw_msgs = self._dbus_client.get_messages(conv_id)
-        messages = [self._msg_dict_to_data(m) for m in raw_msgs]
-        # Merge locally-cached sent messages (iOS MAP sent folder is always empty).
+        messages: list[MessageData] = [self._msg_dict_to_data(m) for m in raw_msgs]
         cache_key = self._current_phone or conv_id
-        cached_sent = self._sent_cache.get(cache_key, [])
-        if cached_sent:
-            existing_sent_bodies = {
-                m.body for m in messages if m.bubble_type == BubbleType.OUTBOUND
-            }
-            extra = [m for m in cached_sent if m.body not in existing_sent_bodies]
-            if extra:
-                messages = sorted(messages + extra, key=lambda m: m.sort_key or m.timestamp)
+
+        # Dedup key: prefer sort_key (MAP timestamp); fall back to body for keyless msgs.
+        def _dk(m: MessageData) -> tuple:
+            return (m.bubble_type, m.sort_key) if m.sort_key else (m.bubble_type, m.body)
+
+        seen: set[tuple] = {_dk(m) for m in messages}
+        extras: list[MessageData] = []
+
+        # Persistent cache — inbound + outbound from all sessions.
+        for m in (self._cache_msg_to_data(c) for c in self._msg_cache.get_messages(cache_key)):
+            k = _dk(m)
+            if k not in seen:
+                extras.append(m)
+                seen.add(k)
+
+        # In-session sent cache — fast path; covers sends from this session not yet
+        # visible in MAP results (iOS sent folder is always empty).
+        for m in self._sent_cache.get(cache_key, []):
+            k = _dk(m)
+            if k not in seen:
+                extras.append(m)
+                seen.add(k)
+
+        if extras:
+            messages = sorted(messages + extras, key=lambda m: m.sort_key or m.timestamp)
         self._thread_view.load_thread(name, conv_id, messages, "SMS")
 
     def _on_daemon_connected(self, device_address: str) -> None:
@@ -788,6 +806,9 @@ class MainWindow(QMainWindow):
         self._thread_view.append_message(
             MessageData(bubble_type, body, sender, timestamp, sort_key=raw_ts)
         )
+        cache_id = conv_id or self._current_phone
+        if body and cache_id and bubble_type != BubbleType.BODY_UNAVAILABLE:
+            self._msg_cache.add_message(cache_id, direction, body, sender, raw_ts, raw_ts)
 
     def _on_conversation_updated(self, conversation: dict) -> None:
         conv_id = str(conversation.get("id", ""))
@@ -862,6 +883,7 @@ class MainWindow(QMainWindow):
         self._thread_view.append_message(sent_msg)
         # Cache sent message for thread reload (iOS MAP sent folder returns 0 messages).
         self._sent_cache.setdefault(phone, []).append(sent_msg)
+        self._msg_cache.add_message(phone, "outbound", text, "", sent_msg.sort_key, sent_msg.sort_key)
         self._pending_sends.add((phone, text))
         # Guard self-conversations: MAP re-delivers self-sent messages to inbox as inbound.
         self._self_echo_guard.add((phone, text))
@@ -997,6 +1019,20 @@ class MainWindow(QMainWindow):
         if conversations and not self._current_phone:
             first_id = conversations[0].id
             QTimer.singleShot(0, lambda: self._conv_list.select_conversation(first_id))
+
+    def _cache_msg_to_data(self, m: dict) -> MessageData:
+        direction = m.get("direction", "inbound")
+        body = str(m.get("body", ""))
+        sender = str(m.get("sender", ""))
+        sort_key = str(m.get("sort_key") or m.get("timestamp", ""))
+        ts = _ts_display(str(m.get("timestamp", "")))
+        if direction == "outbound":
+            btype = BubbleType.OUTBOUND
+        elif body:
+            btype = BubbleType.INBOUND
+        else:
+            btype = BubbleType.BODY_UNAVAILABLE
+        return MessageData(btype, body, sender, ts, sort_key=sort_key)
 
     def _msg_dict_to_data(self, msg: dict) -> MessageData:
         direction = str(msg.get("direction", "inbound"))
