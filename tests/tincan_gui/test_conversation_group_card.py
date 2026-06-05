@@ -6,7 +6,7 @@ Coverage:
   §2 Name label text — participants list formatted as 'A, B' or 'A, B & N more'
   §3 Name label style — font-size 13, not bold; color #f4f4f5 in styleSheet
   §4 Selection — is_group → #3f3f46 background and 2px teal left border on select
-  §5 Selection — is_group=False → existing #dbeafe background (non-group path unchanged)
+  §5 Selection — is_group=False → existing #bfdbfe background (non-group path unchanged)
   §6 Preview — preview_sender shown as 'Sender: body' prefix
   §7 Accessible — unread_count=2 accessible name contains 'Group conversation' and '2 unread'
   §8 Regression — is_group=True does NOT trigger participant_count > 1 suffix [N]
@@ -147,13 +147,13 @@ class TestGroupCardSelectedState:
 
 
 class TestNonGroupCardSelectedState:
-    """set_selected(True) on a non-group card still applies #dbeafe background."""
+    """set_selected(True) on a non-group card still applies #bfdbfe background."""
 
-    def test_non_group_selected_frame_has_dbeafe_background(self, qtbot):
+    def test_non_group_selected_frame_has_bfdbfe_background(self, qtbot):
         item = ConversationItem(_make_data(is_group=False, name="Alice"))
         qtbot.addWidget(item)
         item.set_selected(True)
-        assert "#dbeafe" in item._frame.styleSheet()
+        assert "#bfdbfe" in item._frame.styleSheet()
 
     def test_non_group_selected_frame_does_not_have_teal_border(self, qtbot):
         item = ConversationItem(_make_data(is_group=False, name="Alice"))
