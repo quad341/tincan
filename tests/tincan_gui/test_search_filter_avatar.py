@@ -143,6 +143,32 @@ class TestConversationListFilterVisibility:
         for item in w._items:
             assert item.isVisible()
 
+    def test_filter_matches_on_phone_number(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+        w.load_conversations(_conversations())
+        w._search.setText("5550101")  # prefix of c1's phone
+        assert w._items[0].isVisible()   # Alice (+1 555-0101)
+        assert not w._items[1].isVisible()  # Bob (+1 555-0102)
+        assert not w._items[2].isVisible()  # Carol (+1 555-0103)
+
+    def test_filter_phone_ignores_formatting(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+        w.load_conversations(_conversations())
+        w._search.setText("555-0102")  # hyphenated query matches Bob's +1 555-0102
+        assert not w._items[0].isVisible()
+        assert w._items[1].isVisible()   # Bob
+        assert not w._items[2].isVisible()
+
+    def test_filter_phone_does_not_match_unrelated_digits(self, qtbot):
+        w = ConversationListWidget()
+        qtbot.addWidget(w)
+        w.load_conversations(_conversations())
+        w._search.setText("9999")  # no phone contains 9999
+        for item in w._items:
+            assert not item.isVisible()
+
 
 # ---------------------------------------------------------------------------
 # ConversationListWidget filter — no-results label

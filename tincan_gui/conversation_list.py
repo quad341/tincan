@@ -569,14 +569,15 @@ class ConversationListWidget(QWidget):
 
     def _on_filter_changed(self, text: str) -> None:
         query = text.strip().lower()
+        query_digits = "".join(c for c in query if c.isdigit())
         visible_count = 0
-        for i, (widget, data) in enumerate(
-            zip(self._items, getattr(self, "_item_data_list", []))
-        ):
-            match = (
+        for widget, data in zip(self._items, getattr(self, "_item_data_list", [])):
+            phone_digits = "".join(c for c in data.phone if c.isdigit())
+            match = bool(
                 not query
                 or query in data.name.lower()
                 or query in data.preview.lower()
+                or (query_digits and query_digits in phone_digits)
             )
             widget.setVisible(match)
             if match:
