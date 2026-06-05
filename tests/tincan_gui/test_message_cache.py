@@ -1,7 +1,5 @@
 """Unit tests for MessageCache (tincan_gui/message_cache.py)."""
-import json
 import pytest
-from pathlib import Path
 
 from tincan_gui.message_cache import MessageCache, _safe_name
 
@@ -29,7 +27,9 @@ class TestMessageCache:
         assert cache.get_messages("+18005551234") == []
 
     def test_add_and_retrieve(self, cache):
-        cache.add_message("+18005551234", "inbound", "hello", "Alice", "20260605T143025", "20260605T143025")
+        cache.add_message(
+            "+18005551234", "inbound", "hello", "Alice", "20260605T143025", "20260605T143025"
+        )
         msgs = cache.get_messages("+18005551234")
         assert len(msgs) == 1
         assert msgs[0]["body"] == "hello"
