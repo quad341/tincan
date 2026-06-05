@@ -74,3 +74,6 @@ class BackendManager(BackendInterface):
 
     def send_message(self, to: str, body: str) -> str:
         return self._primary.send_message(to, body)
+
+    def send_group_message(self, participants: list[str], body: str) -> str:
+        return self._primary.send_group_message(participants, body)
