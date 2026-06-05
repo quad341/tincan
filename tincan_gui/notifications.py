@@ -50,8 +50,6 @@ class DesktopNotifier:
             return self._bus
         try:
             import dbus
-            import dbus.mainloop.glib
-            dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
             self._bus = dbus.SessionBus()
             if self._on_action_invoked:
                 self._bus.add_signal_receiver(
