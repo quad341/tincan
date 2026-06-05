@@ -337,6 +337,15 @@ class TincanService(dbus.service.Object):
         # removed the name-keyed conversation.
         raw_to = str(to)
         conv_id_for_send = raw_to if raw_to in self._conversations else normalized_to
+        # Ensure the conversation exists so on_message_received emits ConversationUpdated.
+        # Without this, sending to a new contact produces no thread in the GUI conversation list.
+        if conv_id_for_send not in self._conversations:
+            display = self._contact_store.get_name(normalized_to) or normalized_to
+            self.upsert_conversation(Conversation(
+                id=conv_id_for_send,
+                display_name=display,
+                send_target=normalized_to,
+            ))
         self.on_message_received({
             "id": str(handle),
             "conversation_id": conv_id_for_send,
