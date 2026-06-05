@@ -16,7 +16,13 @@ from unittest.mock import patch
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData, _break_long_words, _linkify
+from tincan_gui.thread_view import (
+    BubbleType,
+    MessageBubble,
+    MessageData,
+    _break_long_words,
+    _linkify,
+)
 
 
 @pytest.fixture(autouse=True)

@@ -204,10 +204,6 @@ class TincanService(dbus.service.Object):
         """Set the human-readable Bluetooth device name (e.g. BlueZ Device1.Alias)."""
         self._device_name = str(name)
 
-    def register_backend(self, backend: object) -> None:
-        """Wire the backend so SendMessage/GetMessage delegate to it."""
-        self._backend = backend
-
     # ------------------------------------------------------------------
     # im.tincan.Messages — SMS/iMessage send and receive
     # ------------------------------------------------------------------

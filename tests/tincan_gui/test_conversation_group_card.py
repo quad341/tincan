@@ -13,8 +13,6 @@ Coverage:
 """
 from __future__ import annotations
 
-import pytest
-
 from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
 from tincan_gui.conversation_list import ConversationData, ConversationItem
 

@@ -264,7 +264,7 @@ class TestSendUsesAsyncCallWithArgumentList:
         _strict_iface.asyncCall.assert_not_called()
 
     def test_no_typeerror_propagates(self, _strict_iface):
-        """Regression: old asyncCall('SendMessage', to, body) raised TypeError, silently swallowed."""
+        """Regression: old asyncCall raised TypeError — ensure it is silently swallowed."""
         client = TincandClient()
         client.send_message_async("+15550001111", "no crash please")
 

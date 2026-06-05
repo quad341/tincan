@@ -369,7 +369,11 @@ class MapBackend(BackendInterface):
                 raw_bmsg = self._fetch_raw_bmsg(str(msg_path))
                 if raw_bmsg is None:
                     continue
-                body = _parse_bmsg_body(raw_bmsg) or str(props.get("Subject", "")).strip() or "New message"
+                body = (
+                    _parse_bmsg_body(raw_bmsg)
+                    or str(props.get("Subject", "")).strip()
+                    or "New message"
+                )
                 participants = _parse_participants_from_bmsg(raw_bmsg)
             else:
                 body = (

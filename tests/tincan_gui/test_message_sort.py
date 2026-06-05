@@ -11,15 +11,14 @@ Coverage:
 """
 from __future__ import annotations
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from tincand.backends.bluez_map import _parse_map_datetime
 from tincan_gui.main import MainWindow
 from tincan_gui.thread_view import BubbleType, MessageData
+from tincand.backends.bluez_map import _parse_map_datetime
 
 
 @pytest.fixture(autouse=True)
@@ -179,7 +178,6 @@ class TestOutboundSortKey:
         monkeypatch.setattr(TincandClient, "send_message_async", lambda self, *a: None)
 
         appended = []
-        original_append = window._thread_view.append_message
         monkeypatch.setattr(
             window._thread_view, "append_message", lambda msg: appended.append(msg)
         )
