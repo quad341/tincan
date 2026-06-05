@@ -23,6 +23,7 @@ import dbus
 from gi.repository import GLib
 
 from tincand.backends.base import BackendInterface
+from tincand.contact_store import normalize_phone
 from tincand.dbus_service import Conversation
 from tincand.message_store import MessageStore
 
@@ -67,22 +68,6 @@ class ConsentRequired(Exception):
 
 class SendFailed(Exception):
     """Raised when a MAP PushMessage transfer ends in an error state."""
-
-
-def normalize_phone(number: str) -> str:
-    """Return a canonical digit key for *number*.
-
-    Matches the behavior of tincand.contact_store.normalize_phone so that
-    participants parsed from bMessages hash-key consistently with the contact
-    store: strip all non-digits; if result is 11 digits AND starts with '1',
-    drop the leading 1 to canonicalize US/CA numbers to 10 digits.
-
-    Examples: '+1 555-010-1234' → '5550101234', '555-010-1234' → '5550101234'.
-    """
-    digits = re.sub(r"\D", "", number)
-    if len(digits) == 11 and digits.startswith("1"):
-        digits = digits[1:]
-    return digits
 
 
 def build_bmsg(to_number: str, body: str) -> str:
@@ -189,16 +174,17 @@ _NON_DIGIT_RE = re.compile(r"\D")
 def _norm_phone(s: str) -> str:
     """Return a canonical conversation key from *s*.
 
-    Strips formatting characters and returns the last 10 digits when *s*
-    looks like a phone number (≥7 digits after stripping). Falls back to *s*
-    unchanged when the digit count is too low (e.g. a contact display name).
-    This merges threads that differ only by country-code prefix or formatting
-    ("+15555550123" == "5555550123" == "(555) 555-0123").
+    Matches normalize_phone() for phone-like strings (≥7 stripped digits):
+    strips formatting; strips leading '1' from 11-digit US/CA numbers;
+    keeps all digits for international numbers. Falls back to *s* unchanged
+    when digit count is too low (e.g. a display-name sender like 'Apple').
     """
     digits = _NON_DIGIT_RE.sub("", s)
-    if len(digits) >= 7:
-        return digits[-10:] if len(digits) > 10 else digits
-    return s
+    if len(digits) < 7:
+        return s
+    if len(digits) == 11 and digits.startswith("1"):
+        return digits[1:]
+    return digits
 
 
 def _get_map_datetime(props: dict) -> str:
