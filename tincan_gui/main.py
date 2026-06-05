@@ -261,7 +261,6 @@ class NewConversationDialog(QDialog):
             "QLineEdit { background: transparent; border: none; color: #f4f4f5; font-size: 13px; }"
         )
         self._text_input.textChanged.connect(self._refresh_autocomplete)
-        self._text_input.installEventFilter(self)
         self._chip_flow.addWidget(self._text_input, stretch=1)
 
         self._chip_scroll.setWidget(self._chip_container)
@@ -278,6 +277,8 @@ class NewConversationDialog(QDialog):
         self._autocomplete.itemActivated.connect(self._on_autocomplete_selected)
         self._autocomplete.setAccessibleName("Autocomplete suggestions")
         layout.addWidget(self._autocomplete)
+        self._text_input.installEventFilter(self)
+        self._autocomplete.installEventFilter(self)
 
         # Buttons
         self._btn_box = QDialogButtonBox()
