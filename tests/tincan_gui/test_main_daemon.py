@@ -361,7 +361,7 @@ class TestMessageReceived:
 
         assert appended[0].bubble_type == BubbleType.INBOUND
 
-    def test_timestamp_truncated_to_five_chars(self, qtbot):
+    def test_timestamp_display_is_hhmm_from_map_format(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         appended = self._capture_appended(window)
@@ -370,10 +370,11 @@ class TestMessageReceived:
             "direction": "inbound",
             "body": "Hi",
             "sender": "Alice",
-            "timestamp": "2024-01-01T10:32:00Z",
+            "timestamp": "20240101T103200",  # MAP YYYYMMDDTHHMMSS from daemon
         })
 
-        assert appended[0].timestamp == "2024-"  # first 5 chars of ISO string
+        assert appended[0].timestamp == "10:32"
+        assert appended[0].sort_key == "20240101T103200"
 
     def test_missing_fields_use_safe_defaults(self, qtbot):
         window = MainWindow()
