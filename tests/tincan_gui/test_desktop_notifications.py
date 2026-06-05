@@ -358,7 +358,7 @@ class TestSettingsDialogAccessibility:
             + dlg.findChildren(QComboBox)
         )
         # Strip the known checkboxes and anything inside the QDialogButtonBox.
-        known = {dlg._desktop_cb, dlg._close_to_tray_cb}
+        known = {dlg._desktop_cb, dlg._mirror_cb, dlg._close_to_tray_cb}
         unexpected = [
             w for w in interactive
             if w not in known

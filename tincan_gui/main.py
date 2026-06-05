@@ -563,7 +563,7 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         from tincan_gui.settings_dialog import SettingsDialog
-        dlg = SettingsDialog(self)
+        dlg = SettingsDialog(self, client=self._dbus_client)
         if hasattr(self, "_tray"):
             dlg.notifications_toggled.connect(self._tray.sync_notifications_action)
         dlg.exec()
