@@ -430,7 +430,7 @@ class TincandClient(QObject):
             _log.warning("send_message_async: tincand not running")
             self.message_send_failed.emit(to, body)
             return
-        pending = iface.asyncCall("SendMessage", to, body)
+        pending = iface.asyncCallWithArgumentList("SendMessage", [to, body])
         watcher = QDBusPendingCallWatcher(pending, self)
         watcher.finished.connect(lambda w: self._on_send_message_reply(w, to, body))
 

@@ -218,6 +218,58 @@ class TestOnSendUsesAsync:
 
 
 # ---------------------------------------------------------------------------
+# §4 asyncCallWithArgumentList — correct D-Bus send API (regression for n0yel)
+# ---------------------------------------------------------------------------
+
+class TestSendUsesAsyncCallWithArgumentList:
+    """send_message_async must use asyncCallWithArgumentList, not asyncCall.
+
+    Regression guard: PySide6 QDBusInterface.asyncCall() accepts only the method
+    name; passing (method, arg1, arg2) raises TypeError.  The old code swallowed
+    that TypeError and showed a false 'sent'.  This fixture enforces the real
+    signature so any regression back to asyncCall(method, *args) is caught.
+    """
+
+    @pytest.fixture
+    def _strict_iface(self, _hermetic_dbus):
+        _hermetic_dbus.isConnected.return_value = True
+        mock_iface = MagicMock()
+        mock_iface.isValid.return_value = True
+
+        def _strict_asynccall(method, *extra_args):
+            if extra_args:
+                raise TypeError(
+                    f"asyncCall() takes exactly one argument ({1 + len(extra_args)} given)"
+                )
+            return MagicMock()
+
+        mock_iface.asyncCall.side_effect = _strict_asynccall
+        mock_iface.asyncCallWithArgumentList.return_value = MagicMock()
+
+        with patch("tincan_gui.dbus_client.QDBusInterface", return_value=mock_iface), \
+             patch("tincan_gui.dbus_client.QDBusPendingCallWatcher"):
+            yield mock_iface
+
+    def test_asyncCallWithArgumentList_called_with_method_and_args(self, _strict_iface):
+        client = TincandClient()
+        client.send_message_async("+15550001111", "hello")
+        _strict_iface.asyncCallWithArgumentList.assert_called_once_with(
+            "SendMessage", ["+15550001111", "hello"]
+        )
+
+    def test_asyncCall_not_called_with_extra_args(self, _strict_iface):
+        """asyncCall(method, to, body) would raise TypeError — must not be called that way."""
+        client = TincandClient()
+        client.send_message_async("+15550001111", "hello")
+        _strict_iface.asyncCall.assert_not_called()
+
+    def test_no_typeerror_propagates(self, _strict_iface):
+        """Regression: old asyncCall('SendMessage', to, body) raised TypeError, silently swallowed."""
+        client = TincandClient()
+        client.send_message_async("+15550001111", "no crash please")
+
+
+# ---------------------------------------------------------------------------
 # §4 Integration — _wire_dbus connects async send signals
 # ---------------------------------------------------------------------------
 
