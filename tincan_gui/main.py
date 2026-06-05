@@ -60,6 +60,16 @@ def _is_dialable(s: str) -> bool:
     return len(_NON_DIGIT_RE.sub("", s)) >= 7
 
 
+def _ts_display(raw: str) -> str:
+    """Extract HH:MM from a MAP YYYYMMDDTHHMMSS timestamp; return raw[:5] for short strings."""
+    if not raw:
+        return ""
+    t = raw.find("T")
+    if t >= 0 and len(raw) >= t + 5:
+        return f"{raw[t + 1:t + 3]}:{raw[t + 3:t + 5]}"
+    return raw[:5]
+
+
 def _same_conv(a: str, b: str) -> bool:
     """True when two conversation IDs refer to the same conversation.
 
@@ -664,7 +674,7 @@ class MainWindow(QMainWindow):
             }
             extra = [m for m in cached_sent if m.body not in existing_sent_bodies]
             if extra:
-                messages = sorted(messages + extra, key=lambda m: m.timestamp)
+                messages = sorted(messages + extra, key=lambda m: m.sort_key or m.timestamp)
         self._thread_view.load_thread(name, conv_id, messages, "SMS")
 
     def _on_daemon_connected(self, device_address: str) -> None:
@@ -752,7 +762,8 @@ class MainWindow(QMainWindow):
             self._thread_view.mark_last_send_delivered()
             return
         sender = str(message.get("sender", "") or message.get("from", ""))
-        timestamp = str(message.get("timestamp", ""))[:5]  # HH:MM
+        raw_ts = str(message.get("timestamp", ""))
+        timestamp = _ts_display(raw_ts)
 
         if not body:
             bubble_type = BubbleType.BODY_UNAVAILABLE
@@ -765,7 +776,9 @@ class MainWindow(QMainWindow):
         if group_hint and bubble_type == BubbleType.INBOUND:
             bubble_type = BubbleType.GROUP_UNKNOWN_SENDER
 
-        self._thread_view.append_message(MessageData(bubble_type, body, sender, timestamp))
+        self._thread_view.append_message(
+            MessageData(bubble_type, body, sender, timestamp, sort_key=raw_ts)
+        )
 
     def _on_conversation_updated(self, conversation: dict) -> None:
         conv_id = str(conversation.get("id", ""))
@@ -781,7 +794,7 @@ class MainWindow(QMainWindow):
             name=str(conversation.get("display_name", conv_id)),
             phone=conv_id,
             preview=str(conversation.get("last_message_preview", "")),
-            timestamp=str(conversation.get("last_message_at", ""))[:5],
+            timestamp=_ts_display(str(conversation.get("last_message_at", ""))),
             unread=unread_count > 0,
             unread_count=unread_count,
             preview_direction=str(conversation.get("last_message_direction", "")),
@@ -886,8 +899,9 @@ class MainWindow(QMainWindow):
         # In-flight guard: prevent double-submit while a send of same (phone, text) is pending.
         if (phone, text) in self._pending_sends:
             return
-        ts = datetime.now().strftime("%H:%M")
-        sent_msg = MessageData(BubbleType.OUTBOUND, text, "", ts)
+        now = datetime.now()
+        ts = now.strftime("%H:%M")
+        sent_msg = MessageData(BubbleType.OUTBOUND, text, "", ts, sort_key=now.strftime("%Y%m%dT%H%M%S"))
         self._thread_view.append_message(sent_msg)
         # Cache sent message for thread reload (iOS MAP sent folder returns 0 messages).
         self._sent_cache.setdefault(phone, []).append(sent_msg)
@@ -1024,14 +1038,15 @@ class MainWindow(QMainWindow):
         direction = str(msg.get("direction", "inbound"))
         body = str(msg.get("body", ""))
         sender = str(msg.get("from", ""))
-        ts = str(msg.get("timestamp", ""))[:5]
+        raw_ts = str(msg.get("timestamp", ""))
+        ts = _ts_display(raw_ts)
         if direction == "outbound":
             btype = BubbleType.OUTBOUND
         elif body:
             btype = BubbleType.INBOUND
         else:
             btype = BubbleType.BODY_UNAVAILABLE
-        return MessageData(btype, body, sender, ts)
+        return MessageData(btype, body, sender, ts, sort_key=raw_ts)
 
 
 def main() -> None:
