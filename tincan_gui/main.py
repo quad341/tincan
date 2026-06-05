@@ -883,6 +883,9 @@ class MainWindow(QMainWindow):
             self._compose.show_send_error(text)
             return
         phone = self._current_phone
+        # In-flight guard: prevent double-submit while a send of same (phone, text) is pending.
+        if (phone, text) in self._pending_sends:
+            return
         ts = datetime.now().strftime("%H:%M")
         sent_msg = MessageData(BubbleType.OUTBOUND, text, "", ts)
         self._thread_view.append_message(sent_msg)
