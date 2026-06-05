@@ -39,8 +39,12 @@ class StateABanner(CapabilityBanner):
         super().__init__(message=msg, parent=parent)
         self.setFixedHeight(56)
         self.setStyleSheet(
-            "background-color: #fef2f2; border: 1px solid #fca5a5;"
+            "background-color: #fee2e2; border: 2px solid #ef4444; color: #991b1b;"
         )
+        _font = QFont()
+        _font.setPointSize(12)
+        _font.setBold(True)
+        self._label.setFont(_font)
 
 
 # ---------------------------------------------------------------------------

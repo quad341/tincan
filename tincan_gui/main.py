@@ -551,6 +551,7 @@ class MainWindow(QMainWindow):
             self._load_conversations()
         else:
             self._title_bar.set_disconnected()
+            self._banner_a.show()
 
     def _sync_compose_state(self) -> None:
         """Gate compose on messaging availability AND conversation selection.
