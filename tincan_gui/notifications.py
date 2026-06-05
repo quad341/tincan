@@ -99,7 +99,7 @@ class DesktopNotifier:
             return
         seen.add(key)
 
-        summary = title if title else f"Notification from {app_id}"
+        summary = title if title else (f"Notification from {app_id}".strip() or "Notification")
         if subtitle:
             body = f"{subtitle}: {body_text}" if body_text else subtitle
         elif body_text:

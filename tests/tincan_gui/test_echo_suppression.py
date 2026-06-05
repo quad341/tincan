@@ -33,6 +33,7 @@ from unittest.mock import patch
 
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
+
 from tincan_gui.main import MainWindow
 
 
