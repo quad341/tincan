@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tincan_gui.avatar import _color_for_name
+from tincan_gui.avatar import AvatarWidget, _color_for_name
 from tincan_gui.theme import is_dark_theme
 
 _URL_RE = _re.compile(r"(https?://[^\s<>\"']+)")
@@ -507,38 +507,48 @@ QAccessible.installFactory(_thread_view_factory)
 
 
 class ThreadHeader(QWidget):
-    """Thread header bar (h=56): contact name + phone + type badge."""
+    """Thread header bar (h=56): avatar + contact name + phone."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(56)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        if is_dark_theme():
+        _dark = is_dark_theme()
+        if _dark:
             self.setStyleSheet("background: #27272a; border-bottom: 1px solid #3f3f46;")
         else:
             self.setStyleSheet("background: #ffffff; border-bottom: 1px solid #e5e7eb;")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 8)
-        layout.setSpacing(2)
 
-        _dark = is_dark_theme()
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(12, 8, 16, 8)
+        outer.setSpacing(10)
+
+        self._avatar = AvatarWidget("")
+        outer.addWidget(self._avatar, alignment=Qt.AlignVCenter)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        text_col.setContentsMargins(0, 0, 0, 0)
+
         self._name_label = QLabel("")
         name_font = QFont()
-        name_font.setPointSize(18)
+        name_font.setPointSize(15)
         self._name_label.setFont(name_font)
         self._name_label.setStyleSheet(
             "color: #f4f4f5;" if _dark else "color: #111827;"
         )
-        layout.addWidget(self._name_label)
+        text_col.addWidget(self._name_label)
 
         self._phone_label = QLabel("")
         phone_font = QFont()
-        phone_font.setPointSize(12)
+        phone_font.setPointSize(11)
         self._phone_label.setFont(phone_font)
         self._phone_label.setStyleSheet(
             "color: #a1a1aa;" if _dark else "color: #6b7280;"
         )
-        layout.addWidget(self._phone_label)
+        text_col.addWidget(self._phone_label)
+
+        outer.addLayout(text_col, stretch=1)
 
     def name_label_color(self) -> str:
         """Return the hex color applied to the name label (used by a11y tests)."""
@@ -556,7 +566,12 @@ class ThreadHeader(QWidget):
                 return part.split(":")[1].strip()
         return "#6b7280"
 
+    def set_contact_photo(self, data: bytes) -> None:
+        """Update the header avatar with a PBAP photo."""
+        self._avatar.set_photo(data)
+
     def update_contact(self, name: str, phone: str, message_type: str = "SMS") -> None:  # noqa: ARG002
+        self._avatar.update_for_name(name)
         self._name_label.setText(name)
         # Show the phone line only when it adds information (differs from name).
         # Suppress the message-type label — SMS vs iMessage is undetectable via MAP.
@@ -574,9 +589,11 @@ class ThreadHeader(QWidget):
         if len(title) > 60:
             title = title[:57] + "..."
         n = len(participants)
+        first = participants[0] if participants else ""
+        self._avatar.update_for_name(first)
         self._name_label.setText(title)
         name_font = self._name_label.font()
-        name_font.setPointSize(15)
+        name_font.setPointSize(13)
         self._name_label.setFont(name_font)
         self._name_label.setStyleSheet("color: #f4f4f5;")
         self._phone_label.setText(f"Group · {n} participants")
@@ -604,6 +621,10 @@ class ThreadView(QWidget):
         self._participants = list(participants or [])
         if is_group and self._participants:
             self._header.set_group_info(self._participants)
+
+    def set_header_photo(self, data: bytes) -> None:
+        """Update the header avatar with a PBAP photo for the current contact."""
+        self._header.set_contact_photo(data)
 
     def _build(self) -> None:
         layout = QVBoxLayout(self)

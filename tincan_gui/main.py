@@ -841,6 +841,8 @@ class MainWindow(QMainWindow):
     def _on_contact_photo_received(self, conv_id: str, photo: bytes) -> None:
         if photo:
             self._conv_list.set_conversation_photo(conv_id, photo)
+            if self._current_phone and _same_conv(conv_id, self._current_phone):
+                self._thread_view.set_header_photo(photo)
 
     def _on_notification_clicked(self, conversation_id: str) -> None:
         """Raise window and select conversation when user clicks a notification."""
