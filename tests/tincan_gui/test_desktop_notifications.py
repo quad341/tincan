@@ -629,3 +629,93 @@ class TestTrayIconMenuState:
             window._tray._on_notifications_toggled(False)
 
         mock_settings.setValue.assert_called_with("notifications/desktop_enabled", False)
+
+
+# ---------------------------------------------------------------------------
+# §10 End-to-end: _on_message_received → notifier.dispatch (ikpf9 regression)
+# ---------------------------------------------------------------------------
+
+class TestMessageReceivedTriggersNotification:
+    """_on_message_received must call _notifier.dispatch for inbound messages.
+
+    Regression guard for tincan-ikpf9: messages were arriving at the daemon
+    but the GUI produced zero notification activity.  The notification path
+    must be called for every inbound message that passes the receive handler.
+    """
+
+    _INBOUND_UNREAD = {
+        "direction": "inbound",
+        "status": "unread",
+        "is_new": True,
+        "body": "R u busy",
+        "timestamp": "20260605T120000",
+        "conversation_id": "+18157916347",
+        "from": "Mom Wordelman",
+        "display_name": "Mom Wordelman",
+    }
+
+    def test_inbound_message_calls_notifier_dispatch(self, qtbot):
+        window = MainWindow()
+        qtbot.addWidget(window)
+        dispatch_calls = []
+        window._notifier.dispatch = lambda msg: dispatch_calls.append(msg)
+
+        window._on_message_received(self._INBOUND_UNREAD)
+
+        assert len(dispatch_calls) == 1, (
+            "_on_message_received must call _notifier.dispatch for inbound messages"
+        )
+
+    def test_dispatch_called_before_thread_guard(self, qtbot):
+        """Notification fires even when no conversation is selected (thread guard fires later)."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window._current_phone = ""  # no conversation selected
+        dispatch_calls = []
+        window._notifier.dispatch = lambda msg: dispatch_calls.append(msg)
+
+        window._on_message_received(self._INBOUND_UNREAD)
+
+        assert len(dispatch_calls) == 1
+
+    def test_outbound_echo_suppression_does_not_skip_dispatch(self, qtbot):
+        """Outbound echo suppression returns early — dispatch still fires before those guards."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+        dispatch_calls = []
+        window._notifier.dispatch = lambda msg: dispatch_calls.append(msg)
+        outbound = {**self._INBOUND_UNREAD, "direction": "outbound"}
+
+        window._on_message_received(outbound)
+
+        assert len(dispatch_calls) == 1
+
+    def test_notification_not_fired_when_desktop_disabled(self, qtbot):
+        """When desktop_enabled=False, _should_notify returns False and Notify() is NOT called."""
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window._notifier._bus = MagicMock()
+        window._notifier._bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(False)):
+                window._on_message_received(self._INBOUND_UNREAD)
+
+        mock_iface.Notify.assert_not_called()
+
+    def test_notification_fired_when_desktop_enabled(self, qtbot):
+        """When desktop_enabled=True, _notify() calls Notify() via mock dbus."""
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window._notifier._bus = MagicMock()
+        window._notifier._bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+                window._on_message_received(self._INBOUND_UNREAD)
+
+        mock_iface.Notify.assert_called_once()
