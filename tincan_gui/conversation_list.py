@@ -81,6 +81,7 @@ class ConversationItem(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setFocusPolicy(Qt.StrongFocus)
         self._build()
+        self._frame = self  # tests check _frame.styleSheet() for selected state
         self._update_accessible()
         # When used as a top-level widget (e.g. in unit tests without a parent window),
         # show() is needed so isVisible() on children reflects setVisible() state rather

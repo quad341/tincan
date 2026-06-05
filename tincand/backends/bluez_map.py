@@ -519,9 +519,10 @@ class MapBackend(BackendInterface):
 
             self._retry(self._msg_access.SetFolder, "telecom")
             self._retry(self._msg_access.SetFolder, "msg")
-            transfer_path = self._retry(
-                self._msg_access.PushMessage, tmp_path, "outbox", {}
+            result = self._retry(
+                self._msg_access.PushMessage, tmp_path, {}
             )
+            transfer_path = result[0] if isinstance(result, (tuple, list)) else result
             self._wait_transfer_send(str(transfer_path))
             _log.info("Group MAP send complete: %d recipients", len(participants))
             return str(transfer_path)
