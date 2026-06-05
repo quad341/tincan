@@ -64,26 +64,31 @@ def _emoji_to_img_tag(emoji: str, point_size: int) -> str:
     font.setPointSize(point_size)
     fm = QFontMetrics(font)
 
-    w = max(fm.horizontalAdvance(emoji) + 4, 2)
-    h = max(fm.height() + 4, 2)
+    # Minimum size: 2× point size; measured advance may be zero when font isn't found.
+    px = max(point_size * 2, 24)
+    w = max(fm.horizontalAdvance(emoji) + 8, px)
+    h = max(fm.height() + 8, px)
 
     img = QImage(w, h, QImage.Format.Format_ARGB32)
     img.fill(QColor(0, 0, 0, 0))
 
     painter = QPainter(img)
     painter.setFont(font)
-    painter.drawText(2, fm.ascent() + 2, emoji)
+    painter.drawText(img.rect(), Qt.AlignmentFlag.AlignCenter, emoji)
     painter.end()
 
+    # Open ReadWrite so buf.buffer() is accessible before close (buf.data() after
+    # close() returns an empty QByteArray in some PySide6 builds — tincan-orp90).
     buf = QBuffer()
-    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    buf.open(QIODevice.OpenModeFlag.ReadWrite)
     saved = img.save(buf, "PNG")
+    png_bytes = bytes(buf.buffer()) if saved else b""
     buf.close()
 
-    if not saved or buf.data().isEmpty():
+    if not png_bytes:
         tag = _html.escape(emoji)
     else:
-        b64 = base64.b64encode(bytes(buf.data())).decode("ascii")
+        b64 = base64.b64encode(png_bytes).decode("ascii")
         tag = f'<img src="data:image/png;base64,{b64}" style="vertical-align:middle" />'
 
     _EMOJI_CACHE[key] = tag
