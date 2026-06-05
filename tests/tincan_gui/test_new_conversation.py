@@ -14,6 +14,7 @@ import pytest
 from PySide6.QtWidgets import QPushButton, QSystemTrayIcon, QToolButton
 
 from tincan_gui.conversation_list import ConversationListWidget
+from tincan_gui.main import NewConversationDialog
 
 
 @pytest.fixture(autouse=True)
@@ -168,3 +169,44 @@ class TestOnComposeNewLoadsThread:
             win._on_compose_new()
 
         assert win._current_phone == "+19995550000"
+
+
+# ---------------------------------------------------------------------------
+# §3 NewConversationDialog — eventFilter _autocomplete init guard (tincan-91th2)
+# ---------------------------------------------------------------------------
+
+class TestNewConversationDialogEventFilter:
+    """NewConversationDialog must not crash with AttributeError on _autocomplete.
+
+    Root cause: installEventFilter(self) was called before self._autocomplete
+    was created, so any Qt event delivered to _text_input during widget setup
+    (resize, polish, etc.) would reach the eventFilter's 'obj is self._autocomplete'
+    check and raise AttributeError.
+    """
+
+    def test_dialog_instantiates_without_attribute_error(self, qtbot):
+        """Creating NewConversationDialog must not raise AttributeError for _autocomplete."""
+        # This fails with the broken code — Qt sends polish/resize events to
+        # _text_input during setWidget() before _autocomplete is created.
+        dlg = NewConversationDialog([], parent=None)
+        qtbot.addWidget(dlg)
+
+    def test_dialog_instantiates_with_contacts(self, qtbot):
+        contacts = [{"name": "Alice", "phone": "+14155550001"}]
+        dlg = NewConversationDialog(contacts, parent=None)
+        qtbot.addWidget(dlg)
+
+    def test_key_down_does_not_crash(self, qtbot):
+        """Down-arrow key on _text_input must navigate autocomplete without AttributeError."""
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtCore import Qt as _Qt
+        dlg = NewConversationDialog([], parent=None)
+        qtbot.addWidget(dlg)
+        key_event = QKeyEvent(QEvent.Type.KeyPress, _Qt.Key.Key_Down, _Qt.KeyboardModifier.NoModifier)
+        dlg.eventFilter(dlg._text_input, key_event)
+
+    def test_selected_phones_initially_empty(self, qtbot):
+        dlg = NewConversationDialog([], parent=None)
+        qtbot.addWidget(dlg)
+        assert dlg.selected_phones() == []

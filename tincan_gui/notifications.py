@@ -80,6 +80,8 @@ class DesktopNotifier:
         """Send a desktop notification if the message warrants one."""
         if not self._should_notify(message):
             return
+        _log.debug("DesktopNotifier.dispatch: sending notification for conv=%s",
+                   message.get("conversation_id", "?"))
         self._notify(message)
 
     def dispatch_app_notification(self, notif: dict) -> None:
@@ -161,11 +163,15 @@ class DesktopNotifier:
         from tincan_gui._settings import app_settings
 
         if not app_settings().value("notifications/desktop_enabled", True, type=bool):
+            _log.debug("_should_notify: skip — desktop notifications disabled in settings")
             return False
-        if str(message.get("direction", "")) != "inbound":
+        direction = str(message.get("direction", ""))
+        if direction != "inbound":
             return False
-        if str(message.get("status", "")) not in ("unread", "new"):
+        status = str(message.get("status", ""))
+        if status not in ("unread", "new"):
             if not message.get("is_new"):
+                _log.debug("_should_notify: skip — status=%r is_new=%r", status, message.get("is_new"))
                 return False
 
         conv_id = str(
@@ -176,6 +182,7 @@ class DesktopNotifier:
         key = (body, timestamp)
         seen = self._seen.setdefault(conv_id, set())
         if key in seen:
+            _log.debug("_should_notify: skip — dedup hit for conv=%s", conv_id)
             return False
         seen.add(key)
         return True
@@ -217,5 +224,10 @@ class DesktopNotifier:
             )
             if conv_id:
                 self._notif_to_conv[int(notif_id)] = conv_id
+            _log.debug("Desktop notification sent (id=%s) for %s", notif_id, conv_id)
         except dbus.DBusException as exc:
-            _log.warning("Desktop notification failed: %s", exc)
+            _log.warning("Desktop notification failed (DBusException): %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            # Broad catch: non-DBusException errors are silently swallowed by Qt's
+            # slot dispatcher — log them here so they appear in /tmp/tincan-gui.log.
+            _log.warning("Desktop notification unexpected error: %s", exc)
