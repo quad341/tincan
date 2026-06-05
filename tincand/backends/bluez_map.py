@@ -163,9 +163,9 @@ def _parse_participants_from_bmsg(bmsg: str) -> list[str]:
 
 
 def _parse_bmsg_body(bmsg: str) -> str:
-    """Extract body text from a bMessage string."""
-    match = re.search(r"BEGIN:MSG\r?\n(.*?)\r?\nEND:MSG", bmsg, re.DOTALL)
-    return match.group(1) if match else ""
+    """Extract body text from a bMessage string, joining all segments for multipart SMS."""
+    segments = re.findall(r"BEGIN:MSG\r?\n(.*?)\r?\nEND:MSG", bmsg, re.DOTALL)
+    return "".join(segments)
 
 
 _NON_DIGIT_RE = re.compile(r"\D")
