@@ -126,6 +126,9 @@ class TrayIcon(QSystemTrayIcon):
 
         self._notif_action = QAction(self.tr("Desktop notifications"), menu)
         self._notif_action.setCheckable(True)
+        self._notif_action.setChecked(
+            app_settings().value("notifications/desktop_enabled", True, type=bool)
+        )
         self._notif_action.triggered.connect(self._on_notifications_toggled)
         menu.addAction(self._notif_action)
 

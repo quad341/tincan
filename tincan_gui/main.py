@@ -679,11 +679,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Hide to tray or quit on window close, per behavior/close_to_tray setting."""
+        from tincan_gui._settings import app_settings  # noqa: PLC0415
+        s = app_settings()
+        s.sync()  # flush before exit so prefs survive crashes/kills
         if hasattr(self, "_tray") and self._tray.isSystemTrayAvailable():
-            from tincan_gui._settings import app_settings  # noqa: PLC0415
-            close_to_tray = app_settings().value(
-                "behavior/close_to_tray", True, type=bool
-            )
+            close_to_tray = s.value("behavior/close_to_tray", True, type=bool)
             if close_to_tray:
                 event.ignore()
                 self.hide()

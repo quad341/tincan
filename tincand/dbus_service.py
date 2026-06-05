@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 
 import dbus
 import dbus.exceptions
@@ -321,7 +321,7 @@ class TincanService(dbus.service.Object):
                 str(exc),
                 name="im.tincan.Error.SendFailed",
             ) from exc
-        now_iso = datetime.now(tz=timezone.utc).strftime("%H:%M")
+        now_iso = datetime.now().strftime("%H:%M")
         normalized_to = normalize_phone(phone_to)
         # Route the optimistic send to the same conv_id the GUI uses.
         # If the caller passed a display name (e.g. "Alice") that still exists as
