@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tincan_gui.archived_conversations import ArchivedConversations
 from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
 from tincan_gui.theme import is_dark_theme
 
@@ -403,7 +404,11 @@ class ConversationListWidget(QWidget):
     compose_new_requested = Signal()       # user clicked "+" compose-new button
     refresh_requested = Signal()           # user clicked the ↻ refresh button
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        archived: ArchivedConversations | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setFocusPolicy(Qt.StrongFocus)
         self._items: list[ConversationItem] = []
@@ -413,6 +418,10 @@ class ConversationListWidget(QWidget):
         self._update_timer.setSingleShot(True)
         self._update_timer.setInterval(200)
         self._update_timer.timeout.connect(self._flush_updates)
+        self._archived: ArchivedConversations = (
+            archived if archived is not None else ArchivedConversations()
+        )
+        self._show_archived: bool = False
         self._build()
 
     def _build(self) -> None:
@@ -560,13 +569,22 @@ class ConversationListWidget(QWidget):
         query_digits = "".join(c for c in query if c.isdigit())
         visible_count = 0
         for widget, data in zip(self._items, getattr(self, "_item_data_list", [])):
-            phone_digits = "".join(c for c in data.phone if c.isdigit())
-            match = bool(
-                not query
-                or query in data.name.lower()
-                or query in data.preview.lower()
-                or (query_digits and query_digits in phone_digits)
-            )
+            is_archived = self._archived.is_archived(data.id)
+            if self._show_archived:
+                in_view = is_archived
+            else:
+                in_view = not is_archived
+            if in_view:
+                phone_digits = "".join(c for c in data.phone if c.isdigit())
+                text_match = bool(
+                    not query
+                    or query in data.name.lower()
+                    or query in data.preview.lower()
+                    or (query_digits and query_digits in phone_digits)
+                )
+                match = text_match
+            else:
+                match = False
             widget.setVisible(match)
             if match:
                 visible_count += 1
@@ -575,6 +593,21 @@ class ConversationListWidget(QWidget):
     def clear_filter(self) -> None:
         """Clear search input and show all rows."""
         self._search.clear()
+
+    def archive_conversation(self, conv_id: str) -> None:
+        """Archive *conv_id*: remove from active list, add to archived."""
+        self._archived.archive(conv_id)
+        self._on_filter_changed(self._search.text())
+
+    def restore_conversation(self, conv_id: str) -> None:
+        """Restore *conv_id* from archive back to the active list."""
+        self._archived.restore(conv_id)
+        self._on_filter_changed(self._search.text())
+
+    def set_show_archived(self, show: bool) -> None:
+        """Toggle between active (show=False) and archived (show=True) view."""
+        self._show_archived = show
+        self._on_filter_changed(self._search.text())
 
     def select_conversation(self, conv_id: str) -> None:
         """Programmatically select and open a conversation by ID."""
