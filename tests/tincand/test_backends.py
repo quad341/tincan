@@ -14,13 +14,13 @@ Coverage:
   §10 MapBackend.connect() — set_capability('messages', True) and set_device_name called on service
   §11 MapBackend.poll_inbox — direction='inbound' for inbox, 'outbound' for sent
   §12 MapBackend.poll_inbox — sent folder DBusException swallowed; inbox messages still returned
-  §13 MapBackend._fetch_full_body — failed-handle backoff cache (tincan-ixqg)
-     - handle is NOT retried after first GetMessage DBusException (inject + tick, no real timing)
-     - GetMessage called exactly once per failing handle across N polls
-     - body falls back to Subject on first poll when GetMessage fails
+  §13 MapBackend._fetch_full_body — failed-handle backoff cache (tincan-ixqg / tincan-572zo)
+     - handle is NOT retried after first Message1.Get DBusException (inject + tick, no real timing)
+     - Message1.Get called exactly once per failing handle across N polls
+     - body falls back to Subject on first poll when Message1.Get fails
      - Subject fallback still used on subsequent polls when handle is cached
-     - handle stored in _failed_handles after GetMessage exception
-     - handle NOT stored in _failed_handles when GetMessage returns None (success path)
+     - handle stored in _failed_handles after Message1.Get exception
+     - handle NOT stored in _failed_handles when Message1.Get returns None (success path)
      - non-failing handle attempted on every poll (not incorrectly cached)
      - _failed_handles cleared by connect()
 
@@ -29,6 +29,7 @@ Run with: python -m pytest tests/tincand/test_backends.py -v
 """
 from __future__ import annotations
 
+import contextlib
 from unittest.mock import MagicMock, patch
 
 import dbus
@@ -564,20 +565,31 @@ class TestMapBackendPollInboxSentFolderException:
 
 
 # ---------------------------------------------------------------------------
-# §13 MapBackend._fetch_full_body — failed-handle backoff cache (tincan-ixqg)
+# §13 MapBackend._fetch_full_body — failed-handle backoff cache (tincan-ixqg / tincan-572zo)
 # ---------------------------------------------------------------------------
 
 def _get_message_exc():
-    """DBusException simulating 'Method GetMessage with signature ssa{sv} not found'."""
+    """DBusException simulating Message1.Get UnknownMethod (BlueZ 5.66+ removed GetMessage)."""
     return dbus.exceptions.DBusException(name="org.freedesktop.DBus.Error.UnknownMethod")
+
+
+def _make_message1_iface_factory(mock_msg1):
+    """Return a dbus.Interface side_effect that yields mock_msg1 for Message1 calls."""
+    def _factory(obj, iface_name):
+        if iface_name == "org.bluez.obex.Message1":
+            return mock_msg1
+        return MagicMock(name=f"iface:{iface_name}")
+    return _factory
 
 
 class TestMapBackendFailedHandleBackoff:
     """_fetch_full_body caches handles that raised DBusException; skips on subsequent polls."""
 
+    @contextlib.contextmanager
     def _make_backend_with_one_failing_handle(self, handle="/msg/1"):
+        mock_msg1 = MagicMock(name="Message1")
+        mock_msg1.Get.side_effect = _get_message_exc()
         backend, mock_access = _make_map_backend_with_mock_access()
-        mock_access.GetMessage.side_effect = _get_message_exc()
         inbox_data = {
             handle: {"Sender": "Alice", "Datetime": "20260101T100000",
                      "Read": False, "Subject": "Subject text"}
@@ -587,61 +599,72 @@ class TestMapBackendFailedHandleBackoff:
             return inbox_data if folder == "inbox" else {}
 
         mock_access.ListMessages.side_effect = _list
-        return backend, mock_access
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   side_effect=_make_message1_iface_factory(mock_msg1)):
+            yield backend, mock_msg1
 
-    def test_get_message_not_retried_on_second_poll(self):
-        backend, mock_access = self._make_backend_with_one_failing_handle()
-        backend.poll_inbox()
-        backend.poll_inbox()
-        assert mock_access.GetMessage.call_count == 1
-
-    def test_get_message_called_exactly_once_across_five_polls(self):
-        backend, mock_access = self._make_backend_with_one_failing_handle()
-        for _ in range(5):
+    def test_get_not_retried_on_second_poll(self):
+        with self._make_backend_with_one_failing_handle() as (backend, mock_msg1):
             backend.poll_inbox()
-        assert mock_access.GetMessage.call_count == 1
+            backend.poll_inbox()
+        assert mock_msg1.Get.call_count == 1
 
-    def test_body_falls_back_to_subject_on_first_poll_when_get_message_fails(self):
-        backend, mock_access = self._make_backend_with_one_failing_handle()
-        result = backend.poll_inbox()
+    def test_get_called_exactly_once_across_five_polls(self):
+        with self._make_backend_with_one_failing_handle() as (backend, mock_msg1):
+            for _ in range(5):
+                backend.poll_inbox()
+        assert mock_msg1.Get.call_count == 1
+
+    def test_body_falls_back_to_subject_on_first_poll_when_get_fails(self):
+        with self._make_backend_with_one_failing_handle() as (backend, mock_msg1):
+            result = backend.poll_inbox()
         assert result[0]["body"] == "Subject text"
 
     def test_subject_fallback_used_on_second_poll_when_handle_cached(self):
-        backend, mock_access = self._make_backend_with_one_failing_handle()
-        backend.poll_inbox()
-        result2 = backend.poll_inbox()
+        with self._make_backend_with_one_failing_handle() as (backend, mock_msg1):
+            backend.poll_inbox()
+            result2 = backend.poll_inbox()
         assert result2[0]["body"] == "Subject text"
 
     def test_handle_stored_in_failed_handles_after_dbus_exception(self):
-        backend, mock_access = self._make_backend_with_one_failing_handle("/msg/42")
-        backend.poll_inbox()
+        with self._make_backend_with_one_failing_handle("/msg/42") as (backend, mock_msg1):
+            backend.poll_inbox()
         assert "/msg/42" in backend._failed_handles
 
-    def test_handle_not_stored_in_failed_handles_when_get_message_returns_none(self):
+    def test_handle_not_stored_when_message1_get_returns_none(self):
+        mock_msg1 = MagicMock(name="Message1")
+        mock_msg1.Get.return_value = None
         backend, mock_access = _make_map_backend_with_mock_access()
-        mock_access.GetMessage.return_value = None
         mock_access.ListMessages.side_effect = lambda f, _: (
             {"/msg/ok": {"Sender": "Bob", "Datetime": "", "Read": False, "Subject": "S"}}
             if f == "inbox" else {}
         )
-        backend.poll_inbox()
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   side_effect=_make_message1_iface_factory(mock_msg1)):
+            backend.poll_inbox()
         assert "/msg/ok" not in backend._failed_handles
 
     def test_unfailed_handle_attempted_on_every_poll(self):
+        mock_msg1 = MagicMock(name="Message1")
+        mock_msg1.Get.return_value = None
         backend, mock_access = _make_map_backend_with_mock_access()
-        mock_access.GetMessage.return_value = None
         mock_access.ListMessages.side_effect = lambda f, _: (
             {"/msg/1": {"Sender": "Alice", "Datetime": "", "Read": False, "Subject": "S"}}
             if f == "inbox" else {}
         )
-        for _ in range(3):
-            backend.poll_inbox()
-        assert mock_access.GetMessage.call_count == 3
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   side_effect=_make_message1_iface_factory(mock_msg1)):
+            for _ in range(3):
+                backend.poll_inbox()
+        assert mock_msg1.Get.call_count == 3
 
     def test_failed_handles_cleared_by_connect(self):
-        backend, mock_access = self._make_backend_with_one_failing_handle("/msg/7")
-        backend.poll_inbox()
-        assert "/msg/7" in backend._failed_handles
+        with self._make_backend_with_one_failing_handle("/msg/7") as (backend, mock_msg1):
+            backend.poll_inbox()
+            assert "/msg/7" in backend._failed_handles
         mock_client = MagicMock(name="Client1")
         mock_client.CreateSession.return_value = "/org/obex/session2"
         with patch("tincand.backends.bluez_map.dbus.SessionBus"), \

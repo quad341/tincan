@@ -33,6 +33,7 @@ _OBEX_CLIENT = "org.bluez.obex"
 _OBEX_CLIENT_IFACE = "org.bluez.obex.Client1"
 _OBEX_CLIENT_PATH = "/org/bluez/obex"
 _MAP_ACCESS_IFACE = "org.bluez.obex.MessageAccess1"
+_MAP_MESSAGE_IFACE = "org.bluez.obex.Message1"
 _TRANSFER_IFACE = "org.bluez.obex.Transfer1"
 _PROPS_IFACE = "org.freedesktop.DBus.Properties"
 _OBJ_MANAGER_IFACE = "org.freedesktop.DBus.ObjectManager"
@@ -53,7 +54,7 @@ _POLL_INTERVAL_SECONDS = 5
 _RECONNECT_INTERVAL_SECONDS = 10
 
 # UpdateInbox raising UnknownObject means the OBEX session object is gone — dead session.
-# Contrast: UnknownMethod from GetMessage is a BlueZ API gap (tincan-ixqg) — handled by
+# Contrast: UnknownMethod from Message1.Get is a BlueZ API gap (tincan-572zo) — handled by
 # _fetch_full_body's _failed_handles cache, never propagates to _poll_tick.
 _DEAD_SESSION_ERRORS = frozenset({"org.freedesktop.DBus.Error.UnknownObject"})
 
@@ -649,24 +650,28 @@ class MapBackend(BackendInterface):
         return None  # unreachable, satisfies type checker
 
     def _fetch_raw_bmsg(self, msg_path: str) -> str | None:
-        """GetMessage for *msg_path*, wait for transfer, return raw bMessage string."""
+        """Download message body via org.bluez.obex.Message1.Get().
+
+        BlueZ 5.66+ removed GetMessage from MessageAccess1 (tincan-572zo).
+        Each message object exposes Message1.Get(targetfile, attachment).
+        """
         if self._msg_access is None:
             return None
         if msg_path in self._failed_handles:
             return None
         try:
-            result = self._retry(
-                self._msg_access.GetMessage,
-                msg_path,
-                "",  # targetfile: empty = obexd picks temp location
-                dbus.Dictionary({"Attachment": dbus.Boolean(False)}, signature="sv"),
+            bus = dbus.SessionBus()
+            msg1 = dbus.Interface(
+                bus.get_object(_OBEX_CLIENT, msg_path),
+                _MAP_MESSAGE_IFACE,
             )
+            result = self._retry(msg1.Get, "", dbus.Boolean(False))
             if result is None:
                 return None
             transfer_path, _ = result
             return self._wait_transfer_recv_raw(str(transfer_path))
         except dbus.exceptions.DBusException as exc:
-            _log.warning("GetMessage failed for %s: %s", msg_path, exc)
+            _log.warning("Get failed for %s: %s", msg_path, exc)
             self._failed_handles.add(msg_path)
             return None
 
