@@ -117,19 +117,46 @@ def _emoji_font_families() -> list[str]:
     return families
 
 
+_MAX_WORD_LEN = 30  # insert <wbr> after this many consecutive non-space chars
+
+
+def _break_long_words(html: str) -> str:
+    """Insert <wbr> hints every _MAX_WORD_LEN chars outside HTML tags (tincan-5hcyf)."""
+    out = []
+    run = 0
+    in_tag = False
+    for ch in html:
+        if ch == "<":
+            in_tag = True
+            run = 0
+        elif ch == ">":
+            in_tag = False
+        out.append(ch)
+        if not in_tag and ch != ">":
+            run = 0 if ch.isspace() else run + 1
+            if run == _MAX_WORD_LEN:
+                out.append("<wbr>")
+                run = 0
+    return "".join(out)
+
+
 def _linkify(text: str, emoji_size: int = 13) -> str:
-    """HTML-escape text, wrap URLs in <a> tags, and render emoji as software-rasterised images."""
+    """HTML-escape text, wrap URLs in <a> tags, render emoji, and break long words."""
     parts: list[str] = []
     last = 0
     for m in _EMOJI_RE.finditer(text):
         before = text[last:m.start()]
         if before:
-            parts.append(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(before)))
+            parts.append(
+                _break_long_words(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(before)))
+            )
         parts.append(_emoji_to_img_tag(m.group(), emoji_size))
         last = m.end()
     after = text[last:]
     if after:
-        parts.append(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(after)))
+        parts.append(
+            _break_long_words(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(after)))
+        )
     return "".join(parts)
 
 
@@ -248,6 +275,7 @@ class MessageBubble(QWidget):
             )
             body_label.setCursor(Qt.CursorShape.IBeamCursor)
             body_label.setText(_linkify(self._data.body))
+        self._body_label = body_label
         bubble_layout.addWidget(body_label)
 
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
