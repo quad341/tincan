@@ -11,6 +11,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QPushButton, QSystemTrayIcon, QToolButton
 
 from tincan_gui.conversation_list import ConversationListWidget
@@ -124,7 +126,6 @@ class TestOnComposeNewLoadsThread:
 
     def test_load_thread_called_for_single_phone(self):
         win = self._make_main()
-        contacts = [{"name": "Alice", "phone": "+14155550001"}]
 
         with patch("tincan_gui.main.NewConversationDialog") as MockDlg:
             dlg = MockDlg.return_value
@@ -198,12 +199,11 @@ class TestNewConversationDialogEventFilter:
 
     def test_key_down_does_not_crash(self, qtbot):
         """Down-arrow key on _text_input must navigate autocomplete without AttributeError."""
-        from PySide6.QtCore import QEvent
-        from PySide6.QtGui import QKeyEvent
-        from PySide6.QtCore import Qt as _Qt
         dlg = NewConversationDialog([], parent=None)
         qtbot.addWidget(dlg)
-        key_event = QKeyEvent(QEvent.Type.KeyPress, _Qt.Key.Key_Down, _Qt.KeyboardModifier.NoModifier)
+        key_event = QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier
+        )
         dlg.eventFilter(dlg._text_input, key_event)
 
     def test_selected_phones_initially_empty(self, qtbot):
