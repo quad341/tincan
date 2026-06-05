@@ -33,4 +33,5 @@ if _loaded:
 # If still not loaded: English source strings are used as-is (silent fallback)
 
 from tincan_gui.main import main  # noqa: E402
+
 main()
