@@ -592,6 +592,9 @@ class ANCSBackend(BackendInterface):
         if self._health_check_id is not None:
             GLib.source_remove(self._health_check_id)
             self._health_check_id = None
+        if self._heal_timer_id is not None:
+            GLib.source_remove(self._heal_timer_id)
+            self._heal_timer_id = None
         self._heal_attempts = 0
         self._heal_timer_id = GLib.timeout_add(5_000, self._attempt_le_rearm)
         _log.warning("ANCSBackend: HEALING — max 3 attempts at 5 s each")
@@ -659,6 +662,12 @@ class ANCSBackend(BackendInterface):
             self._control_point_proxy.WriteValue(list(cmd), {})
         except dbus.exceptions.DBusException as exc:
             _log.warning("ANCSBackend: WriteValue(ControlPoint) failed: %s", exc)
+            exc_msg = str(exc).lower()
+            if "not connected" in exc_msg or "att" in exc_msg:
+                # LE link dropped — clear proxy immediately to stop retry spam
+                self._control_point_proxy = None
+                _log.warning("ANCSBackend: LE link drop on write — entering HEALING")
+                self._enter_healing()
 
     def _on_data_source_changed(self, changed):
         if "Value" not in changed:
