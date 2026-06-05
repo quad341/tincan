@@ -1,14 +1,15 @@
 """Thread view: ThreadHeader, MessageBubble (4 types), ThreadView."""
 from __future__ import annotations
 
+import base64
 import html as _html
 import re as _re
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAccessible, QFont
+from PySide6.QtCore import QBuffer, QIODevice, Qt, QTimer
+from PySide6.QtGui import QAccessible, QColor, QFont, QFontMetrics, QImage, QPainter
 from PySide6.QtWidgets import (
     QAccessibleWidget,
     QApplication,
@@ -24,6 +25,68 @@ from PySide6.QtWidgets import (
 from tincan_gui.theme import is_dark_theme
 
 _URL_RE = _re.compile(r"(https?://[^\s<>\"']+)")
+
+# Matches emoji codepoints and combining characters as a greedy sequence.
+# Including ZWJ (U+200D), VS-16 (U+FE0F), skin tones, and regional indicators
+# ensures ZWJ sequences and flag pairs are captured as a single unit.
+_EMOJI_RE = _re.compile(
+    r"[\U0001F1E0-\U0001F1FF\U0001F300-\U0001FAFF"
+    r"☀-➿⌚-⌛⏏⏩-⏳⏸-⏺"
+    r"▪-▫▶◀◻-◾☔-☕♈-♓"
+    r"♿⚓⚡⚪-⚫⚽-⚾⛄-⛅⛎"
+    r"⛔⛪⛲-⛳⛵⛺⛽✂✅✈-✍"
+    r"✏✒✔✖✝✡✨✳-✴❄❇"
+    r"❌❎❓-❕❗❣-❤➕-➗➡➰"
+    r"➿⤴-⤵⬅-⬇⬛-⬜⭐⭕"
+    r"️‍\U0001F3FB-\U0001F3FF]+",
+    _re.UNICODE,
+)
+
+# Cache: (emoji_str, point_size) → HTML img tag (or plain HTML-escaped fallback)
+_EMOJI_CACHE: dict[tuple[str, int], str] = {}
+
+
+def _emoji_to_img_tag(emoji: str, point_size: int) -> str:
+    """Render emoji to a QImage via software FreeType (COLRv1-capable) and return <img> tag.
+
+    Qt's OpenGL glyph atlas does not support COLRv1 colour glyphs (tincan-xwbfa),
+    so emoji drawn to a screen widget appear monochrome on Wayland+GL.  Drawing to
+    QImage always goes through the software rasteriser, which does support COLRv1.
+    The result is encoded as a PNG data URI and embedded as an inline <img> element.
+    """
+    key = (emoji, point_size)
+    if key in _EMOJI_CACHE:
+        return _EMOJI_CACHE[key]
+
+    font = QFont("Noto Color Emoji")
+    font.setPointSize(point_size)
+    fm = QFontMetrics(font)
+
+    w = max(fm.horizontalAdvance(emoji) + 4, 2)
+    h = max(fm.height() + 4, 2)
+
+    img = QImage(w, h, QImage.Format.Format_ARGB32)
+    img.fill(QColor(0, 0, 0, 0))
+
+    painter = QPainter(img)
+    painter.setFont(font)
+    painter.drawText(2, fm.ascent() + 2, emoji)
+    painter.end()
+
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    saved = img.save(buf, "PNG")
+    buf.close()
+
+    if not saved or buf.data().isEmpty():
+        tag = _html.escape(emoji)
+    else:
+        b64 = base64.b64encode(bytes(buf.data())).decode("ascii")
+        tag = f'<img src="data:image/png;base64,{b64}" style="vertical-align:middle" />'
+
+    _EMOJI_CACHE[key] = tag
+    return tag
+
 
 def _emoji_font_families() -> list[str]:
     """Return font family list: app default first, color-emoji fonts as fallback.
@@ -47,9 +110,20 @@ def _emoji_font_families() -> list[str]:
     return families
 
 
-def _linkify(text: str) -> str:
-    """HTML-escape text and wrap URLs in clickable <a> tags."""
-    return _URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(text))
+def _linkify(text: str, emoji_size: int = 13) -> str:
+    """HTML-escape text, wrap URLs in <a> tags, and render emoji as software-rasterised images."""
+    parts: list[str] = []
+    last = 0
+    for m in _EMOJI_RE.finditer(text):
+        before = text[last:m.start()]
+        if before:
+            parts.append(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(before)))
+        parts.append(_emoji_to_img_tag(m.group(), emoji_size))
+        last = m.end()
+    after = text[last:]
+    if after:
+        parts.append(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(after)))
+    return "".join(parts)
 
 
 class BubbleType(Enum):
