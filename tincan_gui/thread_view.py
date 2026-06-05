@@ -9,6 +9,8 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAccessible, QFont
+
+from tincan_gui.avatar import _color_for_name
 from PySide6.QtWidgets import (
     QAccessibleWidget,
     QApplication,
@@ -65,6 +67,7 @@ class MessageData:
     body: str
     sender: str
     timestamp: str
+    show_attribution: bool = False  # show sender name above inbound bubble in group mode
 
 
 class MessageBubble(QWidget):
@@ -118,6 +121,20 @@ class MessageBubble(QWidget):
 
         if style["align"] == Qt.AlignRight:
             outer.addStretch()
+
+        # Sender attribution label above inbound bubble in group mode
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        if self._data.show_attribution and self._data.sender:
+            attr_label = QLabel(self._data.sender)
+            attr_font = QFont()
+            attr_font.setPointSize(10)
+            attr_font.setBold(True)
+            attr_label.setFont(attr_font)
+            color = _color_for_name(self._data.sender)
+            attr_label.setStyleSheet(f"color: {color};")
+            attr_label.setContentsMargins(style["margin_left"] + 12, 0, 0, 4)
+            col.addWidget(attr_label)
 
         bubble = QWidget()
         bubble_layout = QVBoxLayout(bubble)
@@ -188,7 +205,8 @@ class MessageBubble(QWidget):
         ml = style["margin_left"]
         mr = style["margin_right"]
         outer.setContentsMargins(ml, 0, mr, 0)
-        outer.addWidget(bubble)
+        col.addWidget(bubble)
+        outer.addLayout(col)
 
         if style["align"] == Qt.AlignLeft:
             outer.addStretch()
@@ -302,6 +320,25 @@ class ThreadHeader(QWidget):
         else:
             self._phone_label.setText("")
             self._phone_label.setVisible(False)
+        self.setAccessibleName(f"{name}, {phone}")
+
+    def set_group_info(self, participants: list[str]) -> None:
+        """Update header for a group conversation."""
+        title = ", ".join(participants)
+        if len(title) > 60:
+            title = title[:57] + "..."
+        n = len(participants)
+        self._name_label.setText(title)
+        name_font = self._name_label.font()
+        name_font.setPointSize(15)
+        self._name_label.setFont(name_font)
+        self._name_label.setStyleSheet("color: #f4f4f5;")
+        self._phone_label.setText(f"Group · {n} participants")
+        phone_font = self._phone_label.font()
+        phone_font.setPointSize(11)
+        self._phone_label.setFont(phone_font)
+        self._phone_label.setStyleSheet("color: #71717a;")
+        self.setAccessibleName(f"Group conversation with {n} participants")
 
 
 class ThreadView(QWidget):
@@ -310,7 +347,16 @@ class ThreadView(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._last_outbound: Optional[MessageBubble] = None
+        self._is_group = False
+        self._participants: list[str] = []
         self._build()
+
+    def set_group_mode(self, is_group: bool, participants: list[str] | None = None) -> None:
+        """Toggle group-thread rendering for the current conversation."""
+        self._is_group = is_group
+        self._participants = list(participants or [])
+        if is_group and self._participants:
+            self._header.set_group_info(self._participants)
 
     def _build(self) -> None:
         layout = QVBoxLayout(self)
