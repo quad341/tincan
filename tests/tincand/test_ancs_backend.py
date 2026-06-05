@@ -517,6 +517,34 @@ class TestNotifSourceChanged:
         # byte 1..4 of the command should be the UID in LE
         assert struct.unpack_from("<L", written_bytes, 1)[0] == uid
 
+    def test_write_value_not_connected_clears_proxy_and_enters_healing(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        timers[1]()   # → ACTIVE (notifying=True by default)
+        assert backend._control_point_proxy is not None
+        backend._control_point_proxy.WriteValue.side_effect = Exception("Not connected")
+        data = _notif_source_bytes(event_id=0, category_id=4, uid=1)
+        backend._on_notif_source_changed(
+            "org.freedesktop.DBus.Properties", {"Value": list(data)}, []
+        )
+        assert backend._control_point_proxy is None
+        assert backend._heal_timer_id is not None
+
+    def test_write_value_not_connected_stops_subsequent_retries(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE
+        cp = backend._control_point_proxy
+        cp.WriteValue.side_effect = Exception("Not connected")
+        data1 = _notif_source_bytes(event_id=0, category_id=4, uid=1)
+        backend._on_notif_source_changed(
+            "org.freedesktop.DBus.Properties", {"Value": list(data1)}, []
+        )
+        cp.WriteValue.reset_mock()
+        data2 = _notif_source_bytes(event_id=0, category_id=4, uid=2)
+        backend._on_notif_source_changed(
+            "org.freedesktop.DBus.Properties", {"Value": list(data2)}, []
+        )
+        cp.WriteValue.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # §9 _on_data_source_changed → on_message_received payload shape
@@ -1391,6 +1419,16 @@ class TestTimerHygiene:
         mock_service.reset_mock()
         poll()
         mock_service.set_capability.assert_not_called()
+
+    def test_enter_healing_twice_cancels_first_timer(self, lc):
+        backend, _, _, mock_glib, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()   # → HEALING (first heal timer registered)
+        first_timer_id = backend._heal_timer_id
+        assert first_timer_id is not None
+        backend._enter_healing()   # re-enter: cancels first, registers second
+        mock_glib.source_remove.assert_any_call(first_timer_id)
+        assert backend._heal_timer_id is not None
 
 
 # ---------------------------------------------------------------------------
