@@ -70,11 +70,19 @@ class SendFailed(Exception):
 
 
 def normalize_phone(number: str) -> str:
-    """Strip formatting from a phone number, preserving a leading +."""
-    number = number.strip()
-    if number.startswith("+"):
-        return "+" + re.sub(r"[^\d]", "", number[1:])
-    return re.sub(r"[^\d]", "", number)
+    """Return a canonical digit key for *number*.
+
+    Matches the behavior of tincand.contact_store.normalize_phone so that
+    participants parsed from bMessages hash-key consistently with the contact
+    store: strip all non-digits; if result is 11 digits AND starts with '1',
+    drop the leading 1 to canonicalize US/CA numbers to 10 digits.
+
+    Examples: '+1 555-010-1234' → '5550101234', '555-010-1234' → '5550101234'.
+    """
+    digits = re.sub(r"\D", "", number)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits
 
 
 def build_bmsg(to_number: str, body: str) -> str:
@@ -808,9 +816,18 @@ class MapBackend(BackendInterface):
             participants = latest.get("participants", [])
             is_group = len(participants) > 1
             sender = latest["sender"]
-            display_name = latest.get("display_name", sender) or sender
             if is_group:
-                display_name = latest.get("display_name", key) or key
+                if len(participants) >= 3:
+                    display_name = (
+                        f"{participants[0]}, {participants[1]}"
+                        f" & {len(participants) - 2} more"
+                    )
+                elif len(participants) == 2:
+                    display_name = f"{participants[0]}, {participants[1]}"
+                else:
+                    display_name = participants[0] if participants else key
+            else:
+                display_name = latest.get("display_name", sender) or sender
             is_phone_key = len(_NON_DIGIT_RE.sub("", key)) >= 7
             # Prefer PBAP-resolved name over MAP Sender when contact store is populated
             if is_phone_key and not is_group:
