@@ -37,7 +37,7 @@ fi
 for locale in "${LOCALES[@]}"; do
     ts_file="$TRANSLATIONS/tincan_${locale}.ts"
     echo "Extracting strings for locale: $locale → $ts_file"
-    pyside6-lupdate -recursive tincan_gui -ts "$ts_file" -no-obsolete
+    pyside6-lupdate -extensions py -recursive tincan_gui -ts "$ts_file" -no-obsolete
 done
 
 echo "Done."

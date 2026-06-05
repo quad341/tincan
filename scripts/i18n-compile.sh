@@ -43,7 +43,7 @@ for locale in "${LOCALES[@]}"; do
         continue
     fi
     echo "Compiling $ts_file → $qm_file"
-    lrelease "$ts_file" -qm "$qm_file"
+    pyside6-lrelease "$ts_file" -qm "$qm_file"
 done
 
 echo "Done."
