@@ -1194,14 +1194,14 @@ class TestActiveToHealing:
         backend, _, _, mock_glib, timers, notifying = lc
         timers[1]()
         notifying[_NOTIF_SRC_PATH] = False
-        result = timers[2]()
+        result = backend._health_check()   # tick explicitly — no GLib timer-ID ordering
         assert result == mock_glib.SOURCE_REMOVE
 
     def test_health_check_fail_schedules_heal_timer(self, lc):
         backend, _, _, mock_glib, timers, notifying = lc
         timers[1]()
         notifying[_NOTIF_SRC_PATH] = False
-        timers[2]()
+        backend._health_check()   # tick explicitly — no GLib timer-ID ordering
         assert backend._heal_timer_id is not None
         intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
         assert 5_000 in intervals
@@ -1210,7 +1210,7 @@ class TestActiveToHealing:
         backend, _, _, _, timers, notifying = lc
         timers[1]()
         notifying[_NOTIF_SRC_PATH] = False
-        timers[2]()
+        backend._health_check()   # tick explicitly — no GLib timer-ID ordering
         assert backend._health_check_id is None
 
 
