@@ -208,20 +208,18 @@ def _get_map_datetime(props: dict) -> str:
 
 
 def _parse_map_datetime(dt: str) -> str:
-    """Convert MAP Datetime 'YYYYMMDDTHHMMSS[±HHMM]' to 'HH:MM' for GUI display.
+    """Normalize MAP Datetime 'YYYYMMDDTHHMMSS[±HHMM]' to sortable 'YYYYMMDDTHHMMSS'.
 
-    Returns '' when dt is empty or does not contain a time component (e.g. date-only
-    strings from test fixtures, or missing Datetime from the phone's MAP server).
+    Strips the timezone offset so the result is lexicographically sortable by
+    date and seconds (tincan-93fha). Returns '' for empty or malformed input.
+    The GUI extracts HH:MM for display; the full string is stored as sort_key.
     """
     if not dt:
         return ""
     t = dt.find("T")
-    if t < 0 or len(dt) < t + 5:
+    if t < 0 or len(dt) < t + 7:
         return ""
-    time_part = dt[t + 1:]
-    if len(time_part) >= 4:
-        return f"{time_part[:2]}:{time_part[2:4]}"
-    return ""
+    return dt[: t + 7]
 
 
 class MapBackend(BackendInterface):

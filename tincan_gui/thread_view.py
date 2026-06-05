@@ -147,6 +147,7 @@ class MessageData:
     sender: str
     timestamp: str
     show_attribution: bool = False  # show sender name above inbound bubble in group mode
+    sort_key: str = ""  # full YYYYMMDDTHHMMSS for date+second ordering (tincan-93fha)
 
 
 class MessageBubble(QWidget):

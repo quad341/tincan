@@ -429,24 +429,25 @@ class TestMapBackendDatetimeKeyFallback:
         result = backend.poll_inbox()
         return result[0]["timestamp"] if result else None
 
-    def test_datetime_key_yields_correct_timestamp(self):
-        assert self._poll_timestamp(Datetime="20260101T100000") == "10:00"
+    def test_datetime_key_yields_full_sortable_timestamp(self):
+        # Returns full YYYYMMDDTHHMMSS so GUI can sort by date+seconds (tincan-93fha)
+        assert self._poll_timestamp(Datetime="20260101T100000") == "20260101T100000"
 
-    def test_datetime_camel_key_fallback_yields_correct_timestamp(self):
-        assert self._poll_timestamp(DateTime="20260601T093000") == "09:30"
+    def test_datetime_camel_key_fallback_yields_full_sortable_timestamp(self):
+        assert self._poll_timestamp(DateTime="20260601T093000") == "20260601T093000"
 
-    def test_date_key_second_fallback_yields_correct_timestamp(self):
-        assert self._poll_timestamp(Date="20260601T183000") == "18:30"
+    def test_date_key_second_fallback_yields_full_sortable_timestamp(self):
+        assert self._poll_timestamp(Date="20260601T183000") == "20260601T183000"
 
     def test_datetime_wins_over_datetime_camel_when_both_present(self):
         assert self._poll_timestamp(
             Datetime="20260101T100000", DateTime="20260101T200000"
-        ) == "10:00"
+        ) == "20260101T100000"
 
     def test_datetime_camel_wins_over_date_when_datetime_absent(self):
         assert self._poll_timestamp(
             DateTime="20260101T100000", Date="20260101T200000"
-        ) == "10:00"
+        ) == "20260101T100000"
 
     def test_no_datetime_key_present_yields_empty_timestamp(self):
         assert self._poll_timestamp() == ""
