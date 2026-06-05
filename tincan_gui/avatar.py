@@ -139,3 +139,8 @@ class AvatarWidget(QLabel):
         else:
             self.setPixmap(px)
         self.setAccessibleName(self.tr("Contact photo for {}").format(self._name))
+
+    def update_for_name(self, name: str) -> None:
+        """Reset to initials for a new contact name."""
+        self._name = name
+        self._show_initials()
