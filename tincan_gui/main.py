@@ -413,6 +413,7 @@ class MainWindow(QMainWindow):
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
         self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP echo of self-sends
         self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs; thread render
+        self._failed_sends: dict[str, set[str]] = {}  # phone → {body}; failed state survives reload
         self._msg_cache = MessageCache()
         self._notifier = DesktopNotifier(
             on_action_invoked=self._on_notification_clicked,
@@ -663,6 +664,7 @@ class MainWindow(QMainWindow):
 
         # Paint the thread header immediately so selection feels snappy, then
         # fetch messages in the next event-loop tick (defers the D-Bus round trip).
+        self._compose.hide_send_error()
         self._thread_view.load_thread(name, conv_id, [], "SMS")
         self._sync_compose_state()
         self._tray.reset_unread()
@@ -703,7 +705,10 @@ class MainWindow(QMainWindow):
 
         if extras:
             messages = sorted(messages + extras, key=lambda m: m.sort_key or m.timestamp)
-        self._thread_view.load_thread(name, conv_id, messages, "SMS")
+        self._thread_view.load_thread(
+            name, conv_id, messages, "SMS",
+            failures=self._failed_sends.get(cache_key, set()),
+        )
 
     def _on_daemon_connected(self, device_address: str) -> None:
         status = self._dbus_client.get_status()
@@ -728,6 +733,7 @@ class MainWindow(QMainWindow):
         self._sent_bodies.clear()
         self._self_echo_guard.clear()
         self._sent_cache.clear()
+        self._failed_sends.clear()
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
@@ -785,9 +791,11 @@ class MainWindow(QMainWindow):
             for k, bodies in self._sent_bodies.items()
         ):
             return
-        # Suppress MAP inbound echo of a self-sent message: iOS MAP delivers messages
-        # sent to yourself back to the inbox with direction="inbound".
-        # Use the echo arrival as a delivery confirmation (tincan-f2xy7).
+        # iOS MAP delivers messages sent to yourself back to the inbox as "inbound".
+        # Use the echo arrival as a delivery confirmation, then fall through so it
+        # renders as its own inbound bubble and gets written to the message cache.
+        # Suppressing the echo here was tincan-wqrq8 regression: self-convos only
+        # showed one side (tincan-tqsre).
         if direction == "inbound":
             _echo_key = next(
                 (
@@ -800,14 +808,19 @@ class MainWindow(QMainWindow):
             if _echo_key is not None:
                 self._self_echo_guard.discard(_echo_key)
                 self._thread_view.mark_last_send_delivered()
-                return
         sender = str(message.get("sender", "") or message.get("from", ""))
         raw_ts = str(message.get("timestamp", ""))
         timestamp = _ts_display(raw_ts)
-        try:
-            attachments = json.loads(str(message.get("attachments", "[]")))
-        except (ValueError, TypeError):
-            attachments = []
+        raw_att = message.get("attachments", [])
+        if isinstance(raw_att, list):
+            attachments = raw_att
+        else:
+            try:
+                attachments = json.loads(str(raw_att))
+                if not isinstance(attachments, list):
+                    attachments = []
+            except (ValueError, TypeError):
+                attachments = []
 
         if not body and not attachments:
             bubble_type = BubbleType.BODY_UNAVAILABLE
@@ -849,7 +862,10 @@ class MainWindow(QMainWindow):
             unread_count=unread_count,
             preview_direction=str(conversation.get("last_message_direction", "")),
         )
+        self._conversations_by_id[conv_id] = data
         self._conv_list.update_item(conv_id, data)
+        if _same_conv(conv_id, self._current_phone):
+            self._thread_view._header.update_contact(data.name, data.phone)
 
     def _on_contact_photo_received(self, conv_id: str, photo: bytes) -> None:
         if photo:
@@ -939,6 +955,7 @@ class MainWindow(QMainWindow):
     def _on_send_accepted(self, to: str, body: str, message_id: str) -> None:
         # Defer cleanup so daemon's MessageReceived echo arrives first and is suppressed.
         QTimer.singleShot(0, lambda: self._pending_sends.discard((to, body)))
+        self._failed_sends.get(to, set()).discard(body)
         if message_id:
             # Track sent body so MAP-poll echoes (which arrive after _pending_sends
             # is cleared) are suppressed without showing a duplicate bubble.
@@ -946,6 +963,7 @@ class MainWindow(QMainWindow):
 
     def _on_send_failed(self, to: str, body: str) -> None:
         QTimer.singleShot(0, lambda: self._pending_sends.discard((to, body)))
+        self._failed_sends.setdefault(to, set()).add(body)
         self._thread_view.mark_last_send_failed()
         self._compose.show_send_error(body)
 
@@ -980,9 +998,17 @@ class MainWindow(QMainWindow):
             self._compose._input.setFocus()
 
     def _gather_autocomplete_contacts(self) -> list[dict]:
-        """Build autocomplete list from conversation history (PBAP not yet available)."""
+        """Build autocomplete list from PBAP contacts + conversation history."""
         contacts: list[dict] = []
         seen: set[str] = set()
+        # PBAP contacts first (highest-quality names)
+        for c in self._dbus_client.list_contacts():
+            phone = str(c.get("phone", ""))
+            name = str(c.get("name", ""))
+            if phone and phone not in seen:
+                seen.add(phone)
+                contacts.append({"name": name, "phone": phone})
+        # Fill in from conversation history for any phone not already covered
         for conv in self._dbus_client.list_conversations():
             phone = str(conv.get("id", ""))
             name = str(conv.get("display_name", phone))
@@ -1089,10 +1115,16 @@ class MainWindow(QMainWindow):
         sender = str(msg.get("from", ""))
         raw_ts = str(msg.get("timestamp", ""))
         ts = _ts_display(raw_ts)
-        try:
-            attachments = json.loads(str(msg.get("attachments", "[]")))
-        except (ValueError, TypeError):
-            attachments = []
+        raw_att = msg.get("attachments", [])
+        if isinstance(raw_att, list):
+            attachments = raw_att
+        else:
+            try:
+                attachments = json.loads(str(raw_att))
+                if not isinstance(attachments, list):
+                    attachments = []
+            except (ValueError, TypeError):
+                attachments = []
         if direction == "outbound":
             btype = BubbleType.OUTBOUND
         elif body or attachments:

@@ -446,8 +446,11 @@ class MessageBubble(QWidget):
                         img_label.setPixmap(pixmap)
                         img_label.setAlignment(Qt.AlignCenter)
                         bubble_layout.addWidget(img_label)
+                        continue
                 except Exception:
                     pass
+            btn = QPushButton(f"↓ Save attachment ({mime or 'unknown type'})")
+            bubble_layout.addWidget(btn)
 
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
             sub = QLabel("Message body not available from phone")
@@ -838,6 +841,7 @@ class ThreadView(QWidget):
         phone: str,
         messages: list[MessageData],
         message_type: str = "SMS",
+        failures: set[str] | None = None,
     ) -> None:
         self._header.update_contact(name, phone, message_type)
         self._last_outbound = None  # new thread — prior bubble ref is stale
@@ -867,6 +871,8 @@ class ThreadView(QWidget):
             if date_key:
                 self._last_date_key = date_key
             bubble = MessageBubble(msg)
+            if failures and msg.bubble_type == BubbleType.OUTBOUND and msg.body in failures:
+                bubble.set_send_failed()
             self._messages_layout.addWidget(bubble)
 
         # Scroll to bottom once Qt recomputes the content height.

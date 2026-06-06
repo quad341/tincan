@@ -59,6 +59,10 @@ class ContactStore:
         contact = self.get(phone)
         return contact.name if contact else None
 
+    def get_name(self, phone: str) -> str | None:
+        """Alias for resolve_name; returns display name for *phone* or None."""
+        return self.resolve_name(phone)
+
     def lookup_by_name(self, name: str) -> str | None:
         """Return the normalized_phone for the first contact matching *name* (case-insensitive)."""
         name_lower = name.lower()
@@ -66,6 +70,10 @@ class ContactStore:
             if contact.name.lower() == name_lower:
                 return contact.normalized_phone
         return None
+
+    def all_contacts(self) -> list[Contact]:
+        """Return all contacts in insertion/update order."""
+        return list(self._contacts.values())
 
     def clear(self) -> None:
         self._contacts.clear()

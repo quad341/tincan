@@ -55,8 +55,16 @@ class DesktopNotifier:
             return self._bus
         try:
             import dbus
+            import dbus.mainloop.glib
+            # The GUI runs under Qt/GLib; install GLib as the dbus mainloop so
+            # add_signal_receiver() actually dispatches incoming signals.  Without
+            # this, ActionInvoked is never received even though the subscription
+            # succeeds — GLib events are pumped by Qt but only for the default
+            # mainloop.  set_as_default=True is safe here because the Qt event
+            # loop is already driving the GLib loop on Linux.
+            dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
             self._bus = dbus.SessionBus()
-            if self._on_action_invoked:
+            if self._on_action_invoked or self._on_mark_read:
                 self._bus.add_signal_receiver(
                     self._on_action_invoked_signal,
                     signal_name="ActionInvoked",

@@ -436,6 +436,19 @@ class TincanService(dbus.service.Object):
         """Return phone numbers for *conv_id*, or [] if unknown."""
         return [dbus.String(p) for p in self._group_participants.get(conv_id, [])]
 
+    @dbus.service.method(IFACE_MESSAGES, in_signature="", out_signature="aa{sv}")
+    def GetContacts(self) -> list:  # noqa: N802
+        """Return [{phone, name}] for all PBAP-synced contacts."""
+        result = []
+        for contact in self._contact_store.all_contacts():
+            if contact.name:
+                result.append(dbus.Dictionary(
+                    {"phone": dbus.String(contact.normalized_phone),
+                     "name": dbus.String(contact.name)},
+                    signature="sv",
+                ))
+        return dbus.Array(result, signature="a{sv}")
+
     @dbus.service.signal(IFACE_MESSAGES, signature="a{sv}")
     def MessageReceived(self, message: dbus.Dictionary) -> None:  # noqa: N802
         pass
@@ -567,6 +580,8 @@ class TincanService(dbus.service.Object):
     def upsert_conversation(self, conv: Conversation) -> None:
         """Add or replace a conversation in the in-memory store."""
         self._conversations[conv.id] = conv
+        if conv.is_group and conv.participants:
+            self._group_participants[conv.id] = list(conv.participants)
 
     def on_message_received(self, message: dict) -> None:
         """Record an inbound message; update conversation state; emit signals.

@@ -163,27 +163,33 @@ class TestSentBodiesGuard:
 # ---------------------------------------------------------------------------
 
 class TestSelfEchoGuard:
-    """Inbound self-echoes matching _self_echo_guard are swallowed (once)."""
+    """Inbound self-echoes mark sent bubble Delivered and render as inbound bubble.
 
-    def test_matching_self_echo_suppresses_bubble(self, qtbot):
+    The echo is NO LONGER suppressed (tincan-wqrq8 / tincan-tqsre): self-conversations
+    must show both the sent bubble and the received copy so both sides of the
+    conversation are visible.
+    """
+
+    def test_matching_self_echo_shows_inbound_bubble(self, qtbot):
+        """Self-echo is not suppressed — it renders as its own inbound bubble."""
         window = _make_window(qtbot)
         appended = _capture(window)
         window._self_echo_guard.add(("5550001111", "Echo me"))
 
         _recv(window, "inbound", "Echo me")
 
-        assert appended == []
+        assert len(appended) == 1
 
-    def test_entry_removed_after_suppression(self, qtbot):
-        """Guard entry is consumed — a second identical inbound is shown."""
+    def test_entry_removed_after_echo(self, qtbot):
+        """Guard entry is consumed — a second identical inbound is also shown."""
         window = _make_window(qtbot)
         appended = _capture(window)
         window._self_echo_guard.add(("5550001111", "Echo me"))
 
-        _recv(window, "inbound", "Echo me")  # suppressed, guard cleared
-        _recv(window, "inbound", "Echo me")  # guard gone — shown
+        _recv(window, "inbound", "Echo me")  # guard cleared; bubble shown
+        _recv(window, "inbound", "Echo me")  # guard gone — also shown
 
-        assert len(appended) == 1
+        assert len(appended) == 2
 
     def test_different_body_passes_through(self, qtbot):
         window = _make_window(qtbot)

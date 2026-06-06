@@ -70,9 +70,23 @@ ruff check .    # lint
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — honest "what it can and can't do"
 - [docs/TESTING.md](docs/TESTING.md) — testing approach
 
+## Android?
+
+Tincan's Bluetooth stack (MAP/ANCS/PBAP over BlueZ) works the same way in theory for an Android phone, but **Android is a non-goal for this project**. Android users should look at **[KDE Connect](https://community.kde.org/KDEConnect)** — a mature, well-supported Android ↔ Linux integration app available on Google Play and F-Droid.
+
 ## Why
 
 Microsoft Phone Link already does calls + SMS + notifications + contacts over Bluetooth alone — on Windows. Nobody had assembled the same stack on Linux. That's the gap Tincan fills.
+
+## Vibe-maintained
+
+Tincan is a **vibe-maintained** project — the codebase is developed and maintained by autonomous AI coding agents working from a shared backlog. Human contributors set direction; agents implement, test, and ship.
+
+Contributions are **very welcome**. You don't need to understand every line — open an issue or a PR and the agents will engage with it.
+
+If you're curious about this development style, Steve Yegge's writing is a good primer:
+- [The Brute Squad](https://sourcegraph.com/blog/the-brute-squad) — agentic vibe coding at scale
+- [Revenge of the Junior Developer](https://sourcegraph.com/blog/revenge-of-the-junior-developer) — the original piece that coined the term
 
 ## License
 

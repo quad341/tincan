@@ -835,3 +835,29 @@ class TestActionableNotifications:
         qtbot.addWidget(window)
 
         assert window._notifier._on_mark_read is not None
+
+    def test_ensure_bus_installs_glib_mainloop_before_session_bus(self):
+        """_ensure_bus must call DBusGMainLoop before SessionBus.
+
+        Without GLib mainloop integration, ActionInvoked signals are never
+        dispatched by the Qt/GLib event loop — the fix (tincan-5i5i1) adds
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True) first.
+        """
+        mock_dbus, mock_glib, _mock_iface = _make_dbus_mock()
+        call_order = []
+        # After `import dbus`, code accesses dbus.mainloop.glib.DBusGMainLoop
+        # via attribute chain on mock_dbus.  Track that specific call.
+        mock_dbus.mainloop.glib.DBusGMainLoop.side_effect = (
+            lambda **_kw: call_order.append("glib")
+        )
+        mock_dbus.SessionBus.side_effect = lambda: call_order.append("bus") or MagicMock()
+
+        notifier = DesktopNotifier(on_action_invoked=lambda cid: None)
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            notifier._ensure_bus()
+
+        assert "glib" in call_order, "DBusGMainLoop was never called"
+        assert call_order.index("glib") < call_order.index("bus"), (
+            "DBusGMainLoop must be called BEFORE SessionBus; "
+            f"got order: {call_order}"
+        )
