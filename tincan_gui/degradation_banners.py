@@ -17,13 +17,21 @@ from PySide6.QtWidgets import (
 from tincan_gui.capability_banner import CapabilityBanner
 
 # ---------------------------------------------------------------------------
-# State A: Disconnected — inherits CapabilityBanner → AlertMessage role via factory
+# State A: Disconnected
 # ---------------------------------------------------------------------------
 
-class StateABanner(CapabilityBanner):
+class StateABanner(QWidget):
     """Full-width disconnected banner (h=56, red border). Design: tincan-s42 §2 State A."""
 
+    reconnect_clicked = Signal()
+
     def __init__(self, last_seen: str = "", parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(56)
+        self.setStyleSheet(
+            "background-color: #fee2e2; border: 2px solid #ef4444; color: #991b1b;"
+        )
+
         if not last_seen:
             msg = QCoreApplication.translate(
                 "StateABanner",
@@ -36,15 +44,40 @@ class StateABanner(CapabilityBanner):
                 "⊗ Connection lost — last seen {last_seen}"
                 " · Bluetooth out of range · reconnecting…",
             ).format(last_seen=last_seen)
-        super().__init__(message=msg, parent=parent)
-        self.setFixedHeight(56)
-        self.setStyleSheet(
-            "background-color: #fee2e2; border: 2px solid #ef4444; color: #991b1b;"
+
+        accessible_name = QCoreApplication.translate(
+            "StateABanner",
+            "Connection lost. Activate Reconnect to retry immediately.",
         )
-        _font = QFont()
-        _font.setPointSize(12)
-        _font.setBold(True)
-        self._label.setFont(_font)
+        self.setAccessibleName(accessible_name)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 8, 0)
+
+        self._label = QLabel(msg)
+        label_font = QFont()
+        label_font.setPointSize(12)
+        label_font.setBold(True)
+        self._label.setFont(label_font)
+        self._label.setStyleSheet("color: #991b1b;")
+        self._label.setWordWrap(True)
+        layout.addWidget(self._label, stretch=1)
+
+        reconnect_btn = QPushButton(
+            QCoreApplication.translate("StateABanner", "Reconnect")
+        )
+        reconnect_btn.setMinimumWidth(100)
+        reconnect_btn.setAccessibleName(
+            QCoreApplication.translate("StateABanner", "Reconnect")
+        )
+        reconnect_btn.setStyleSheet(
+            "QPushButton { color: #991b1b; background: #ffffff; font-size: 12pt;"
+            " border: 1px solid #ef4444; border-radius: 4px; padding: 2px 8px; }"
+            "QPushButton:hover { background: #fecaca; }"
+            "QPushButton:focus { outline: 2px solid #ef4444; outline-offset: 2px; }"
+        )
+        reconnect_btn.clicked.connect(self.reconnect_clicked)
+        layout.addWidget(reconnect_btn)
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +278,8 @@ class ContactsEmptyBanner(QWidget):
 # ---------------------------------------------------------------------------
 
 def _degradation_banner_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
+    if isinstance(obj, StateABanner):
+        return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)
     if isinstance(obj, StateBBanner):
         # State B = urgent: MAP link dropped, messaging broken
         return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)

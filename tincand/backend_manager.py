@@ -77,3 +77,6 @@ class BackendManager(BackendInterface):
 
     def send_group_message(self, participants: list[str], body: str) -> str:
         return self._primary.send_group_message(participants, body)
+
+    def schedule_reconnect(self) -> None:
+        self._primary.schedule_reconnect()
