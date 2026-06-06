@@ -185,6 +185,8 @@ class ANCSBackend(BackendInterface):
         self._health_check_id: int | None = None
         self._heal_timer_id: int | None = None
         self._heal_attempts: int = 0
+        self._backlog_suppress: bool = False
+        self._backlog_timer_id: int | None = None
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -325,6 +327,10 @@ class ANCSBackend(BackendInterface):
         if self._heal_timer_id is not None:
             GLib.source_remove(self._heal_timer_id)
             self._heal_timer_id = None
+        if self._backlog_timer_id is not None:
+            GLib.source_remove(self._backlog_timer_id)
+            self._backlog_timer_id = None
+        self._backlog_suppress = False
         self._notif_src_path = None
         self._data_src_path = None
 
@@ -517,6 +523,10 @@ class ANCSBackend(BackendInterface):
         if self._heal_timer_id is not None:
             GLib.source_remove(self._heal_timer_id)
             self._heal_timer_id = None
+        if self._backlog_timer_id is not None:
+            GLib.source_remove(self._backlog_timer_id)
+            self._backlog_timer_id = None
+        self._backlog_suppress = False
         if self._bus is not None:
             if self._notif_src_path:
                 try:
@@ -566,9 +576,17 @@ class ANCSBackend(BackendInterface):
                 self._verify_notifying(self._data_src_path)):
             _log.info("ANCSBackend: Notifying=True on both chars — ACTIVE confirmed")
             self._health_check_id = GLib.timeout_add(30_000, self._health_check)
+            self._backlog_suppress = True
+            self._backlog_timer_id = GLib.timeout_add(2_000, self._end_backlog_suppress)
         else:
             _log.warning("ANCSBackend: Notifying=False after StartNotify — entering HEALING")
             self._enter_healing()
+        return GLib.SOURCE_REMOVE
+
+    def _end_backlog_suppress(self) -> bool:
+        self._backlog_suppress = False
+        self._backlog_timer_id = None
+        _log.debug("ANCSBackend: backlog suppression window ended — new notifications active")
         return GLib.SOURCE_REMOVE
 
     def _health_check(self) -> bool:
@@ -595,6 +613,10 @@ class ANCSBackend(BackendInterface):
         if self._heal_timer_id is not None:
             GLib.source_remove(self._heal_timer_id)
             self._heal_timer_id = None
+        if self._backlog_timer_id is not None:
+            GLib.source_remove(self._backlog_timer_id)
+            self._backlog_timer_id = None
+        self._backlog_suppress = False
         self._heal_attempts = 0
         self._heal_timer_id = GLib.timeout_add(5_000, self._attempt_le_rearm)
         _log.warning("ANCSBackend: HEALING — max 3 attempts at 5 s each")
@@ -690,6 +712,9 @@ class ANCSBackend(BackendInterface):
         self._data_buffer.clear(uid)
         attrs = result.get("attrs", {})
         self._uid_meta.pop(uid, None)  # consume to prevent memory leak
+        if self._backlog_suppress:
+            _log.debug("ANCSBackend: backlog suppress — dropping uid=%d", uid)
+            return
         app_id = attrs.get(ATTR_APP_ID, "")
         if self._service is None:
             return

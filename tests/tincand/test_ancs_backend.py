@@ -1470,3 +1470,109 @@ class TestDoubleSubscribeGuard:
         mock_service.reset_mock()
         backend._on_device_connected(_DEV_PATH)
         mock_service.set_capability.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §24 Backlog suppression: 2 s grace window after ACTIVE drops replay flood
+# ---------------------------------------------------------------------------
+
+class TestBacklogSuppression:
+    """iOS replays full Notification Center on connect; suppress during 2 s window."""
+
+    def test_active_transition_sets_backlog_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE
+        assert backend._backlog_suppress is True
+
+    def test_active_transition_schedules_backlog_timer_at_2s(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        timers[1]()
+        intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
+        assert 2_000 in intervals
+
+    def test_active_transition_sets_backlog_timer_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        assert backend._backlog_timer_id is not None
+
+    def test_app_notification_suppressed_during_backlog_window(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE; _backlog_suppress = True
+        payload = _data_source_tlv(uid=1, title="Hey", message="Yo",
+                                   app_id="com.apple.WhatsApp")
+        backend._on_data_source_changed({"Value": list(payload)})
+        mock_service.on_app_notification_received.assert_not_called()
+
+    def test_sms_suppressed_during_backlog_window(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        timers[1]()
+        payload = _data_source_tlv(uid=2, title="Alice", message="Hi",
+                                   app_id="com.apple.MobileSMS")
+        backend._on_data_source_changed({"Value": list(payload)})
+        mock_service.on_message_received.assert_not_called()
+
+    def test_backlog_timer_fires_clears_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE; timers[3] = _end_backlog_suppress
+        timers[3]()
+        assert backend._backlog_suppress is False
+
+    def test_backlog_timer_fires_clears_timer_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        timers[3]()
+        assert backend._backlog_timer_id is None
+
+    def test_app_notification_dispatched_after_backlog_window(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        timers[1]()
+        timers[3]()   # backlog window closed
+        payload = _data_source_tlv(uid=3, title="Hey", message="New",
+                                   app_id="com.apple.WhatsApp")
+        backend._on_data_source_changed({"Value": list(payload)})
+        mock_service.on_app_notification_received.assert_called_once()
+
+    def test_stop_from_active_clears_backlog_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend.stop()
+        assert backend._backlog_suppress is False
+
+    def test_stop_from_active_clears_backlog_timer_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend.stop()
+        assert backend._backlog_timer_id is None
+
+    def test_disconnect_clears_backlog_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend._on_device_disconnected()
+        assert backend._backlog_suppress is False
+
+    def test_disconnect_clears_backlog_timer_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend._on_device_disconnected()
+        assert backend._backlog_timer_id is None
+
+    def test_enter_healing_clears_backlog_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend._enter_healing()
+        assert backend._backlog_suppress is False
+
+    def test_enter_healing_cancels_backlog_timer(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        timers[1]()
+        backlog_tid = backend._backlog_timer_id
+        assert backlog_tid is not None
+        backend._enter_healing()
+        mock_glib.source_remove.assert_any_call(backlog_tid)
+        assert backend._backlog_timer_id is None
+
+    def test_healing_path_does_not_set_backlog_suppress(self, lc):
+        backend, _, _, _, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()   # → HEALING (not ACTIVE)
+        assert backend._backlog_suppress is False
