@@ -533,3 +533,109 @@ class TestEmitMessagesPbapNameResolution:
         conv = svc._conversations.get("Carol")
         assert conv is not None
         assert conv.display_name == "Carol"
+
+
+# ---------------------------------------------------------------------------
+# §8 _emit_messages — is_new flag (tincan-ps152 / tincan-vlxtb)
+# ---------------------------------------------------------------------------
+
+class TestEmitMessagesIsNewFlag:
+    """_emit_messages sets is_new correctly based on notify and direction.
+
+    iOS auto-read-on-fetch: MAP marks messages read=True on fetch, so
+    notify=True inbound messages can arrive with read=True.  is_new must
+    still be True so the GUI notifier fires despite status='read'.
+
+    Coverage:
+      §8.1 notify=True + inbound → is_new=True in MessageReceived dict
+      §8.2 notify=False + inbound → is_new=False
+      §8.3 notify=True + outbound → is_new=False
+      §8.4 notify=True + inbound + read=True → is_new=True (iOS auto-read)
+      §8.5 end-to-end: two inbound msgs same conv, notify=True, second
+           read=True → both MessageReceived calls carry is_new=True
+    """
+
+    def _make_backend_with_service(self):
+        from unittest.mock import patch
+
+        import dbus
+        import dbus.service
+
+        from tincand.dbus_service import TincanService
+
+        with patch("dbus.service.BusName", return_value=MagicMock()), \
+             patch.object(dbus.service.Object, "__init__", return_value=None):
+            svc = TincanService(MagicMock())
+        svc.Connected = MagicMock()
+        svc.Disconnected = MagicMock()
+        svc.CapabilityChanged = MagicMock()
+        svc.MessageReceived = MagicMock()
+        svc.MessageSent = MagicMock()
+        svc.ConversationUpdated = MagicMock()
+        svc.ContactPhotoReceived = MagicMock()
+
+        backend = MapBackend()
+        backend._service = svc
+        backend._store = None
+        backend._initial_poll_done = True
+        return backend, svc
+
+    def _make_msg(self, direction: str = "inbound", read: bool = False,
+                  body: str = "hi", timestamp: str = "2026-06-06T10:00:00") -> dict:
+        return {
+            "sender": "+15550100001",
+            "display_name": "Alice",
+            "timestamp": timestamp,
+            "read": read,
+            "body": body,
+            "direction": direction,
+        }
+
+    def _is_new_from_call(self, call) -> bool:
+        """Extract is_new bool from a MessageReceived MagicMock call argument."""
+        msg_dbus = call[0][0]
+        return bool(msg_dbus["is_new"])
+
+    def test_notify_true_inbound_sets_is_new_true(self):
+        """§8.1 notify=True + inbound → is_new=True."""
+        backend, svc = self._make_backend_with_service()
+        backend._emit_messages([self._make_msg("inbound", read=False)], notify=True)
+        assert svc.MessageReceived.call_count == 1
+        assert self._is_new_from_call(svc.MessageReceived.call_args_list[0]) is True
+
+    def test_notify_false_inbound_sets_is_new_false(self):
+        """§8.2 notify=False + inbound → is_new=False (baseline poll, no notification)."""
+        backend, svc = self._make_backend_with_service()
+        backend._emit_messages([self._make_msg("inbound", read=False)], notify=False)
+        assert svc.MessageReceived.call_count == 1
+        assert self._is_new_from_call(svc.MessageReceived.call_args_list[0]) is False
+
+    def test_notify_true_outbound_sets_is_new_false(self):
+        """§8.3 notify=True + outbound → is_new=False (only inbound triggers notify)."""
+        backend, svc = self._make_backend_with_service()
+        backend._emit_messages([self._make_msg("outbound", read=True)], notify=True)
+        assert svc.MessageReceived.call_count == 1
+        assert self._is_new_from_call(svc.MessageReceived.call_args_list[0]) is False
+
+    def test_notify_true_inbound_read_true_sets_is_new_true(self):
+        """§8.4 iOS auto-read-on-fetch: read=True with notify=True → is_new=True."""
+        backend, svc = self._make_backend_with_service()
+        backend._emit_messages([self._make_msg("inbound", read=True)], notify=True)
+        assert svc.MessageReceived.call_count == 1
+        assert self._is_new_from_call(svc.MessageReceived.call_args_list[0]) is True
+
+    def test_two_inbound_same_conv_notify_true_both_is_new_true(self):
+        """§8.5 Two inbound msgs same conv, second read=True → both is_new=True."""
+        backend, svc = self._make_backend_with_service()
+        msgs = [
+            self._make_msg("inbound", read=False, body="first",
+                           timestamp="2026-06-06T10:00:00"),
+            self._make_msg("inbound", read=True, body="second",
+                           timestamp="2026-06-06T10:00:01"),
+        ]
+        backend._emit_messages(msgs, notify=True)
+        assert svc.MessageReceived.call_count == 2
+        for i, call in enumerate(svc.MessageReceived.call_args_list):
+            assert self._is_new_from_call(call) is True, (
+                f"msg[{i}] expected is_new=True"
+            )

@@ -13,6 +13,8 @@ Coverage:
   - TrayIcon.sync_notifications_action(): checkbox state synchronization
   - TrayIcon._on_menu_about_to_show(): reads desktop_enabled from QSettings on open
   - §11 Actionable notifications (tincan-5ptsg): reply + mark-read action buttons
+  - §12 MAP is_new end-to-end (tincan-ps152/tincan-vlxtb): two inbound msgs both
+         call Notify() even when second has status='read' but is_new=True
 """
 from __future__ import annotations
 
@@ -160,6 +162,13 @@ class TestShouldNotify:
             assert notifier._should_notify(msg1) is True
             assert notifier._should_notify(msg2) is True
 
+    def test_inbound_status_read_with_is_new_true_returns_true(self):
+        """iOS auto-read regression: status='read' + is_new=True must not suppress notify."""
+        notifier = DesktopNotifier()
+        msg = {**_INBOUND_NEW, "status": "read", "is_new": True}
+        with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+            assert notifier._should_notify(msg) is True
+
 
 # ---------------------------------------------------------------------------
 # §2 Dispatch — mocked dbus.SessionBus
@@ -225,6 +234,20 @@ class TestDispatch:
                 notifier.dispatch(_INBOUND_NEW)
 
         assert notifier._notif_to_conv[7] == "conv-alice"
+
+    def test_status_read_with_is_new_true_calls_notify(self):
+        """dispatch() fires Notify() for status='read' when is_new=True (iOS auto-read)."""
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        notifier, mock_bus = _make_notifier_with_mock_bus()
+        mock_bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+        msg = {**_INBOUND_NEW, "status": "read", "is_new": True}
+
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+                notifier.dispatch(msg)
+
+        mock_iface.Notify.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -835,3 +858,59 @@ class TestActionableNotifications:
         qtbot.addWidget(window)
 
         assert window._notifier._on_mark_read is not None
+
+
+# ---------------------------------------------------------------------------
+# §12 MAP is_new end-to-end (tincan-ps152 / tincan-vlxtb)
+# ---------------------------------------------------------------------------
+
+class TestMapIsNewEndToEnd:
+    """Two inbound MAP messages (second read=True) both call Notify() when is_new=True.
+
+    Regression guard for tincan-ps152: _emit_messages sets is_new=True for
+    notify=True inbound messages regardless of read=True.  The GUI notifier
+    must fire for both.  Message dicts below match the exact profile produced
+    by _emit_messages(msgs, notify=True) for an iOS fetch.
+    """
+
+    _MSG1 = {
+        "direction": "inbound",
+        "status": "unread",
+        "is_new": True,
+        "body": "first message",
+        "timestamp": "2026-06-06T10:00:00",
+        "conversation_id": "conv-alice",
+        "from": "Alice",
+    }
+    _MSG2 = {
+        "direction": "inbound",
+        "status": "read",   # iOS auto-read-on-fetch: MAP read=True
+        "is_new": True,     # but notify=True so is_new stays True
+        "body": "second message",
+        "timestamp": "2026-06-06T10:00:01",
+        "conversation_id": "conv-alice",
+        "from": "Alice",
+    }
+
+    def test_both_messages_call_notify(self):
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        mock_iface.Notify.return_value = 1
+        notifier, mock_bus = _make_notifier_with_mock_bus()
+        mock_bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+
+        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+                notifier.dispatch(self._MSG1)
+                notifier.dispatch(self._MSG2)
+
+        assert mock_iface.Notify.call_count == 2, (
+            "Both inbound MAP messages must call Notify() even when second has status='read'"
+        )
+
+    def test_second_message_read_without_is_new_is_suppressed(self):
+        """Contrast: status='read' without is_new=True is correctly suppressed."""
+        notifier = DesktopNotifier()
+        msg_no_is_new = {**self._MSG2, "is_new": False}
+        with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+            assert notifier._should_notify(msg_no_is_new) is False
