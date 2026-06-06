@@ -662,10 +662,19 @@ class MainWindow(QMainWindow):
         self._thread_view.set_group_mode(is_group, participants)
         self._compose.set_group_mode(is_group)
 
-        # Paint the thread header immediately so selection feels snappy, then
-        # fetch messages in the next event-loop tick (defers the D-Bus round trip).
+        # Show cached messages immediately (no empty-thread flash), then merge
+        # MAP results in the next event-loop tick once the D-Bus round trip completes.
+        cache_key = self._current_phone or conv_id
+        cached: list[MessageData] = [
+            self._cache_msg_to_data(c) for c in self._msg_cache.get_messages(cache_key)
+        ]
+        cached += self._sent_cache.get(cache_key, [])
+        cached.sort(key=lambda m: m.sort_key or m.timestamp)
         self._compose.hide_send_error()
-        self._thread_view.load_thread(name, conv_id, [], "SMS")
+        self._thread_view.load_thread(
+            name, conv_id, cached, "SMS",
+            failures=self._failed_sends.get(cache_key, set()),
+        )
         self._sync_compose_state()
         self._tray.reset_unread()
         self._dbus_client.mark_conversation_read(conv_id)
