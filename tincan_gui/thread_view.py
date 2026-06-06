@@ -280,6 +280,22 @@ def _date_label_for_sort_key(sort_key: str, today: "datetime.date | None" = None
     return label if label else None
 
 
+def _sort_key_to_hover_text(sort_key: str) -> str:
+    """Convert YYYYMMDDTHHMMSS sort_key to a readable date/time for bubble hover tooltip."""
+    if not sort_key or len(sort_key) < 15:
+        return ""
+    try:
+        dt = datetime.datetime(
+            int(sort_key[:4]), int(sort_key[4:6]), int(sort_key[6:8]),
+            int(sort_key[9:11]), int(sort_key[11:13]),
+        )
+    except (ValueError, IndexError):
+        return ""
+    hour = dt.hour % 12 or 12
+    ampm = "AM" if dt.hour < 12 else "PM"
+    return f"{dt.strftime('%A, %B')} {dt.day}, {dt.year} at {hour}:{dt.minute:02d} {ampm}"
+
+
 class DateSeparatorWidget(QWidget):
     """Full-width centered date separator row between message bubbles."""
 
@@ -493,6 +509,9 @@ class MessageBubble(QWidget):
         bubble.setStyleSheet(
             f"background-color: {bg}; border-radius: 12px;"
         )
+        hover = _sort_key_to_hover_text(self._data.sort_key)
+        if hover:
+            bubble.setToolTip(hover)
 
         ml = style["margin_left"]
         mr = style["margin_right"]
@@ -932,7 +951,7 @@ class ThreadView(QWidget):
         sep_count = 0
         for msg in messages:
             date_key = msg.sort_key[:8] if msg.sort_key else ""
-            if date_key and self._last_date_key and date_key != self._last_date_key:
+            if date_key and date_key != self._last_date_key:
                 label_text = _date_label_text(msg.sort_key)
                 self._messages_layout.addWidget(DateSeparatorWidget(label_text))
                 _trace.emit("date_separator", source="load_thread", index=self._bubble_count,
