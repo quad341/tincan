@@ -374,19 +374,30 @@ class NewConversationDialog(QDialog):
         self._autocomplete.clear()
         chipped_phones = {c.phone for c in self._chips}
         query = query.strip().lower()
+        if not query:
+            # Don't flood the list before the user has typed anything.
+            self._autocomplete.setVisible(False)
+            return
+        contact_found = False
         for contact in self._contacts:
             name = str(contact.get("name", ""))
             phone = str(contact.get("phone", ""))
             if phone in chipped_phones:
                 continue
-            if query and query not in name.lower() and query not in phone.lower():
+            if query not in name.lower() and query not in phone.lower():
                 continue
+            contact_found = True
             display = f"{name}  {phone}" if name else phone
             item = QListWidgetItem(display)
             item.setData(Qt.UserRole, {"name": name, "phone": phone})
-            if phone in chipped_phones:
-                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
             self._autocomplete.addItem(item)
+        if not contact_found:
+            # Allow arbitrary phone/name entry: show an "Add as recipient" item.
+            raw_query = self._text_input.text().strip()
+            add_item = QListWidgetItem(f"Add '{raw_query}' as recipient")
+            add_item.setData(Qt.UserRole, {"name": raw_query, "phone": raw_query})
+            add_item.setForeground(self._autocomplete.palette().placeholderText())
+            self._autocomplete.addItem(add_item)
         count = self._autocomplete.count()
         self._autocomplete.setVisible(count > 0)
         self._autocomplete.setAccessibleName(f"{count} suggestions")
@@ -410,6 +421,10 @@ class NewConversationDialog(QDialog):
 
     def selected_phones(self) -> list[str]:
         return [c.phone for c in self._chips]
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._text_input.setFocus()
 
 
 class MainWindow(QMainWindow):
@@ -1001,6 +1016,62 @@ class MainWindow(QMainWindow):
         orch = PairingOrchestrator(on_state_change=lambda state, reason=None: None)
         wizard = PairingWizard(orchestrator=orch, parent=self)
         wizard.exec()
+
+    def _on_file_bug(self) -> None:
+        """Show the File-a-Bug dialog and write a local structured report."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("File a Bug Report")
+        dlg.setMinimumWidth(440)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+
+        prompt = QLabel("Describe what looks wrong:")
+        prompt_font = QFont()
+        prompt_font.setPointSize(12)
+        prompt.setFont(prompt_font)
+        layout.addWidget(prompt)
+
+        note_edit = QTextEdit()
+        note_edit.setPlaceholderText(
+            "e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'"
+        )
+        note_edit.setFixedHeight(80)
+        layout.addWidget(note_edit)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.button(QDialogButtonBox.StandardButton.Ok).setText("Submit Report")
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        layout.addWidget(btn_box)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        note = note_edit.toPlainText().strip()
+        if not note:
+            return
+
+        app_state = {
+            "current_phone": self._current_phone,
+            "connected_device": self._connected_device,
+            "messages_ok": self._messages_ok,
+            "pending_sends": len(self._pending_sends),
+            "conversations_loaded": len(self._conversations_by_id),
+            "trace_enabled": _trace._ENABLED,
+            "trace_cid": _trace.current_cid(),
+        }
+        report_path = _write_bug_report(note, app_state, _trace.recent_events(100))
+        _trace.emit("bug_report_filed", path=str(report_path), note_len=len(note))
+
+        QMessageBox.information(
+            self,
+            "Bug Report Saved",
+            f"Report saved to:\n{report_path}\n\nHand the path to the mayor.",
+        )
 
     def _open_settings(self) -> None:
         from tincan_gui.settings_dialog import SettingsDialog

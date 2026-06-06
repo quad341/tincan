@@ -34,6 +34,12 @@ Coverage:
       §5a  separator layout-index is strictly less than the first message of the new day
       §5b  separator layout-index is strictly greater than the last message of the previous day
       §5c  same-day messages have no separator between them in the layout
+
+  §6  Bug report button (tincan-il293)
+      §6a  TitleBar exposes a bug_button property
+      §6b  Clicking bug button invokes _on_file_bug
+      §6c  Accepting the dialog produces a local report with note+state+trace
+      §6d  Cancelling the dialog does not write a report
 """
 from __future__ import annotations
 
@@ -591,3 +597,80 @@ class TestDateSeparatorLayoutPosition:
             f"Separator index {seps[0]} should be immediately before last bubble "
             f"index {bubbles[-1]} (expected {bubbles[-1] - 1})"
         )
+
+
+# ---------------------------------------------------------------------------
+# §6  Bug report button (tincan-il293)
+# ---------------------------------------------------------------------------
+
+class TestBugReportButton:
+    """Bug report button files a local report (tincan-il293)."""
+
+    def test_bug_button_exists_in_title_bar(self, qtbot):
+        """§6a  TitleBar exposes a bug_button property."""
+        win = _make_window(qtbot)
+        assert hasattr(win._title_bar, "bug_button"), "TitleBar must expose bug_button"
+
+    def test_bug_button_click_calls_on_file_bug(self, qtbot):
+        """§6b  Clicking bug button invokes _on_file_bug."""
+        win = _make_window(qtbot)
+        called = []
+        win._on_file_bug = lambda: called.append(1)
+        win._title_bar.bug_button.clicked.emit()
+        assert called, "bug button must be connected to _on_file_bug"
+
+    def test_accept_writes_report_with_note_and_state(
+        self, qtbot, tmp_path, monkeypatch
+    ):
+        """§6c  Accepting the dialog produces a local report with note+state+trace."""
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QDialog, QTextEdit
+        from unittest.mock import MagicMock
+
+        win = _make_window(qtbot)
+        reports = []
+
+        def fake_write(note, state, events):
+            reports.append((note, state))
+            p = tmp_path / "bug.json"
+            p.write_text("{}")
+            return p
+
+        monkeypatch.setattr("tincan_gui.main._write_bug_report", fake_write)
+        monkeypatch.setattr("tincan_gui.main.QMessageBox", MagicMock())
+
+        def _auto_accept():
+            dlg = win.findChild(QDialog)
+            if dlg:
+                note_field = dlg.findChild(QTextEdit)
+                if note_field:
+                    note_field.setPlainText("display bug: triple bubble on send")
+                dlg.accept()
+
+        QTimer.singleShot(0, _auto_accept)
+        win._on_file_bug()
+
+        assert len(reports) == 1, "_write_bug_report must be called once on accept"
+        assert reports[0][0] == "display bug: triple bubble on send"
+        assert "connected_device" in reports[0][1]
+
+    def test_cancel_does_not_write_report(self, qtbot, monkeypatch):
+        """§6d  Cancelling the dialog does not write a report."""
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QDialog
+
+        win = _make_window(qtbot)
+        called = []
+        monkeypatch.setattr(
+            "tincan_gui.main._write_bug_report", lambda *a: called.append(1)
+        )
+
+        def _auto_reject():
+            dlg = win.findChild(QDialog)
+            if dlg:
+                dlg.reject()
+
+        QTimer.singleShot(0, _auto_reject)
+        win._on_file_bug()
+
+        assert not called, "cancelled dialog must not write a report"

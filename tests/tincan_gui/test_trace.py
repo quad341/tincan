@@ -13,10 +13,13 @@ def _reset_trace_state():
     prev_enabled = trace._ENABLED
     prev_file = trace._trace_file
     prev_cid = trace._CID
+    prev_ring = list(trace._ring)
     yield
     trace._ENABLED = prev_enabled
     trace._trace_file = prev_file
     trace._CID = prev_cid
+    trace._ring.clear()
+    trace._ring.extend(prev_ring)
 
 
 class TestBodyHash:
@@ -133,17 +136,23 @@ class TestEmit:
         assert json.loads(lines[0])["event"] == "ev1"
         assert json.loads(lines[1])["event"] == "ev2"
 
-    def test_emit_adds_to_ring_buffer(self):
-        out = io.StringIO()
+    def test_emit_adds_to_ring_when_enabled(self):
         trace._ENABLED = True
-        trace._trace_file = out
+        trace._trace_file = io.StringIO()  # pre-set to avoid trace_start auto-emit
         trace._ring.clear()
-
-        trace.emit("ring_test", x=42)
-
+        trace.emit("ring_ev", x=1)
         assert len(trace._ring) == 1
-        assert trace._ring[0]["event"] == "ring_test"
-        assert trace._ring[0]["x"] == 42
+        assert trace._ring[0]["event"] == "ring_ev"
+        assert trace._ring[0]["x"] == 1
+
+    def test_emit_adds_to_ring_even_when_disabled(self):
+        trace._ENABLED = False
+        trace._trace_file = None
+        trace._ring.clear()
+        trace.emit("ring_noop", y=2)
+        assert len(trace._ring) == 1
+        assert trace._ring[0]["event"] == "ring_noop"
+        assert trace._trace_file is None  # still no file opened
 
 
 class TestRecentEvents:
@@ -155,8 +164,7 @@ class TestRecentEvents:
         trace._ring.clear()
         trace._ring.append({"event": "a"})
         trace._ring.append({"event": "b"})
-        result = trace.recent_events(100)
-        assert len(result) == 2
+        assert len(trace.recent_events(100)) == 2
 
     def test_returns_last_n_when_more(self):
         trace._ring.clear()
@@ -173,3 +181,11 @@ class TestRecentEvents:
         trace._ring.append({"event": "pre_existing"})
         result = trace.recent_events()
         assert result[0]["event"] == "pre_existing"
+
+    def test_default_n_is_100(self):
+        trace._ring.clear()
+        for i in range(150):
+            trace._ring.append({"event": f"e{i}"})
+        result = trace.recent_events()
+        assert len(result) == 100
+        assert result[-1]["event"] == "e149"

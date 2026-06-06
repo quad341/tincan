@@ -70,9 +70,7 @@ def current_cid() -> int:
 
 
 def emit(event: str, cid: Optional[int] = None, **fields: Any) -> None:
-    """Write one JSON-line trace event. No-op when TINCAN_TRACE is not set."""
-    if not _ENABLED:
-        return
+    """Write one JSON-line trace event and append to the in-memory ring buffer."""
     rec: dict[str, Any] = {
         "ts": round(time.monotonic(), 4),
         "event": event,
@@ -80,6 +78,8 @@ def emit(event: str, cid: Optional[int] = None, **fields: Any) -> None:
     }
     rec.update(fields)
     _ring.append(rec)
+    if not _ENABLED:
+        return
     try:
         _open_trace_file().write(json.dumps(rec, default=str) + "\n")
     except OSError:
