@@ -182,3 +182,36 @@ class TestGuardReleasedAfterAccepted:
         window._on_send(text)                            # should proceed now
 
         assert len(calls) == 2, f"expected 2 send calls, got {len(calls)}"
+
+
+# ---------------------------------------------------------------------------
+# §4 Guard released after _on_send_failed
+# ---------------------------------------------------------------------------
+
+class TestGuardReleasedAfterFailed:
+    """After _on_send_failed + event flush, the same (phone, text) may re-send."""
+
+    @pytest.fixture(autouse=True)
+    def _no_daemon(self, monkeypatch):
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {})
+        monkeypatch.setattr(TincandClient, "get_messages", lambda self, cid: [])
+        monkeypatch.setattr(TincandClient, "list_conversations", lambda self: [])
+
+    def test_resend_allowed_after_failed_and_event_flush(self, qtbot, monkeypatch):
+        calls = []
+        phone = "+15550001111"
+        window = _make_window(qtbot, phone)
+        monkeypatch.setattr(
+            window._dbus_client, "send_message_async",
+            lambda to, body: calls.append((to, body)),
+        )
+
+        text = "retry after fail"
+        window._on_send(text)                        # adds (phone, text) to _pending_sends
+
+        window._on_send_failed(phone, text)          # schedules discard via singleShot(0)
+        QCoreApplication.processEvents()             # fires the timer, clears the guard
+
+        window._on_send(text)                        # should proceed now
+
+        assert len(calls) == 2, f"expected 2 send calls after failed+retry, got {len(calls)}"
