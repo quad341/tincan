@@ -171,7 +171,10 @@ def _parse_participants_from_bmsg(bmsg: str) -> list[str]:
 def _parse_bmsg_body(bmsg: str) -> str:
     """Extract body text from a bMessage string, joining all segments for multipart SMS."""
     segments = re.findall(r"BEGIN:MSG\r?\n(.*?)\r?\nEND:MSG", bmsg, re.DOTALL)
-    return "".join(segments)
+    raw = "".join(segments)
+    # Normalize CRLF → LF so the parsed body matches what the compose panel sends
+    # (iOS MAP returns bMessages with \r\n line endings; the composer uses \n).
+    return raw.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _parse_mms_content(raw: str) -> tuple[str, list[dict]]:
