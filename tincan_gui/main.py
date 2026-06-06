@@ -1,6 +1,7 @@
 """Main window: QMainWindow with title bar, QSplitter, and component wiring."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -798,8 +799,12 @@ class MainWindow(QMainWindow):
         sender = str(message.get("sender", "") or message.get("from", ""))
         raw_ts = str(message.get("timestamp", ""))
         timestamp = _ts_display(raw_ts)
+        try:
+            attachments = json.loads(str(message.get("attachments", "[]")))
+        except (ValueError, TypeError):
+            attachments = []
 
-        if not body:
+        if not body and not attachments:
             bubble_type = BubbleType.BODY_UNAVAILABLE
         elif direction == "inbound":
             bubble_type = BubbleType.INBOUND
@@ -811,7 +816,10 @@ class MainWindow(QMainWindow):
             bubble_type = BubbleType.GROUP_UNKNOWN_SENDER
 
         self._thread_view.append_message(
-            MessageData(bubble_type, body, sender, timestamp, sort_key=raw_ts)
+            MessageData(
+                bubble_type, body, sender, timestamp,
+                sort_key=raw_ts, attachments=attachments,
+            )
         )
         cache_id = conv_id or self._current_phone
         if body and cache_id and bubble_type != BubbleType.BODY_UNAVAILABLE:
@@ -1058,13 +1066,17 @@ class MainWindow(QMainWindow):
         sender = str(m.get("sender", ""))
         sort_key = str(m.get("sort_key") or m.get("timestamp", ""))
         ts = _ts_display(str(m.get("timestamp", "")))
+        try:
+            attachments = json.loads(str(m.get("attachments", "[]")))
+        except (ValueError, TypeError):
+            attachments = []
         if direction == "outbound":
             btype = BubbleType.OUTBOUND
-        elif body:
+        elif body or attachments:
             btype = BubbleType.INBOUND
         else:
             btype = BubbleType.BODY_UNAVAILABLE
-        return MessageData(btype, body, sender, ts, sort_key=sort_key)
+        return MessageData(btype, body, sender, ts, sort_key=sort_key, attachments=attachments)
 
     def _msg_dict_to_data(self, msg: dict) -> MessageData:
         direction = str(msg.get("direction", "inbound"))
@@ -1072,13 +1084,17 @@ class MainWindow(QMainWindow):
         sender = str(msg.get("from", ""))
         raw_ts = str(msg.get("timestamp", ""))
         ts = _ts_display(raw_ts)
+        try:
+            attachments = json.loads(str(msg.get("attachments", "[]")))
+        except (ValueError, TypeError):
+            attachments = []
         if direction == "outbound":
             btype = BubbleType.OUTBOUND
-        elif body:
+        elif body or attachments:
             btype = BubbleType.INBOUND
         else:
             btype = BubbleType.BODY_UNAVAILABLE
-        return MessageData(btype, body, sender, ts, sort_key=raw_ts)
+        return MessageData(btype, body, sender, ts, sort_key=raw_ts, attachments=attachments)
 
 
 def main() -> None:

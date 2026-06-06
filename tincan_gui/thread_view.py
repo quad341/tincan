@@ -5,12 +5,12 @@ import base64
 import datetime
 import html as _html
 import re as _re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt
-from PySide6.QtGui import QAccessible, QColor, QFont, QFontMetrics, QImage, QPainter
+from PySide6.QtGui import QAccessible, QColor, QFont, QFontMetrics, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAccessibleWidget,
     QApplication,
@@ -302,6 +302,7 @@ class MessageData:
     timestamp: str
     show_attribution: bool = False  # show sender name above inbound bubble in group mode
     sort_key: str = ""  # full YYYYMMDDTHHMMSS for date+second ordering (tincan-93fha)
+    attachments: list[dict] = field(default_factory=list)
 
 
 class MessageBubble(QWidget):
@@ -406,6 +407,27 @@ class MessageBubble(QWidget):
             body_label.setText(_linkify(self._data.body))
         self._body_label = body_label
         bubble_layout.addWidget(body_label)
+
+        for att in self._data.attachments:
+            mime = att.get("mime_type", "")
+            data = att.get("data", "")
+            if mime.startswith("image/") and data:
+                try:
+                    img_bytes = base64.b64decode(data)
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(img_bytes)
+                    if not pixmap.isNull():
+                        max_w = 300
+                        if pixmap.width() > max_w:
+                            pixmap = pixmap.scaledToWidth(
+                                max_w, Qt.TransformationMode.SmoothTransformation
+                            )
+                        img_label = QLabel()
+                        img_label.setPixmap(pixmap)
+                        img_label.setAlignment(Qt.AlignCenter)
+                        bubble_layout.addWidget(img_label)
+                except Exception:
+                    pass
 
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
             sub = QLabel("Message body not available from phone")

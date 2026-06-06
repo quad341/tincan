@@ -589,6 +589,7 @@ class TincanService(dbus.service.Object):
                 "direction": direction,
                 "status": status,
                 "from": str(message.get("from", conv_id)),
+                "attachments": str(message.get("attachments", "[]")),
             })
 
         if conv_id in self._conversations:
