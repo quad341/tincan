@@ -665,6 +665,9 @@ class MainWindow(QMainWindow):
         # Show cached messages immediately (no empty-thread flash), then merge
         # MAP results in the next event-loop tick once the D-Bus round trip completes.
         cache_key = self._current_phone or conv_id
+        # Migrate any messages written under the old (wrong) conv_id key.
+        if conv_id and conv_id != cache_key:
+            self._msg_cache.merge_into(cache_key, conv_id)
         cached: list[MessageData] = [
             self._cache_msg_to_data(c) for c in self._msg_cache.get_messages(cache_key)
         ]
@@ -689,6 +692,9 @@ class MainWindow(QMainWindow):
         raw_msgs = self._dbus_client.get_messages(conv_id)
         messages: list[MessageData] = [self._msg_dict_to_data(m) for m in raw_msgs]
         cache_key = self._current_phone or conv_id
+        # Migrate any messages written under the old (wrong) conv_id key.
+        if conv_id and conv_id != cache_key:
+            self._msg_cache.merge_into(cache_key, conv_id)
 
         # Dedup key: prefer sort_key (MAP timestamp); fall back to body for keyless msgs.
         def _dk(m: MessageData) -> tuple:
@@ -848,7 +854,9 @@ class MainWindow(QMainWindow):
                 sort_key=raw_ts, attachments=attachments,
             )
         )
-        cache_id = conv_id or self._current_phone
+        # Use current_phone-first to match the read key in _load_thread_messages;
+        # conv_id-first caused miskeyed writes that read operations never found.
+        cache_id = self._current_phone or conv_id
         if body and cache_id and bubble_type != BubbleType.BODY_UNAVAILABLE:
             self._msg_cache.add_message(cache_id, direction, body, sender, raw_ts, raw_ts)
 

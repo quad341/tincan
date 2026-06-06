@@ -79,3 +79,22 @@ class MessageCache:
             self._path(conv_id).write_text(json.dumps({"messages": messages}, indent=None))
         except OSError:
             pass
+
+    def merge_into(self, dest_key: str, src_key: str) -> None:
+        """Copy messages from src_key into dest_key; noop when keys share a file.
+
+        Used to migrate messages written under the wrong cache key (e.g. conv_id
+        instead of current_phone) into the canonical key without data loss.
+        The dedup logic in add_message prevents duplicates on repeated calls.
+        """
+        if _safe_name(dest_key) == _safe_name(src_key):
+            return
+        for m in self.get_messages(src_key):
+            self.add_message(
+                dest_key,
+                m.get("direction", "inbound"),
+                str(m.get("body", "")),
+                str(m.get("sender", "")),
+                str(m.get("timestamp", "")),
+                str(m.get("sort_key") or m.get("timestamp", "")),
+            )
