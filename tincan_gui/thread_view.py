@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -432,6 +433,9 @@ class MessageBubble(QWidget):
             )
             body_label.setCursor(Qt.CursorShape.IBeamCursor)
             body_label.setText(_linkify(self._data.body))
+            # Suppress the QLabel built-in context menu — MessageBubble.contextMenuEvent
+            # handles it with hover-highlight styling and proper disabled states.
+            body_label.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self._body_label = body_label
         bubble_layout.addWidget(body_label)
 
@@ -544,6 +548,59 @@ class MessageBubble(QWidget):
                 )
             )
 
+
+    def contextMenuEvent(self, event) -> None:
+        """Right-click menu: Copy, Copy Message, Copy Link, Select All.
+
+        Actions are disabled when unavailable so the user gets clear feedback
+        rather than a silent no-op. QMenu is styled with an explicit hover
+        highlight and grey-out for disabled items.
+        """
+        if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
+            return
+        dark = is_dark_theme()
+        menu = QMenu(self)
+        if dark:
+            menu.setStyleSheet(
+                "QMenu { background: #27272a; color: #f4f4f5;"
+                " border: 1px solid #3f3f46; padding: 2px; }"
+                "QMenu::item { padding: 5px 24px 5px 12px; border-radius: 3px; }"
+                "QMenu::item:selected { background: #3f3f46; color: #f4f4f5; }"
+                "QMenu::item:disabled { color: #52525b; }"
+            )
+        else:
+            menu.setStyleSheet(
+                "QMenu { background: #ffffff; color: #111827;"
+                " border: 1px solid #e5e7eb; padding: 2px; }"
+                "QMenu::item { padding: 5px 24px 5px 12px; border-radius: 3px; }"
+                "QMenu::item:selected { background: #f3f4f6; color: #111827; }"
+                "QMenu::item:disabled { color: #9ca3af; }"
+            )
+
+        copy_act = menu.addAction("Copy")
+        copy_act.setEnabled(self._body_label.hasSelectedText())
+
+        copy_msg_act = menu.addAction("Copy Message")
+        copy_msg_act.setEnabled(bool(self._data.body))
+
+        urls = _URL_RE.findall(self._data.body or "")
+        copy_link_act = menu.addAction("Copy Link")
+        copy_link_act.setEnabled(bool(urls))
+
+        menu.addSeparator()
+        select_all_act = menu.addAction("Select All")
+
+        chosen = menu.exec(event.globalPos())
+        if chosen is None:
+            return
+        if chosen is copy_act:
+            self._body_label.copy()
+        elif chosen is copy_msg_act:
+            QApplication.clipboard().setText(self._data.body or "")
+        elif chosen is copy_link_act and urls:
+            QApplication.clipboard().setText(urls[0])
+        elif chosen is select_all_act:
+            self._body_label.selectAll()
 
     def matches(self, term: str) -> bool:
         """Return True if this bubble's body contains *term* (case-insensitive)."""
