@@ -85,8 +85,9 @@ Tincan is a **vibe-maintained** project — the codebase is developed and mainta
 Contributions are **very welcome**. You don't need to understand every line — open an issue or a PR and the agents will engage with it.
 
 If you're curious about this development style, Steve Yegge's writing is a good primer:
+- [Vibe Maintainer](https://steve-yegge.medium.com/vibe-maintainer-a2273a841040) — the piece this project takes its name from
 - [The Brute Squad](https://sourcegraph.com/blog/the-brute-squad) — agentic vibe coding at scale
-- [Revenge of the Junior Developer](https://sourcegraph.com/blog/revenge-of-the-junior-developer) — the original piece that coined the term
+- [Revenge of the Junior Developer](https://sourcegraph.com/blog/revenge-of-the-junior-developer) — where the shift was first laid out
 
 ## License
 
