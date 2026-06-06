@@ -74,3 +74,33 @@ class TestMessageCache:
         cache = MessageCache(cache_dir=tmp_path)
         (tmp_path / "conv1.json").write_text("not json{{")
         assert cache.get_messages("conv1") == []
+
+
+class TestMergeInto:
+    """merge_into: copy messages from old (miskeyed) cache into canonical cache."""
+
+    def test_copies_missing_messages_to_dest(self, tmp_path):
+        cache = MessageCache(cache_dir=tmp_path)
+        cache.add_message("5551234567", "inbound", "hello", "", "t1", "t1")
+        cache.merge_into("+15551234567", "5551234567")
+        msgs = cache.get_messages("+15551234567")
+        assert len(msgs) == 1
+        assert msgs[0]["body"] == "hello"
+
+    def test_dedup_no_double_on_repeated_merge(self, tmp_path):
+        cache = MessageCache(cache_dir=tmp_path)
+        cache.add_message("5551234567", "inbound", "hello", "", "t1", "t1")
+        cache.merge_into("+15551234567", "5551234567")
+        cache.merge_into("+15551234567", "5551234567")  # idempotent
+        assert len(cache.get_messages("+15551234567")) == 1
+
+    def test_noop_when_same_safe_name(self, tmp_path):
+        cache = MessageCache(cache_dir=tmp_path)
+        cache.add_message("conv1", "inbound", "msg", "", "t1", "t1")
+        cache.merge_into("conv1", "CONV1")  # same safe_name → noop
+        assert len(cache.get_messages("conv1")) == 1
+
+    def test_noop_when_src_empty(self, tmp_path):
+        cache = MessageCache(cache_dir=tmp_path)
+        cache.merge_into("+15551234567", "empty_src")  # src has no file
+        assert cache.get_messages("+15551234567") == []
