@@ -263,6 +263,74 @@ class TestDispatchAppNotification:
 
 
 # ---------------------------------------------------------------------------
+# §2c DispatchAppNotification — TTL expiry (tincan-irma2 regression)
+# ---------------------------------------------------------------------------
+
+class TestDispatchAppNotificationTTL:
+    """TTL-based dedup: same notification fires again after TTL expires (tincan-irma2).
+
+    Root cause: old code used a permanent set — once seen, identical (app_id, title, body)
+    triples were suppressed forever.  The fix uses a 30-second TTL so recurring real
+    notifications (e.g. Gmail badge updates) are delivered again after the window passes.
+    """
+
+    def test_same_notification_fires_again_after_ttl_expires(self):
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        mock_iface.Notify.return_value = 1
+        notifier, mock_bus = _make_notifier_with_mock_bus()
+        mock_bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+        notif = {"app_id": "com.google.Gmail", "title": "New email", "body": "You have mail"}
+
+        times = iter([0.0, 31.0])  # one monotonic() call per dispatch
+        with patch("tincan_gui.notifications.time.monotonic", side_effect=times):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+                with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+                    notifier.dispatch_app_notification(notif)   # t=0 → fires
+                    notifier.dispatch_app_notification(notif)   # t=31 > TTL → fires again
+
+        assert mock_iface.Notify.call_count == 2
+
+    def test_same_notification_suppressed_within_ttl(self):
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        mock_iface.Notify.return_value = 1
+        notifier, mock_bus = _make_notifier_with_mock_bus()
+        mock_bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+        notif = {"app_id": "com.google.Gmail", "title": "New email", "body": "You have mail"}
+
+        times = iter([0.0, 15.0])  # one monotonic() call per dispatch
+        with patch("tincan_gui.notifications.time.monotonic", side_effect=times):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+                with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+                    notifier.dispatch_app_notification(notif)   # t=0 → fires
+                    notifier.dispatch_app_notification(notif)   # t=15 < TTL → suppressed
+
+        assert mock_iface.Notify.call_count == 1
+
+    def test_expired_entries_pruned_from_seen_app(self):
+        notifier = DesktopNotifier()
+        # Seed _seen_app with a stale entry (100s ago)
+        notifier._seen_app[("old.app", "Old", "stale body")] = 0.0
+
+        mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
+        mock_iface.Notify.return_value = 2
+        notifier._bus = MagicMock()
+        notifier._bus.get_object.return_value = MagicMock()
+        mock_dbus.Interface.return_value = mock_iface
+        notif = {"app_id": "com.new.App", "title": "Hi", "body": "Fresh"}
+
+        with patch("tincan_gui.notifications.time.monotonic", return_value=100.0):
+            with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+                with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+                    notifier.dispatch_app_notification(notif)
+
+        # Stale entry must have been pruned; only the fresh entry remains
+        assert ("old.app", "Old", "stale body") not in notifier._seen_app
+        assert ("com.new.App", "Hi", "Fresh") in notifier._seen_app
+
+
+# ---------------------------------------------------------------------------
 # §3 ActionInvoked signal handler
 # ---------------------------------------------------------------------------
 
