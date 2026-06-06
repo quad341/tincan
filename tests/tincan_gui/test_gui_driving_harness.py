@@ -50,7 +50,6 @@ from tincan_gui.main import MainWindow
 from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 
-
 # ---------------------------------------------------------------------------
 # Global autouse fixtures
 # ---------------------------------------------------------------------------
@@ -579,7 +578,6 @@ class TestDateSeparatorLayoutPosition:
 
     def test_append_message_separator_at_correct_index(self, qtbot):
         """append_message inserts separator immediately before the new-day bubble."""
-        from tincan_gui.thread_view import DateSeparatorWidget, MessageBubble
         view = ThreadView()
         qtbot.addWidget(view)
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
