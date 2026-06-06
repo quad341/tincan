@@ -144,6 +144,12 @@ class TincanService(dbus.service.Object):
         _log.info("Disconnected")
         self.Disconnected()
 
+    @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="")
+    def RequestReconnect(self) -> None:
+        """Ask the backend to schedule a reconnect attempt (fire-and-forget)."""
+        if self._backend is not None:
+            self._backend.schedule_reconnect()
+
     @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="a{sv}")
     def GetStatus(self) -> dbus.Dictionary:
         """Return current daemon status.

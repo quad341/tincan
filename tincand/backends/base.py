@@ -40,3 +40,6 @@ class BackendInterface(ABC):
     @abstractmethod
     def send_group_message(self, participants: list[str], body: str) -> str:
         """Send *body* to all *participants*; return the assigned handle or ''."""
+
+    def schedule_reconnect(self) -> None:
+        """Request a reconnect attempt. No-op if the backend has no reconnect logic."""

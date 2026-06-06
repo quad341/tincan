@@ -445,6 +445,14 @@ class TincandClient(QObject):
             self.message_send_failed.emit(to, body)
         watcher.deleteLater()
 
+    def request_reconnect(self) -> None:
+        """Call RequestReconnect on the daemon (fire-and-forget)."""
+        if not self._bus.isConnected():
+            return
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+        if iface.isValid():
+            iface.call("RequestReconnect")
+
     def mark_conversation_read(self, conv_id: str) -> None:
         """Call MarkConversationRead on the daemon (fire-and-forget)."""
         if not self._bus.isConnected():

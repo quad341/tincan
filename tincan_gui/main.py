@@ -511,6 +511,7 @@ class MainWindow(QMainWindow):
         self._conv_list.refresh_requested.connect(self.refresh_requested.emit)
         self._compose.send_requested.connect(self._on_send)
         self._title_bar.gear_button.clicked.connect(self._open_settings)
+        self._banner_a.reconnect_clicked.connect(self._on_reconnect_clicked)
         self._banner_ancs_repair.reconnect_clicked.connect(self._open_pairing_wizard)
 
     def _wire_dbus(self) -> None:
@@ -734,6 +735,9 @@ class MainWindow(QMainWindow):
         self._banner_contacts_empty.hide()
         self._compose.set_compose_enabled(False, "not connected")
         self._tray.set_connected(False)
+
+    def _on_reconnect_clicked(self) -> None:
+        self._dbus_client.request_reconnect()
 
     def _on_capability_changed(self, feature: str, available: bool) -> None:
         """Handle a CapabilityChanged signal by re-fetching full status.
