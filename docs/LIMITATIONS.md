@@ -78,6 +78,13 @@ to us over MAP — **not** a carrier/recipient delivery receipt; don't conflate 
   for…" systems may not work reliably.
 - **Multiparty / 3-way calling is conditional** on the carrier/phone advertising
   it; not guaranteed.
+- **BT headset → computer → phone relay is unsupported.** Bridging a wireless
+  headset through the computer to the phone (computer acts as HFP Audio Gateway
+  to the headset *and* HFP Hands-Free to the phone simultaneously) would require
+  two concurrent SCO audio links — most Bluetooth controllers support only one SCO
+  link at a time. Two USB Bluetooth adapters on one host would solve it, but that
+  is niche hardware and untested. The autonomous-calling use case (computer as the
+  audio endpoint) does not need this relay.
 
 ## Out of scope by design
 
