@@ -8,6 +8,7 @@ the main window and selects the conversation on click.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -36,12 +37,17 @@ class DesktopNotifier:
     clicks a notification (ActionInvoked with action_id='default').
     """
 
+    # Suppress app-notification duplicates arriving within this many seconds
+    # (covers iOS retry delivery; does not permanently block recurring notifications).
+    _APP_NOTIF_DEDUP_TTL = 30.0
+
     def __init__(
         self,
         on_action_invoked: Callable[[str], None] | None = None,
         on_mark_read: Callable[[str], None] | None = None,
     ) -> None:
         self._seen: dict[str, set[tuple[str, str]]] = {}
+        self._seen_app: dict[tuple[str, str, str], float] = {}  # key → monotonic timestamp
         self._notif_to_conv: dict[int, str] = {}
         self._on_action_invoked = on_action_invoked
         self._on_mark_read = on_mark_read
@@ -112,10 +118,13 @@ class DesktopNotifier:
         body_text = str(notif.get("body", ""))
 
         key = (app_id, title, body_text)
-        seen = self._seen.setdefault("__app__", set())
-        if key in seen:
+        now = time.monotonic()
+        last = self._seen_app.get(key)
+        if last is not None and now - last < self._APP_NOTIF_DEDUP_TTL:
             return
-        seen.add(key)
+        # Prune expired entries (prevent unbounded growth in long sessions)
+        self._seen_app = {k: t for k, t in self._seen_app.items() if now - t < self._APP_NOTIF_DEDUP_TTL}
+        self._seen_app[key] = now
 
         summary = title if title else (f"Notification from {app_id}".strip() or "Notification")
         if subtitle:
