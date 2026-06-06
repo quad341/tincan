@@ -1,4 +1,4 @@
-"""Behavioral integration tests: user-visible flows (tincan-iplg1).
+"""Behavioral integration tests: user-visible flows (tincan-iplg1, tincan-0an0b).
 
 These tests assert user-visible behavior for flows that were shipping broken.
 Each test uses FakeMapBackend-compatible patterns and targets the GUI component
@@ -15,6 +15,7 @@ Coverage (acceptance criteria from tincan-iplg1):
   §5 failed-notif-scope  — send-error bar is scoped to its conversation
   §6 contact-names       — contact name resolved via ConversationUpdated shows in header
   §7 inline-image        — MMS attachment produces image or download affordance
+  §8 no-duplicate-reload — ISO-ts daemon echo is deduped to 1 bubble (tincan-0an0b)
 """
 from __future__ import annotations
 
@@ -360,4 +361,50 @@ class TestInlineImage:
         assert has_image or has_download_btn, (
             "MMS attachment produced no inline image and no download button — "
             "attachment data was silently dropped"
+        )
+
+
+# ---------------------------------------------------------------------------
+# §8  no-duplicate-reload — ISO-ts daemon echo deduped to 1 bubble (tincan-0an0b)
+# ---------------------------------------------------------------------------
+
+class TestNoDuplicateAfterReload:
+    """Daemon outbound echo with ISO sort_key matching cache must show exactly 1 bubble.
+
+    Bug tincan-0an0b (root cause 1): daemon stored 'HH:MM' timestamps;
+    _load_thread_messages _dk = (bubble_type, sort_key) produced different keys
+    for the same logical message → both cache entry and daemon echo showed.
+    """
+
+    def test_single_bubble_when_daemon_echo_has_matching_sort_key(self, qtbot, tmp_path):
+        """After send + thread reload with ISO-ts daemon echo: exactly 1 bubble."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        phone = "+15550001"
+        body = "No duplicate test"
+
+        win._on_send(body)
+        assert len(_bubble_widgets(win)) == 1, "should start with 1 optimistic bubble"
+
+        cached = win._msg_cache.get_messages(phone)
+        sort_key = cached[0]["sort_key"] if cached else "20260606T143000"
+
+        daemon_messages = [{
+            "direction": "outbound",
+            "body": body,
+            "timestamp": sort_key,
+            "conversation_id": phone,
+            "sender": "",
+        }]
+
+        win._thread_view.load_thread(phone, phone, [], "SMS")
+        assert _bubble_widgets(win) == [], "thread should be empty after clearing"
+
+        with patch.object(win._dbus_client, "get_messages", return_value=daemon_messages):
+            win._load_thread_messages(phone, phone)
+
+        bubbles = _bubble_widgets(win)
+        assert len(bubbles) == 1, (
+            f"Expected 1 bubble but got {len(bubbles)} — "
+            f"daemon echo with matching ISO timestamp was not deduplicated.\n"
+            f"Bodies: {[b._data.body for b in bubbles]}"
         )

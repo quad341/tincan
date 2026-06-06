@@ -356,7 +356,7 @@ class TincanService(dbus.service.Object):
                 str(exc),
                 name="im.tincan.Error.SendFailed",
             ) from exc
-        now_iso = datetime.now().strftime("%H:%M")
+        now_iso = datetime.now().strftime("%Y%m%dT%H%M%S")
         normalized_to = normalize_phone(phone_to)
         raw_to = str(to)
         conv_id_for_send = raw_to if raw_to in self._conversations else normalized_to

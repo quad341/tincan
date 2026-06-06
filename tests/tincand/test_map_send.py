@@ -249,3 +249,78 @@ class TestNoCreateSessionOnSend:
              patch.object(backend, "_wait_transfer_send", return_value=None):
             backend.send_message(_PHONE, _BODY)
         mock_bus.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §7 SendMessage stores ISO8601 timestamp (tincan-0an0b fix 1)
+# ---------------------------------------------------------------------------
+
+class TestSendMessageTimestampFormat:
+    """SendMessage must store ISO8601 timestamp so GUI thread-reload dedup works.
+
+    Bug tincan-0an0b (root cause 1): daemon stored HH:MM timestamp ("14:30");
+    GUI cache stored ISO8601 sort_key ("20260606T143000").
+    _load_thread_messages dedup key _dk = (bubble_type, sort_key) → keys never
+    matched → both the cache entry and the daemon echo appeared as separate bubbles.
+    """
+
+    def test_send_message_stores_iso_timestamp(self, send_ready_service):
+        """Stored timestamp must be ISO8601: YYYYMMDDTHHmmSS (T at index 8, ≥15 chars)."""
+        send_ready_service.SendMessage(_PHONE, _BODY)
+        msgs = send_ready_service.GetMessages(_NORM)
+        assert msgs, "no messages stored after SendMessage"
+        ts = str(msgs[0]["timestamp"])
+        assert "T" in ts, (
+            f"Timestamp {ts!r} is missing 'T' separator — expected ISO8601 like "
+            f"'20260606T143000', not HH:MM like '14:30'.\n"
+            f"HH:MM timestamps break _load_thread_messages dedup → 2 bubbles shown."
+        )
+        assert len(ts) >= 13, (
+            f"Timestamp {ts!r} too short for ISO8601 — expected ≥13 chars, got {len(ts)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# §8 _parse_bmsg_body normalizes CRLF → LF (tincan-0an0b fix 2)
+# ---------------------------------------------------------------------------
+
+class TestParseBmsgBodyCrlfNormalization:
+    """_parse_bmsg_body must normalize CRLF to LF so MAP echoes match _sent_bodies.
+
+    Bug tincan-0an0b (root cause 2): iOS MAP bMessages use CRLF line endings.
+    When the user sends 'Hello\\nWorld', _sent_bodies stores 'Hello\\nWorld'.
+    iOS MAP returns the sent-folder entry as 'Hello\\r\\nWorld'.
+    The exact _sent_bodies check (body in bodies) fails → echo not suppressed → 2 bubbles.
+    """
+
+    def test_crlf_in_body_normalized_to_lf(self):
+        from tincand.backends.bluez_map import _parse_bmsg_body
+        bmsg = (
+            "BEGIN:BMSG\r\nVERSION:1.0\r\n"
+            "STATUS:READ\r\nTYPE:SMS_GSM\r\n"
+            "BEGIN:BENV\r\n"
+            "BEGIN:BBODY\r\n"
+            "BEGIN:MSG\r\nHello\r\nWorld\r\nEND:MSG\r\n"
+            "END:BBODY\r\n"
+            "END:BENV\r\n"
+            "END:BMSG\r\n"
+        )
+        body = _parse_bmsg_body(bmsg)
+        assert "\r" not in body, (
+            f"Expected CRLF normalized to LF but '\\r' still present in {body!r}.\n"
+            f"iOS MAP returns bMessages with CRLF; _sent_bodies uses LF → "
+            f"suppression fails → 2 outbound bubbles shown."
+        )
+        assert body == "Hello\nWorld", f"Got {body!r}"
+
+    def test_lf_only_body_unchanged(self):
+        from tincand.backends.bluez_map import _parse_bmsg_body
+        bmsg = "BEGIN:MSG\nHello\nWorld\nEND:MSG\n"
+        body = _parse_bmsg_body(bmsg)
+        assert body == "Hello\nWorld"
+
+    def test_single_line_body_no_crlf_added(self):
+        from tincand.backends.bluez_map import _parse_bmsg_body
+        bmsg = "BEGIN:MSG\r\nHello World\r\nEND:MSG\r\n"
+        body = _parse_bmsg_body(bmsg)
+        assert body == "Hello World", f"Got {body!r}"
