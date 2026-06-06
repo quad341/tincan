@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QScrollArea,
     QSizePolicy,
     QToolButton,
@@ -56,6 +57,7 @@ class ConversationItem(QWidget):
     """Single conversation row (h=72)."""
 
     activated = Signal(str)   # emits conversation id
+    hide_requested = Signal(str)  # emits conversation id when "Hide" is chosen
 
     _SELECTED_BG = "#bfdbfe"
     _SELECTED_BORDER = "#93c5fd"
@@ -355,6 +357,29 @@ class ConversationItem(QWidget):
         self.activated.emit(self._data.id)
         super().mousePressEvent(event)
 
+    def contextMenuEvent(self, event) -> None:
+        """Right-click menu: Hide conversation."""
+        dark = is_dark_theme()
+        menu = QMenu(self)
+        if dark:
+            menu.setStyleSheet(
+                "QMenu { background: #27272a; color: #f4f4f5;"
+                " border: 1px solid #3f3f46; padding: 2px; }"
+                "QMenu::item { padding: 5px 24px 5px 12px; border-radius: 3px; }"
+                "QMenu::item:selected { background: #3f3f46; color: #f4f4f5; }"
+            )
+        else:
+            menu.setStyleSheet(
+                "QMenu { background: #ffffff; color: #111827;"
+                " border: 1px solid #e5e7eb; padding: 2px; }"
+                "QMenu::item { padding: 5px 24px 5px 12px; border-radius: 3px; }"
+                "QMenu::item:selected { background: #f3f4f6; color: #111827; }"
+            )
+        hide_act = menu.addAction("Hide conversation")
+        chosen = menu.exec(event.globalPos())
+        if chosen is hide_act:
+            self.hide_requested.emit(self._data.id)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Space):
             self.activated.emit(self._data.id)
@@ -551,6 +576,7 @@ class ConversationListWidget(QWidget):
         for data in conversations:
             widget = ConversationItem(data)
             widget.activated.connect(self._on_item_activated)
+            widget.hide_requested.connect(self.archive_conversation)
             self._list_layout.insertWidget(self._list_layout.count() - 1, widget)
             self._items.append(widget)
             self._item_data_list.append(data)
