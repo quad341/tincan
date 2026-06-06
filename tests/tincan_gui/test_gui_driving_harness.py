@@ -48,7 +48,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QSystemTrayIcon
+from PySide6.QtWidgets import QSystemTrayIcon, QWidget
 
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.dbus_client import TincandClient
@@ -492,7 +492,7 @@ class TestDateSeparatorLayoutPosition:
         return seps, bubbles
 
     def test_separator_index_less_than_new_day_first_message(self, qtbot):
-        """Separator for day 2 must appear at a lower layout index than day-2's first message."""
+        """Each day's first message must be preceded by a date separator."""
         view = ThreadView()
         qtbot.addWidget(view)
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
@@ -502,20 +502,20 @@ class TestDateSeparatorLayoutPosition:
             ])
 
         seps, bubbles = self._sep_and_bubble_indices(view)
-        assert len(seps) == 1, f"Expected 1 separator, got {len(seps)}"
+        # Layout: sep(yesterday) < bubble(yesterday) < sep(today) < bubble(today)
+        assert len(seps) == 2, f"Expected 2 separators (one per day), got {len(seps)}"
         assert len(bubbles) == 2, f"Expected 2 bubbles, got {len(bubbles)}"
-        # Layout order must be: bubble(yesterday) < separator < bubble(today)
-        assert seps[0] > bubbles[0], (
-            f"Separator (index {seps[0]}) must come after yesterday's bubble "
+        assert seps[0] < bubbles[0], (
+            f"Yesterday's separator (index {seps[0]}) must precede yesterday's bubble "
             f"(index {bubbles[0]})"
         )
-        assert seps[0] < bubbles[1], (
-            f"Separator (index {seps[0]}) must come before today's bubble "
+        assert seps[1] < bubbles[1], (
+            f"Today's separator (index {seps[1]}) must precede today's bubble "
             f"(index {bubbles[1]})"
         )
 
     def test_separator_index_greater_than_previous_day_last_message(self, qtbot):
-        """The separator must appear AFTER the last message from the previous day."""
+        """The day-boundary separator must appear after all messages from the previous day."""
         view = ThreadView()
         qtbot.addWidget(view)
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
@@ -526,22 +526,22 @@ class TestDateSeparatorLayoutPosition:
             ])
 
         seps, bubbles = self._sep_and_bubble_indices(view)
-        assert len(seps) == 1, f"Expected 1 separator, got {len(seps)}"
-        # Layout: bubble(y9) < bubble(y10) < separator < bubble(t11)
+        # Layout: sep(y) < bubble(y9) < bubble(y10) < sep(today) < bubble(t11)
+        assert len(seps) == 2, f"Expected 2 separators (one per day), got {len(seps)}"
         yesterday_bubble_indices = bubbles[:2]
         today_bubble_index = bubbles[2]
-        sep_index = seps[0]
-        assert all(sep_index > idx for idx in yesterday_bubble_indices), (
-            f"Separator (index {sep_index}) must appear after both yesterday's "
-            f"messages (indices {yesterday_bubble_indices})"
+        today_sep_index = seps[1]
+        assert all(today_sep_index > idx for idx in yesterday_bubble_indices), (
+            f"Today's separator (index {today_sep_index}) must appear after both "
+            f"yesterday's messages (indices {yesterday_bubble_indices})"
         )
-        assert sep_index < today_bubble_index, (
-            f"Separator (index {sep_index}) must appear before today's message "
-            f"(index {today_bubble_index})"
+        assert today_sep_index < today_bubble_index, (
+            f"Today's separator (index {today_sep_index}) must appear before today's "
+            f"message (index {today_bubble_index})"
         )
 
     def test_same_day_messages_have_no_separator_between_them(self, qtbot):
-        """Multiple messages from the same day must have no separator in between."""
+        """Single-day conversations show exactly one separator (before the first message)."""
         view = ThreadView()
         qtbot.addWidget(view)
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
@@ -552,13 +552,17 @@ class TestDateSeparatorLayoutPosition:
             ])
 
         seps, bubbles = self._sep_and_bubble_indices(view)
-        assert seps == [], (
-            f"No separators expected for same-day messages, found at indices: {seps}"
+        assert len(seps) == 1, (
+            f"Expected exactly 1 separator (before first same-day message), got {len(seps)}"
         )
         assert len(bubbles) == 3
+        # The separator must precede all bubbles (no separators between same-day messages)
+        assert seps[0] < bubbles[0], (
+            f"Separator (index {seps[0]}) must come before first bubble (index {bubbles[0]})"
+        )
 
-    def test_two_day_boundaries_produce_two_separators_in_order(self, qtbot):
-        """Three messages spanning three days produce two separators in correct order."""
+    def test_two_day_boundaries_produce_three_separators_in_order(self, qtbot):
+        """Three messages spanning three days produce three separators (one per day)."""
         view = ThreadView()
         qtbot.addWidget(view)
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
@@ -569,16 +573,18 @@ class TestDateSeparatorLayoutPosition:
             ])
 
         seps, bubbles = self._sep_and_bubble_indices(view)
-        assert len(seps) == 2, f"Expected 2 separators for 3-day span, got {len(seps)}"
+        assert len(seps) == 3, f"Expected 3 separators (one per day), got {len(seps)}"
         assert len(bubbles) == 3
-        # Layout must be strictly interleaved:
-        # bubble[0] < sep[0] < bubble[1] < sep[1] < bubble[2]
-        assert bubbles[0] < seps[0] < bubbles[1], (
-            f"First separator {seps[0]} must be between bubble[0]={bubbles[0]} "
+        # Layout: sep[0]<bubble[0]<sep[1]<bubble[1]<sep[2]<bubble[2]
+        assert seps[0] < bubbles[0], (
+            f"First separator {seps[0]} must precede bubble[0]={bubbles[0]}"
+        )
+        assert bubbles[0] < seps[1] < bubbles[1], (
+            f"Second separator {seps[1]} must be between bubble[0]={bubbles[0]} "
             f"and bubble[1]={bubbles[1]}"
         )
-        assert bubbles[1] < seps[1] < bubbles[2], (
-            f"Second separator {seps[1]} must be between bubble[1]={bubbles[1]} "
+        assert bubbles[1] < seps[2] < bubbles[2], (
+            f"Third separator {seps[2]} must be between bubble[1]={bubbles[1]} "
             f"and bubble[2]={bubbles[2]}"
         )
 
@@ -591,12 +597,45 @@ class TestDateSeparatorLayoutPosition:
             view.append_message(_make_msg("today msg", _TODAY))
 
         seps, bubbles = self._sep_and_bubble_indices(view)
-        assert len(seps) == 1, f"Expected 1 separator after day-crossing append, got {len(seps)}"
-        # The separator must be immediately before the last bubble
-        assert seps[0] == bubbles[-1] - 1, (
-            f"Separator index {seps[0]} should be immediately before last bubble "
+        # load_thread adds sep+bubble for yesterday; append adds sep+bubble for today
+        assert len(seps) == 2, f"Expected 2 separators after day-crossing append, got {len(seps)}"
+        # The last separator must be immediately before the last bubble
+        assert seps[-1] == bubbles[-1] - 1, (
+            f"Last separator index {seps[-1]} should be immediately before last bubble "
             f"index {bubbles[-1]} (expected {bubbles[-1] - 1})"
         )
+
+    def test_single_message_gets_date_separator(self, qtbot):
+        """A conversation with exactly one message must show one date separator."""
+        view = ThreadView()
+        qtbot.addWidget(view)
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
+            view.load_thread("Alice", "+1555", [_make_msg("only msg", _TODAY)])
+
+        seps, bubbles = self._sep_and_bubble_indices(view)
+        assert len(seps) == 1, f"Single-message thread must have exactly 1 separator, got {len(seps)}"
+        assert seps[0] < bubbles[0], "Separator must precede the message"
+
+    def test_bubble_tooltip_contains_day_and_time(self, qtbot):
+        """Each message bubble must expose a hover tooltip with the full date/time."""
+        from tincan_gui.thread_view import MessageBubble
+        view = ThreadView()
+        qtbot.addWidget(view)
+        with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
+            view.load_thread("Alice", "+1555", [_make_msg("hello", _TODAY, 14)])
+
+        items = _layout_items(view)
+        bubbles = [w for w in items if isinstance(w, MessageBubble)]
+        assert bubbles, "Expected at least one MessageBubble"
+        # The tooltip is on the inner bubble QWidget (the rounded-rect container)
+        bubble_widgets = [
+            w for w in bubbles[0].findChildren(QWidget)
+            if w.toolTip()
+        ]
+        assert bubble_widgets, "MessageBubble must contain a child widget with a tooltip"
+        tip = bubble_widgets[0].toolTip()
+        assert "2026" in tip, f"Tooltip must include the year; got: {tip!r}"
+        assert "14" in tip or "2:00 PM" in tip, f"Tooltip must include time; got: {tip!r}"
 
 
 # ---------------------------------------------------------------------------

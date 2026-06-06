@@ -1,4 +1,4 @@
-"""Tests: date separator headers in the message list (tincan-mlkka).
+"""Tests: date separator headers in the message list (tincan-mlkka, tincan-utnta).
 
 Coverage:
   §1 _date_label_text — converts sort_key to "Today" / "Yesterday" / date string
@@ -7,19 +7,19 @@ Coverage:
      - older date → explicit abbreviated date (e.g. "Mon Jun  2")
      - empty sort_key → empty string (no separator for undated messages)
 
-  §2 ThreadView.load_thread — separator inserted between day-crossing messages
-     - no separator widget for a single message
-     - no separator when all messages share the same day
-     - one separator between two messages from different days
-     - two separators for three messages spanning three distinct days
+  §2 ThreadView.load_thread — one separator per day, including the first
+     - single message → exactly one separator (tincan-utnta: no blank conversations)
+     - same-day messages → exactly one separator (before the first message)
+     - two days → two separators
+     - three days → three separators
 
   §3 ThreadView.load_thread — separator text matches expected date label
      - separator text is "Today" for today's messages
      - separator text matches the date label for older messages
 
   §4 ThreadView.append_message — inserts separator on day boundary
-     - no separator when appended message is same day as the last loaded message
-     - separator inserted when appended message crosses a day boundary
+     - same-day append: no NEW separator (initial load already produced one)
+     - day-crossing append: adds a separator for the new day
 """
 from __future__ import annotations
 
@@ -109,35 +109,35 @@ def _count_date_separator_labels(view: ThreadView) -> list[str]:
 
 
 class TestLoadThreadSeparators:
-    """load_thread inserts DateSeparator widgets between messages from different days."""
+    """load_thread inserts one DateSeparator per day, always including the first day."""
 
-    def test_single_message_has_no_separator(self, qtbot):
+    def test_single_message_has_one_separator(self, qtbot):
         view = ThreadView()
         qtbot.addWidget(view)
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", [_msg("hi", _TODAY)])
         seps = _count_date_separator_labels(view)
-        assert seps == [], f"Expected no separators, got: {seps}"
+        assert len(seps) == 1, f"Expected 1 separator (for the day), got: {seps}"
 
-    def test_same_day_messages_have_no_separator(self, qtbot):
+    def test_same_day_messages_have_one_separator(self, qtbot):
         view = ThreadView()
         qtbot.addWidget(view)
         msgs = [_msg("a", _TODAY, 9), _msg("b", _TODAY, 10), _msg("c", _TODAY, 11)]
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", msgs)
         seps = _count_date_separator_labels(view)
-        assert seps == [], f"Expected no separators for same-day messages, got: {seps}"
+        assert len(seps) == 1, f"Expected 1 separator for same-day messages, got: {seps}"
 
-    def test_two_days_gets_one_separator(self, qtbot):
+    def test_two_days_gets_two_separators(self, qtbot):
         view = ThreadView()
         qtbot.addWidget(view)
         msgs = [_msg("old", _YESTERDAY), _msg("new", _TODAY)]
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", msgs)
         seps = _count_date_separator_labels(view)
-        assert len(seps) == 1, f"Expected 1 separator, got {len(seps)}: {seps}"
+        assert len(seps) == 2, f"Expected 2 separators, got {len(seps)}: {seps}"
 
-    def test_three_days_gets_two_separators(self, qtbot):
+    def test_three_days_gets_three_separators(self, qtbot):
         view = ThreadView()
         qtbot.addWidget(view)
         msgs = [
@@ -148,7 +148,7 @@ class TestLoadThreadSeparators:
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", msgs)
         seps = _count_date_separator_labels(view)
-        assert len(seps) == 2, f"Expected 2 separators, got {len(seps)}: {seps}"
+        assert len(seps) == 3, f"Expected 3 separators, got {len(seps)}: {seps}"
 
 
 # ---------------------------------------------------------------------------
@@ -184,14 +184,16 @@ class TestLoadThreadSeparatorText:
 class TestAppendMessageSeparator:
     """append_message inserts a separator when the date advances past midnight."""
 
-    def test_same_day_append_no_separator(self, qtbot):
+    def test_same_day_append_no_new_separator(self, qtbot):
         view = ThreadView()
         qtbot.addWidget(view)
         with patch("tincan_gui.thread_view._get_today", return_value=_TODAY):
             view.load_thread("Alice", "+1555", [_msg("morning", _TODAY, 8)])
             view.append_message(_msg("noon", _TODAY, 12))
         seps = _count_date_separator_labels(view)
-        assert seps == [], f"Expected no new separator on same-day append, got: {seps}"
+        # load_thread adds 1 separator (Today), append adds no new one (same day)
+        assert len(seps) == 1, f"Expected 1 separator (from load), got: {seps}"
+        assert seps[0] == "Today"
 
     def test_new_day_append_inserts_separator(self, qtbot):
         view = ThreadView()
@@ -200,5 +202,6 @@ class TestAppendMessageSeparator:
             view.load_thread("Alice", "+1555", [_msg("yesterday msg", _YESTERDAY)])
             view.append_message(_msg("today msg", _TODAY))
         seps = _count_date_separator_labels(view)
-        assert len(seps) == 1, f"Expected 1 separator on day-boundary append, got: {seps}"
-        assert seps[0] == "Today"
+        # load_thread adds sep for yesterday, append adds sep for today
+        assert len(seps) == 2, f"Expected 2 separators on day-boundary append, got: {seps}"
+        assert seps[-1] == "Today"
