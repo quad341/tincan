@@ -23,10 +23,12 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSplitter,
+    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -34,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from tincan_gui import trace as _trace
 from tincan_gui.avatar import _color_for_name
+from tincan_gui.bug_report import write_report as _write_bug_report
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.daemon_config import load_daemon_config
@@ -92,7 +95,7 @@ def _same_conv(a: str, b: str) -> bool:
 
 
 class TitleBar(QWidget):
-    """Title bar (h=48, forest teal #0f4c3a): wordmark + gear button + connection status chip."""
+    """Title bar (h=48, forest teal): wordmark + gear + bug-report button + connection status."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -139,6 +142,20 @@ class TitleBar(QWidget):
         )
         layout.addWidget(self._gear_btn)
 
+        layout.addSpacing(4)
+
+        self._bug_btn = QToolButton()
+        self._bug_btn.setText("🐞")
+        self._bug_btn.setFixedSize(32, 32)
+        self._bug_btn.setToolTip("File a bug report")
+        self._bug_btn.setAccessibleName("File a bug report")
+        self._bug_btn.setStyleSheet(
+            "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
+            " background: transparent; }"
+            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+        )
+        layout.addWidget(self._bug_btn)
+
         layout.addSpacing(8)
 
         self._status_chip = QLabel("○ Disconnected")
@@ -152,6 +169,10 @@ class TitleBar(QWidget):
     @property
     def gear_button(self) -> QToolButton:
         return self._gear_btn
+
+    @property
+    def bug_button(self) -> QToolButton:
+        return self._bug_btn
 
     @property
     def status_chip(self) -> QLabel:
@@ -414,7 +435,7 @@ class MainWindow(QMainWindow):
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
         self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP echo of self-sends
         self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs; thread render
-        self._failed_sends: dict[str, set[str]] = {}  # phone → {body}; failed state survives reload
+        self._failed_sends: dict[str, set[str]] = {}  # phone → {body}; survives reload
         self._msg_cache = MessageCache()
         self._notifier = DesktopNotifier(
             on_action_invoked=self._on_notification_clicked,
@@ -514,6 +535,7 @@ class MainWindow(QMainWindow):
         self._conv_list.refresh_requested.connect(self.refresh_requested.emit)
         self._compose.send_requested.connect(self._on_send)
         self._title_bar.gear_button.clicked.connect(self._open_settings)
+        self._title_bar.bug_button.clicked.connect(self._on_file_bug)
         self._banner_a.reconnect_clicked.connect(self._on_reconnect_clicked)
         self._banner_ancs_repair.reconnect_clicked.connect(self._open_pairing_wizard)
 
@@ -915,6 +937,63 @@ class MainWindow(QMainWindow):
         """Mark conversation as read when user activates the mark-read notification action."""
         if conversation_id:
             self._dbus_client.mark_conversation_read(conversation_id)
+
+    def _on_file_bug(self) -> None:
+        """Show the File-a-Bug dialog and write a local structured report."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("File a Bug Report")
+        dlg.setMinimumWidth(440)
+        dlg.setStyleSheet("background: #18181b; color: #f4f4f5;")
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+
+        prompt = QLabel("Describe what looks wrong:")
+        prompt_font = QFont()
+        prompt_font.setPointSize(12)
+        prompt.setFont(prompt_font)
+        layout.addWidget(prompt)
+
+        note_edit = QTextEdit()
+        note_edit.setPlaceholderText("e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'")
+        note_edit.setFixedHeight(80)
+        note_edit.setStyleSheet(
+            "QTextEdit { background: #27272a; border: 1px solid #3f3f46;"
+            " border-radius: 4px; color: #f4f4f5; padding: 4px; }"
+        )
+        layout.addWidget(note_edit)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.button(QDialogButtonBox.Ok).setText("Submit Report")
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        layout.addWidget(btn_box)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        note = note_edit.toPlainText().strip()
+        if not note:
+            return
+
+        app_state = {
+            "current_phone": self._current_phone,
+            "connected_device": self._connected_device,
+            "messages_ok": self._messages_ok,
+            "pending_sends": len(self._pending_sends),
+            "conversations_loaded": len(self._conversations_by_id),
+            "trace_enabled": _trace._ENABLED,
+            "trace_cid": _trace.current_cid(),
+        }
+        report_path = _write_bug_report(note, app_state, _trace.recent_events(100))
+        _trace.emit("bug_report_filed", path=str(report_path), note_len=len(note))
+
+        QMessageBox.information(
+            self,
+            "Bug Report Saved",
+            f"Report saved to:\n{report_path}\n\nThank you — hand the path to the mayor.",
+        )
 
     def _open_pairing_wizard(self) -> None:
         from tincan_gui.pairing_wizard import PairingWizard

@@ -132,3 +132,44 @@ class TestEmit:
         assert len(lines) == 2
         assert json.loads(lines[0])["event"] == "ev1"
         assert json.loads(lines[1])["event"] == "ev2"
+
+    def test_emit_adds_to_ring_buffer(self):
+        out = io.StringIO()
+        trace._ENABLED = True
+        trace._trace_file = out
+        trace._ring.clear()
+
+        trace.emit("ring_test", x=42)
+
+        assert len(trace._ring) == 1
+        assert trace._ring[0]["event"] == "ring_test"
+        assert trace._ring[0]["x"] == 42
+
+
+class TestRecentEvents:
+    def test_returns_empty_when_ring_empty(self):
+        trace._ring.clear()
+        assert trace.recent_events() == []
+
+    def test_returns_all_when_fewer_than_n(self):
+        trace._ring.clear()
+        trace._ring.append({"event": "a"})
+        trace._ring.append({"event": "b"})
+        result = trace.recent_events(100)
+        assert len(result) == 2
+
+    def test_returns_last_n_when_more(self):
+        trace._ring.clear()
+        for i in range(10):
+            trace._ring.append({"event": f"ev{i}"})
+        result = trace.recent_events(3)
+        assert len(result) == 3
+        assert result[0]["event"] == "ev7"
+        assert result[2]["event"] == "ev9"
+
+    def test_noop_disabled_still_returns_from_ring(self):
+        trace._ENABLED = False
+        trace._ring.clear()
+        trace._ring.append({"event": "pre_existing"})
+        result = trace.recent_events()
+        assert result[0]["event"] == "pre_existing"
