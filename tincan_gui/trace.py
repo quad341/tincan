@@ -23,6 +23,7 @@ Design:
 from __future__ import annotations
 
 import binascii
+import collections
 import json
 import os
 import time
@@ -32,6 +33,8 @@ from typing import Any, Optional
 _ENABLED: bool = bool(os.environ.get("TINCAN_TRACE"))
 _trace_file: Any = None  # opened lazily on first emit
 _CID: int = 0            # current correlation ID
+_RING_SIZE: int = 200    # max events kept in memory for bug-report capture
+_ring: collections.deque = collections.deque(maxlen=_RING_SIZE)
 
 
 def _trace_dir() -> Path:
@@ -76,7 +79,14 @@ def emit(event: str, cid: Optional[int] = None, **fields: Any) -> None:
         "cid": cid if cid is not None else _CID,
     }
     rec.update(fields)
+    _ring.append(rec)
     try:
         _open_trace_file().write(json.dumps(rec, default=str) + "\n")
     except OSError:
         pass
+
+
+def recent_events(n: int = 100) -> list[dict]:
+    """Return the most recent n events from the in-memory ring buffer."""
+    events = list(_ring)
+    return events[-n:] if n < len(events) else events
