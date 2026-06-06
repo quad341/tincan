@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from tincan_gui import trace as _trace
+
 _NON_ALNUM = re.compile(r"[^0-9a-z]")
 _MAX_MESSAGES = 500  # cap per conversation to bound disk use
 
@@ -39,8 +41,11 @@ class MessageCache:
         """Return cached messages for *conv_id*, oldest first."""
         try:
             data = json.loads(self._path(conv_id).read_text())
-            return data.get("messages", [])
+            msgs = data.get("messages", [])
+            _trace.emit("cache_read", key=conv_id, hit=1, count=len(msgs))
+            return msgs
         except (OSError, json.JSONDecodeError, KeyError):
+            _trace.emit("cache_read", key=conv_id, hit=0, count=0)
             return []
 
     def add_message(
@@ -62,6 +67,7 @@ class MessageCache:
             for m in messages
         }
         if dedup_key in existing_keys:
+            _trace.emit("cache_dedup", key=conv_id, direction=direction)
             return
         messages.append(
             {
@@ -77,6 +83,7 @@ class MessageCache:
             messages = messages[-_MAX_MESSAGES:]
         try:
             self._path(conv_id).write_text(json.dumps({"messages": messages}, indent=None))
+            _trace.emit("cache_write", key=conv_id, direction=direction, count=len(messages))
         except OSError:
             pass
 
@@ -89,7 +96,8 @@ class MessageCache:
         """
         if _safe_name(dest_key) == _safe_name(src_key):
             return
-        for m in self.get_messages(src_key):
+        src_msgs = self.get_messages(src_key)
+        for m in src_msgs:
             self.add_message(
                 dest_key,
                 m.get("direction", "inbound"),
@@ -98,3 +106,4 @@ class MessageCache:
                 str(m.get("timestamp", "")),
                 str(m.get("sort_key") or m.get("timestamp", "")),
             )
+        _trace.emit("cache_merge", dest=dest_key, src=src_key, attempted=len(src_msgs))

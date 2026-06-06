@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tincan_gui import trace as _trace
 from tincan_gui.avatar import AvatarWidget, _color_for_name
 from tincan_gui.theme import is_dark_theme
 
@@ -784,6 +785,7 @@ class ThreadView(QWidget):
         self._participants: list[str] = []
         self._match_bubbles: list[MessageBubble] = []
         self._match_index: int = 0
+        self._bubble_count: int = 0  # number of bubbles in current thread (for trace)
         self._build()
 
     def set_group_mode(self, is_group: bool, participants: list[str] | None = None) -> None:
@@ -851,6 +853,7 @@ class ThreadView(QWidget):
     ) -> None:
         self._header.update_contact(name, phone, message_type)
         self._last_outbound = None  # new thread — prior bubble ref is stale
+        self._bubble_count = 0
 
         # Clear existing bubbles; never deleteLater the empty label (keep Python ref valid)
         while self._messages_layout.count():
@@ -869,17 +872,23 @@ class ThreadView(QWidget):
 
         self._messages_layout.addStretch()
         self._last_date_key = ""
+        sep_count = 0
         for msg in messages:
             date_key = msg.sort_key[:8] if msg.sort_key else ""
             if date_key and self._last_date_key and date_key != self._last_date_key:
                 label_text = _date_label_text(msg.sort_key)
                 self._messages_layout.addWidget(DateSeparatorWidget(label_text))
+                _trace.emit("date_separator", source="load_thread", index=self._bubble_count,
+                            date_key=date_key, label=label_text)
+                sep_count += 1
             if date_key:
                 self._last_date_key = date_key
             bubble = MessageBubble(msg)
             if failures and msg.bubble_type == BubbleType.OUTBOUND and msg.body in failures:
                 bubble.set_send_failed()
             self._messages_layout.addWidget(bubble)
+            self._bubble_count += 1
+        _trace.emit("thread_render", phone=phone, msg_count=len(messages), sep_count=sep_count)
 
         # Scroll to bottom once Qt recomputes the content height.
         # singleShot(0) fires before QScrollArea processes QEvent::LayoutRequest
@@ -918,13 +927,20 @@ class ThreadView(QWidget):
             self._messages_layout.addStretch()
 
         date_key = msg.sort_key[:8] if msg.sort_key else ""
+        new_sep = False
         if date_key and date_key != self._last_date_key:
             label_text = _date_label_text(msg.sort_key)
             self._messages_layout.addWidget(DateSeparatorWidget(label_text))
+            _trace.emit("date_separator", source="append", index=self._bubble_count,
+                        date_key=date_key, label=label_text)
             self._last_date_key = date_key
+            new_sep = True
 
+        _trace.emit("bubble_append", bubble=msg.bubble_type.name, index=self._bubble_count,
+                    date_key=date_key, new_sep=new_sep, body_len=len(msg.body or ""))
         bubble = MessageBubble(msg)
         self._messages_layout.addWidget(bubble)
+        self._bubble_count += 1
         if msg.bubble_type == BubbleType.OUTBOUND:
             self._last_outbound = bubble
 
