@@ -503,6 +503,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("F5"), self).activated.connect(self.refresh_requested.emit)
         QShortcut(QKeySequence("Ctrl+R"), self).activated.connect(self.refresh_requested.emit)
         QShortcut(QKeySequence("Alt+,"), self).activated.connect(self._open_settings)
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._thread_view.show_search)
 
     def _wire(self) -> None:
         self._conv_list.conversation_selected.connect(self._on_conversation_selected)

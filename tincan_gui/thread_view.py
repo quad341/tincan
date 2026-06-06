@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional
 
-from PySide6.QtCore import QBuffer, QIODevice, Qt
+from PySide6.QtCore import QBuffer, QIODevice, Qt, Signal
 from PySide6.QtGui import QAccessible, QColor, QFont, QFontMetrics, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAccessibleWidget,
@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -215,6 +217,24 @@ def _linkify(text: str, emoji_size: int = 13) -> str:
             _break_long_words(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(after)))
         )
     return "".join(parts)
+
+
+_HIGHLIGHT_START = '<span style="background:#fef08a; color:#1f2937">'
+_HIGHLIGHT_END = '</span>'
+
+
+def _linkify_with_highlight(text: str, term: str, emoji_size: int = 13) -> str:
+    """Like _linkify but wraps case-insensitive occurrences of *term* in a highlight span."""
+    if not term:
+        return _linkify(text, emoji_size)
+    segments = _re.split(f'({_re.escape(term)})', text, flags=_re.IGNORECASE)
+    out = []
+    for i, seg in enumerate(segments):
+        if i % 2 == 1:  # matched segment
+            out.append(_HIGHLIGHT_START + _linkify(seg, emoji_size) + _HIGHLIGHT_END)
+        else:
+            out.append(_linkify(seg, emoji_size))
+    return "".join(out)
 
 
 def _get_today() -> datetime.date:
@@ -515,6 +535,24 @@ class MessageBubble(QWidget):
             )
 
 
+    def matches(self, term: str) -> bool:
+        """Return True if this bubble's body contains *term* (case-insensitive)."""
+        if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
+            return False
+        return bool(term) and term.lower() in self._data.body.lower()
+
+    def highlight(self, term: str) -> None:
+        """Re-render body label with highlighted occurrences of *term*."""
+        if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
+            return
+        self._body_label.setText(_linkify_with_highlight(self._data.body, term))
+
+    def clear_highlight(self) -> None:
+        """Restore body label to normal (no highlight)."""
+        if self._data.bubble_type != BubbleType.BODY_UNAVAILABLE:
+            self._body_label.setText(_linkify(self._data.body))
+
+
 # ---------------------------------------------------------------------------
 # Accessible role factory — MessageBubble → StaticText
 # ---------------------------------------------------------------------------
@@ -626,6 +664,106 @@ class ThreadHeader(QWidget):
         self.setAccessibleName(f"Group conversation with {n} participants")
 
 
+class _ThreadSearchBar(QWidget):
+    """Compact Ctrl+F search bar for thread view. Hidden until activated."""
+
+    search_changed = Signal(str)
+    prev_requested = Signal()
+    next_requested = Signal()
+    closed = Signal()
+
+    _BTN_STYLE = (
+        "QPushButton { background: transparent; border: none; color: #f4f4f5;"
+        " font-size: 13px; padding: 0; }"
+        " QPushButton:hover { background: #3f3f46; border-radius: 3px; }"
+    )
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(34)
+        self.setStyleSheet(
+            "background: #27272a; border-bottom: 1px solid #3f3f46;"
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(4)
+
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("Find in conversation…")
+        self._input.setFixedHeight(24)
+        self._input.setStyleSheet(
+            "QLineEdit { border: 1px solid #52525b; border-radius: 3px;"
+            " padding: 0 6px; background: #18181b; color: #f4f4f5; }"
+        )
+        self._input.setAccessibleName("Find in conversation")
+        self._input.textChanged.connect(self.search_changed)
+        layout.addWidget(self._input, stretch=1)
+
+        self._count_label = QLabel("")
+        count_font = QFont()
+        count_font.setPointSize(10)
+        self._count_label.setFont(count_font)
+        self._count_label.setFixedWidth(70)
+        self._count_label.setStyleSheet("color: #a1a1aa;")
+        layout.addWidget(self._count_label)
+
+        prev_btn = QPushButton("↑")
+        prev_btn.setFixedSize(24, 24)
+        prev_btn.setToolTip("Previous match (Shift+Enter)")
+        prev_btn.setAccessibleName("Previous match")
+        prev_btn.setStyleSheet(self._BTN_STYLE)
+        prev_btn.clicked.connect(self.prev_requested)
+        layout.addWidget(prev_btn)
+
+        next_btn = QPushButton("↓")
+        next_btn.setFixedSize(24, 24)
+        next_btn.setToolTip("Next match (Enter)")
+        next_btn.setAccessibleName("Next match")
+        next_btn.setStyleSheet(self._BTN_STYLE)
+        next_btn.clicked.connect(self.next_requested)
+        layout.addWidget(next_btn)
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setToolTip("Close search (Escape)")
+        close_btn.setAccessibleName("Close search")
+        close_btn.setStyleSheet(self._BTN_STYLE)
+        close_btn.clicked.connect(self.closed)
+        layout.addWidget(close_btn)
+
+    def set_match_count(self, current: int, total: int) -> None:
+        if total == 0:
+            self._count_label.setText("No results")
+            self._count_label.setStyleSheet("color: #ef4444;")
+        else:
+            self._count_label.setText(f"{current} / {total}")
+            self._count_label.setStyleSheet("color: #a1a1aa;")
+
+    def clear_count(self) -> None:
+        self._count_label.setText("")
+        self._count_label.setStyleSheet("color: #a1a1aa;")
+
+    def focus_input(self) -> None:
+        self._input.setFocus()
+        self._input.selectAll()
+
+    def current_text(self) -> str:
+        return self._input.text()
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self._input.clear()
+            self.closed.emit()
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if event.modifiers() & Qt.ShiftModifier:
+                self.prev_requested.emit()
+            else:
+                self.next_requested.emit()
+        else:
+            super().keyPressEvent(event)
+
+
 class ThreadView(QWidget):
     """Right pane (minus compose): thread header + scrollable message bubbles."""
 
@@ -635,6 +773,8 @@ class ThreadView(QWidget):
         self._last_date_key: str = ""  # YYYYMMDD of the most recently rendered message
         self._is_group = False
         self._participants: list[str] = []
+        self._match_bubbles: list[MessageBubble] = []
+        self._match_index: int = 0
         self._build()
 
     def set_group_mode(self, is_group: bool, participants: list[str] | None = None) -> None:
@@ -655,6 +795,15 @@ class ThreadView(QWidget):
 
         self._header = ThreadHeader()
         layout.addWidget(self._header)
+
+        # In-thread search bar (Ctrl+F, hidden until activated)
+        self._search_bar = _ThreadSearchBar()
+        self._search_bar.hide()
+        self._search_bar.search_changed.connect(self._on_search_changed)
+        self._search_bar.prev_requested.connect(self._on_search_prev)
+        self._search_bar.next_requested.connect(self._on_search_next)
+        self._search_bar.closed.connect(self._on_search_closed)
+        layout.addWidget(self._search_bar)
 
         # Scrollable message area
         self._scroll = QScrollArea()
@@ -804,3 +953,58 @@ class ThreadView(QWidget):
         self._messages_layout.addWidget(self._empty_label, alignment=Qt.AlignCenter)
         self._messages_layout.addStretch()
         self._header.update_contact("", "", "")
+
+    # ------------------------------------------------------------------
+    # In-thread search (Ctrl+F)
+    # ------------------------------------------------------------------
+
+    def show_search(self) -> None:
+        """Reveal the search bar and focus it (called from Ctrl+F shortcut)."""
+        self._search_bar.show()
+        self._search_bar.focus_input()
+
+    def _all_bubbles(self) -> list[MessageBubble]:
+        result = []
+        for i in range(self._messages_layout.count()):
+            item = self._messages_layout.itemAt(i)
+            if item and isinstance(item.widget(), MessageBubble):
+                result.append(item.widget())
+        return result
+
+    def _on_search_changed(self, term: str) -> None:
+        self._match_bubbles = []
+        for bubble in self._all_bubbles():
+            if bubble.matches(term):
+                bubble.highlight(term)
+                self._match_bubbles.append(bubble)
+            else:
+                bubble.clear_highlight()
+        self._match_index = 0
+        if self._match_bubbles:
+            self._search_bar.set_match_count(1, len(self._match_bubbles))
+            self._scroll.ensureWidgetVisible(self._match_bubbles[0], 0, 50)
+        elif term:
+            self._search_bar.set_match_count(0, 0)
+        else:
+            self._search_bar.clear_count()
+
+    def _on_search_next(self) -> None:
+        if not self._match_bubbles:
+            return
+        self._match_index = (self._match_index + 1) % len(self._match_bubbles)
+        self._search_bar.set_match_count(self._match_index + 1, len(self._match_bubbles))
+        self._scroll.ensureWidgetVisible(self._match_bubbles[self._match_index], 0, 50)
+
+    def _on_search_prev(self) -> None:
+        if not self._match_bubbles:
+            return
+        self._match_index = (self._match_index - 1) % len(self._match_bubbles)
+        self._search_bar.set_match_count(self._match_index + 1, len(self._match_bubbles))
+        self._scroll.ensureWidgetVisible(self._match_bubbles[self._match_index], 0, 50)
+
+    def _on_search_closed(self) -> None:
+        self._search_bar.hide()
+        for bubble in self._all_bubbles():
+            bubble.clear_highlight()
+        self._match_bubbles = []
+        self._match_index = 0
