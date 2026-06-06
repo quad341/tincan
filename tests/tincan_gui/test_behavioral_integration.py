@@ -408,3 +408,56 @@ class TestNoDuplicateAfterReload:
             f"daemon echo with matching ISO timestamp was not deduplicated.\n"
             f"Bodies: {[b._data.body for b in bubbles]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# §9  long-unbroken-wrap — 200-char unbroken body wraps instead of clipping
+# (tincan-schbs)
+# ---------------------------------------------------------------------------
+
+class TestLongUnbrokenWrap:
+    """A 200-char unbroken string must wrap inside the bubble, not be clipped.
+
+    Bug tincan-schbs: body_label.minimumSizeHint().width() returned the full
+    natural text width (~1600px).  Qt layout honored that minimum, making the
+    bubble wider than the viewport.  With horizontal scrollbar disabled, the
+    overflow was clipped and the message body was invisible past a certain point.
+    """
+
+    def test_body_label_minimum_width_is_zero(self, qtbot, tmp_path):
+        """body_label.minimumWidth() must be 0 so the layout can constrain it."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        win._on_message_received({
+            "direction": "inbound",
+            "body": "a" * 200,
+            "conversation_id": "+15550001",
+            "sender": "+15550002",
+            "timestamp": "20260606T120000",
+        })
+        bubbles = _bubble_widgets(win)
+        assert bubbles, "no bubble created for 200-char message"
+        body_label = bubbles[-1]._body_label
+        assert body_label.minimumWidth() == 0, (
+            f"body_label.minimumWidth() = {body_label.minimumWidth()}, expected 0.\n"
+            f"Non-zero minimum width lets the bubble overflow the viewport → text clipped."
+        )
+
+    def test_body_label_wraps_at_narrow_width(self, qtbot, tmp_path):
+        """heightForWidth(300) must be > single-line height for a 200-char body."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        win._on_message_received({
+            "direction": "inbound",
+            "body": "a" * 200,
+            "conversation_id": "+15550001",
+            "sender": "+15550002",
+            "timestamp": "20260606T120000",
+        })
+        bubbles = _bubble_widgets(win)
+        assert bubbles, "no bubble created"
+        body_label = bubbles[-1]._body_label
+        h = body_label.heightForWidth(300)
+        # At 300px, 200 'a's at 13pt should span 4+ lines; each line ≥ 15px → >45px
+        assert h > 30, (
+            f"heightForWidth(300) = {h}px — expected >30px for a 200-char body at 300px width.\n"
+            f"Text is not wrapping; it will be clipped in the thread view."
+        )
