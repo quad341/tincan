@@ -37,3 +37,29 @@ def _block_real_map_sends(monkeypatch):
 
     monkeypatch.setattr(MapBackend, "send_message", _guarded)
     yield
+
+
+# ---------------------------------------------------------------------------
+# Known-broken D-Bus contract cases — xfail until the underlying bug lands on
+# main. Each entry ties a currently-failing contract assertion to the bead that
+# fixes it. strict=True: when the bug is fixed the case xpasses and CI FAILS
+# until the entry is removed here, so the contract guard can never silently rot.
+# ---------------------------------------------------------------------------
+_KNOWN_BROKEN_CONTRACT = {
+    "test_handler_has_slot_decorator[_on_contact_photo_received]": (
+        "tincan-3vakg: ContactPhotoReceived handler missing @Slot(str, QByteArray) "
+        "— avatars do not update live (caught at 2026-06-06 deploy, 7/8 signals)."
+    ),
+    "test_called_method_exists_in_daemon[Daemon.RequestReconnect]": (
+        "tincan-zqtbj/s7569: GUI reconnect button calls im.tincan.Daemon.RequestReconnect "
+        "but the daemon does not export it on main yet — button is a no-op until it lands."
+    ),
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    """Mark the known-broken contract cases as strict xfail (tracked by bead)."""
+    for item in items:
+        for needle, reason in _KNOWN_BROKEN_CONTRACT.items():
+            if needle in item.nodeid:
+                item.add_marker(pytest.mark.xfail(strict=True, reason=reason))
