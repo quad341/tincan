@@ -12,6 +12,7 @@ Coverage:
   - MainWindow._on_notification_clicked(): raises window, calls select_conversation
   - TrayIcon.sync_notifications_action(): checkbox state synchronization
   - TrayIcon._on_menu_about_to_show(): reads desktop_enabled from QSettings on open
+  - §4b Persistence (tincan-nxino): setting survives across QSettings instances (simulate restart)
   - §11 Actionable notifications (tincan-5ptsg): reply + mark-read action buttons
 """
 from __future__ import annotations
@@ -450,6 +451,100 @@ class TestSettingsDialogState:
             qtbot.addWidget(dlg)
 
         assert dlg.desktop_notifications_enabled is True
+
+
+# ---------------------------------------------------------------------------
+# §4b Persistence (tincan-nxino) — setting survives across QSettings instances
+# ---------------------------------------------------------------------------
+
+class TestNotificationSettingPersistence:
+    """notifications/desktop_enabled persists so the app remembers the setting.
+
+    Regression: before the fix, the setting was written but without an explicit
+    sync(), so a crash/force-kill between write and GC could lose the value.
+    These tests use a real (temp-file) QSettings to verify end-to-end
+    persistence — mock-based tests can't catch a missing sync().
+    """
+
+    def _real_settings_factory(self, tmp_path):
+        """Return a factory that creates real QSettings objects backed by a temp file."""
+        from PySide6.QtCore import QSettings
+        settings_file = str(tmp_path / "tincan.conf")
+
+        def make():
+            return QSettings(settings_file, QSettings.Format.IniFormat)
+
+        make.path = settings_file
+        return make
+
+    def test_dialog_enable_persists_across_instances(self, tmp_path, qtbot):
+        """After enabling via the settings dialog, a fresh QSettings sees True."""
+        factory = self._real_settings_factory(tmp_path)
+        # Start with False written so the checkbox initializes unchecked
+        from PySide6.QtCore import QSettings
+        s0 = QSettings(factory.path, QSettings.Format.IniFormat)
+        s0.setValue("notifications/desktop_enabled", False)
+        s0.sync()
+        del s0
+
+        with patch("tincan_gui.settings_dialog.app_settings", side_effect=factory):
+            dlg = SettingsDialog()
+            qtbot.addWidget(dlg)
+            assert dlg._desktop_cb.isChecked() is False  # sanity: reads False
+            dlg._desktop_cb.setChecked(True)              # user enables
+
+        # Simulate restart: fresh QSettings instance
+        s_fresh = QSettings(factory.path, QSettings.Format.IniFormat)
+        assert s_fresh.value("notifications/desktop_enabled", False, type=bool) is True
+
+    def test_dialog_disable_persists_across_instances(self, tmp_path, qtbot):
+        """After disabling via the settings dialog, a fresh QSettings sees False."""
+        factory = self._real_settings_factory(tmp_path)
+        from PySide6.QtCore import QSettings
+        s0 = QSettings(factory.path, QSettings.Format.IniFormat)
+        s0.setValue("notifications/desktop_enabled", True)
+        s0.sync()
+        del s0
+
+        with patch("tincan_gui.settings_dialog.app_settings", side_effect=factory):
+            dlg = SettingsDialog()
+            qtbot.addWidget(dlg)
+            assert dlg._desktop_cb.isChecked() is True   # sanity: reads True
+            dlg._desktop_cb.setChecked(False)             # user disables
+
+        s_fresh = QSettings(factory.path, QSettings.Format.IniFormat)
+        assert s_fresh.value("notifications/desktop_enabled", True, type=bool) is False
+
+    def test_tray_toggle_persists_across_instances(self, tmp_path, qtbot):
+        """After toggling via the tray, a fresh QSettings sees the updated value."""
+        factory = self._real_settings_factory(tmp_path)
+        window = MainWindow()
+        qtbot.addWidget(window)
+
+        with patch("tincan_gui.tray.app_settings", side_effect=factory):
+            window._tray._on_notifications_toggled(False)  # disable via tray
+
+        from PySide6.QtCore import QSettings
+        s_fresh = QSettings(factory.path, QSettings.Format.IniFormat)
+        assert s_fresh.value("notifications/desktop_enabled", True, type=bool) is False
+
+    def test_close_event_syncs_settings(self, tmp_path, qtbot):
+        """closeEvent calls app_settings().sync() to flush writes before exit."""
+        from PySide6.QtGui import QCloseEvent
+
+        window = MainWindow()
+        qtbot.addWidget(window)
+        sync_calls = []
+
+        mock_s = MagicMock()
+        mock_s.value.return_value = True  # close_to_tray=True → hide, no quit
+        mock_s.sync.side_effect = lambda: sync_calls.append(1)
+
+        # closeEvent does a local `from tincan_gui._settings import app_settings`
+        with patch("tincan_gui._settings.app_settings", return_value=mock_s):
+            window.closeEvent(QCloseEvent())
+
+        assert len(sync_calls) >= 1, "closeEvent must call app_settings().sync()"
 
 
 # ---------------------------------------------------------------------------
