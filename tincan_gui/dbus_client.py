@@ -471,6 +471,16 @@ class TincandClient(QObject):
         if iface.isValid():
             iface.call("FetchContactPhoto", str(conv_id))
 
+    def list_contacts(self) -> list[dict]:
+        """Call GetContacts; returns [{phone, name}] or [] when daemon is absent."""
+        result = self._dbus_call(_IFACE_MESSAGES, "GetContacts")
+        if result is None:
+            return []
+        try:
+            return [dict(c) for c in result]
+        except (TypeError, ValueError):
+            return []
+
     # ------------------------------------------------------------------
     # Notification filter methods (im.tincan.Daemon)
     # ------------------------------------------------------------------

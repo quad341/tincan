@@ -473,3 +473,40 @@ class TestAppNotificationPayloadKeys:
         assert str(payload["category"]) == ""
         assert int(payload["category_id"]) == 0
         assert int(payload["event_flags"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# §GetContacts — PBAP contact list via D-Bus (tincan-d86aj)
+# ---------------------------------------------------------------------------
+
+class TestGetContacts:
+    """GetContacts returns PBAP-synced contacts; upsert_conversation wires group participants."""
+
+    def test_get_contacts_empty_when_no_pbap(self, service):
+        assert service.GetContacts() == []
+
+    def test_get_contacts_returns_upserted_contacts(self, service):
+        service._contact_store.upsert("8157916347", "Mom Wordelman")
+        service._contact_store.upsert("4155550001", "Alice")
+        contacts = service.GetContacts()
+        phones = [str(c["phone"]) for c in contacts]
+        names = [str(c["name"]) for c in contacts]
+        assert "8157916347" in phones
+        assert "4155550001" in phones
+        assert "Mom Wordelman" in names
+        assert "Alice" in names
+
+    def test_get_contacts_excludes_nameless_entries(self, service):
+        service._contact_store.upsert("8157916347", "")
+        contacts = service.GetContacts()
+        assert contacts == []
+
+    def test_upsert_group_conv_populates_group_participants(self, service):
+        service.upsert_conversation(Conversation(
+            id="grp-xyz",
+            display_name="A, B",
+            participants=["4155550001", "4155550002"],
+            is_group=True,
+        ))
+        assert "grp-xyz" in service._group_participants
+        assert set(service._group_participants["grp-xyz"]) == {"4155550001", "4155550002"}
