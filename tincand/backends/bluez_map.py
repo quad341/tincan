@@ -12,7 +12,11 @@ treating the first attempt as fatal.
 
 from __future__ import annotations
 
+import base64
+import email
+import email.policy
 import hashlib
+import json
 import logging
 import os
 import re
@@ -168,6 +172,42 @@ def _parse_bmsg_body(bmsg: str) -> str:
     """Extract body text from a bMessage string, joining all segments for multipart SMS."""
     segments = re.findall(r"BEGIN:MSG\r?\n(.*?)\r?\nEND:MSG", bmsg, re.DOTALL)
     return "".join(segments)
+
+
+def _parse_mms_content(raw: str) -> tuple[str, list[dict]]:
+    """Extract text body and image attachments from a raw MMS bMessage.
+
+    Returns (body_text, attachments) where each attachment is
+    {"mime_type": str, "data": str} with base64-encoded image data.
+    """
+    match = re.search(r"BEGIN:MSG\r?\n(.*?)\r?\nEND:MSG", raw, re.DOTALL)
+    if not match:
+        return ("", [])
+    mime_content = match.group(1)
+    try:
+        msg = email.message_from_string(mime_content, policy=email.policy.compat32)
+    except Exception:
+        return (mime_content.strip(), [])
+
+    body_parts: list[str] = []
+    attachments: list[dict] = []
+
+    for part in (msg.walk() if msg.is_multipart() else [msg]):
+        ct = part.get_content_type()
+        if ct == "text/plain":
+            payload = part.get_payload(decode=True)
+            if payload:
+                charset = part.get_content_charset("utf-8") or "utf-8"
+                body_parts.append(payload.decode(charset, errors="replace"))
+        elif ct.startswith("image/"):
+            payload = part.get_payload(decode=True)
+            if payload:
+                attachments.append({
+                    "mime_type": ct,
+                    "data": base64.b64encode(payload).decode("ascii"),
+                })
+
+    return (" ".join(body_parts).strip(), attachments)
 
 
 _NON_DIGIT_RE = re.compile(r"\D")
@@ -365,12 +405,14 @@ class MapBackend(BackendInterface):
                 _first_inbox = False
             msg_type = str(props.get("Type", "SMS_GSM")).upper()
             conv_id = str(props.get("ConvID") or props.get("ConversationID") or "")
+            attachments: list[dict] = []
             if msg_type == "MMS":
-                raw_bmsg = self._fetch_raw_bmsg(str(msg_path))
+                raw_bmsg = self._fetch_raw_bmsg(str(msg_path), attachment=True)
                 if raw_bmsg is None:
                     continue
+                body, attachments = _parse_mms_content(raw_bmsg)
                 body = (
-                    _parse_bmsg_body(raw_bmsg)
+                    body
                     or str(props.get("Subject", "")).strip()
                     or "New message"
                 )
@@ -396,6 +438,7 @@ class MapBackend(BackendInterface):
                 "msg_type": msg_type,
                 "conv_id": conv_id,
                 "participants": participants,
+                "attachments": json.dumps(attachments),
             })
 
         # Try both "sent" and "outbox" — MAP spec says "sent" but some iOS versions
@@ -711,11 +754,11 @@ class MapBackend(BackendInterface):
                 raise
         return None  # unreachable, satisfies type checker
 
-    def _fetch_raw_bmsg(self, msg_path: str) -> str | None:
+    def _fetch_raw_bmsg(self, msg_path: str, *, attachment: bool = False) -> str | None:
         """Download message body via org.bluez.obex.Message1.Get().
 
         BlueZ 5.66+ removed GetMessage from MessageAccess1 (tincan-572zo).
-        Each message object exposes Message1.Get(targetfile, attachment).
+        Pass attachment=True for MMS to retrieve the full MIME body.
         """
         if self._msg_access is None:
             return None
@@ -727,7 +770,7 @@ class MapBackend(BackendInterface):
                 bus.get_object(_OBEX_CLIENT, msg_path),
                 _MAP_MESSAGE_IFACE,
             )
-            result = self._retry(msg1.Get, "", dbus.Boolean(False))
+            result = self._retry(msg1.Get, "", dbus.Boolean(attachment))
             if result is None:
                 return None
             transfer_path, _ = result
@@ -910,6 +953,7 @@ class MapBackend(BackendInterface):
                     "direction": msg.get("direction", "inbound"),
                     "status": "read" if (not notify or msg["read"]) else "unread",
                     "from": msg["sender"],
+                    "attachments": msg.get("attachments", "[]"),
                 }
                 if is_group:
                     msg_dict["group_hint"] = True
