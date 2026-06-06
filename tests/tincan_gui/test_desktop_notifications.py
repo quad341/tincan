@@ -241,9 +241,10 @@ class TestDispatchAppNotification:
         mock_bus.get_object.return_value = MagicMock()
         mock_dbus.Interface.return_value = mock_iface
         notif = {"app_id": "com.foo.App", "title": "Title", "body": "Hello"}
-        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
-            notifier.dispatch_app_notification(notif)
-            notifier.dispatch_app_notification(notif)
+        with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+            with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+                notifier.dispatch_app_notification(notif)
+                notifier.dispatch_app_notification(notif)
         assert mock_iface.Notify.call_count == 1
 
     def test_distinct_body_passes_through(self):
@@ -254,9 +255,10 @@ class TestDispatchAppNotification:
         mock_dbus.Interface.return_value = mock_iface
         notif1 = {"app_id": "com.foo.App", "title": "Title", "body": "First"}
         notif2 = {"app_id": "com.foo.App", "title": "Title", "body": "Second"}
-        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
-            notifier.dispatch_app_notification(notif1)
-            notifier.dispatch_app_notification(notif2)
+        with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+            with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+                notifier.dispatch_app_notification(notif1)
+                notifier.dispatch_app_notification(notif2)
         assert mock_iface.Notify.call_count == 2
 
 
@@ -286,13 +288,24 @@ class TestActionInvokedSignalHandler:
         assert received == []
 
     def test_unknown_notif_id_does_not_invoke_callback(self):
-        # conv_id="" is falsy — the implementation guards with `if conv_id:` so no call.
+        # notif ID 99 is not in _notif_to_conv — spurious signal is ignored.
         received = []
         notifier = DesktopNotifier(on_action_invoked=lambda cid: received.append(cid))
 
         notifier._on_action_invoked_signal(99, "default")
 
         assert received == []
+
+    def test_open_action_on_app_notification_invokes_callback(self):
+        # Regression: 'Open' on an ANCS app notification must raise the window
+        # even though conv_id == "" (no conversation to select).
+        received = []
+        notifier = DesktopNotifier(on_action_invoked=lambda cid: received.append(cid))
+        notifier._notif_to_conv[42] = ""  # app notification: known ID, no conv
+
+        notifier._on_action_invoked_signal(42, "open")
+
+        assert received == [""]
 
     def test_no_callback_does_not_raise(self):
         notifier = DesktopNotifier(on_action_invoked=None)

@@ -517,6 +517,34 @@ class TestNotifSourceChanged:
         # byte 1..4 of the command should be the UID in LE
         assert struct.unpack_from("<L", written_bytes, 1)[0] == uid
 
+    def test_write_value_not_connected_clears_proxy_and_enters_healing(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        timers[1]()   # → ACTIVE (notifying=True by default)
+        assert backend._control_point_proxy is not None
+        backend._control_point_proxy.WriteValue.side_effect = Exception("Not connected")
+        data = _notif_source_bytes(event_id=0, category_id=4, uid=1)
+        backend._on_notif_source_changed(
+            "org.freedesktop.DBus.Properties", {"Value": list(data)}, []
+        )
+        assert backend._control_point_proxy is None
+        assert backend._heal_timer_id is not None
+
+    def test_write_value_not_connected_stops_subsequent_retries(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE
+        cp = backend._control_point_proxy
+        cp.WriteValue.side_effect = Exception("Not connected")
+        data1 = _notif_source_bytes(event_id=0, category_id=4, uid=1)
+        backend._on_notif_source_changed(
+            "org.freedesktop.DBus.Properties", {"Value": list(data1)}, []
+        )
+        cp.WriteValue.reset_mock()
+        data2 = _notif_source_bytes(event_id=0, category_id=4, uid=2)
+        backend._on_notif_source_changed(
+            "org.freedesktop.DBus.Properties", {"Value": list(data2)}, []
+        )
+        cp.WriteValue.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # §9 _on_data_source_changed → on_message_received payload shape
@@ -1392,6 +1420,16 @@ class TestTimerHygiene:
         poll()
         mock_service.set_capability.assert_not_called()
 
+    def test_enter_healing_twice_cancels_first_timer(self, lc):
+        backend, _, _, mock_glib, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()   # → HEALING (first heal timer registered)
+        first_timer_id = backend._heal_timer_id
+        assert first_timer_id is not None
+        backend._enter_healing()   # re-enter: cancels first, registers second
+        mock_glib.source_remove.assert_any_call(first_timer_id)
+        assert backend._heal_timer_id is not None
+
 
 # ---------------------------------------------------------------------------
 # §22 HEALING stub — _attempt_le_rearm contains SPIKE-TBD, makes no D-Bus calls
@@ -1432,3 +1470,244 @@ class TestDoubleSubscribeGuard:
         mock_service.reset_mock()
         backend._on_device_connected(_DEV_PATH)
         mock_service.set_capability.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §24 Backlog suppression: 2 s grace window after ACTIVE drops replay flood
+# ---------------------------------------------------------------------------
+
+class TestBacklogSuppression:
+    """iOS replays full Notification Center on connect; suppress during 2 s window."""
+
+    def test_active_transition_sets_backlog_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE
+        assert backend._backlog_suppress is True
+
+    def test_active_transition_schedules_backlog_timer_at_2s(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        timers[1]()
+        intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
+        assert 2_000 in intervals
+
+    def test_active_transition_sets_backlog_timer_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        assert backend._backlog_timer_id is not None
+
+    def test_app_notification_suppressed_during_backlog_window(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE; _backlog_suppress = True
+        payload = _data_source_tlv(uid=1, title="Hey", message="Yo",
+                                   app_id="com.apple.WhatsApp")
+        backend._on_data_source_changed({"Value": list(payload)})
+        mock_service.on_app_notification_received.assert_not_called()
+
+    def test_sms_suppressed_during_backlog_window(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        timers[1]()
+        payload = _data_source_tlv(uid=2, title="Alice", message="Hi",
+                                   app_id="com.apple.MobileSMS")
+        backend._on_data_source_changed({"Value": list(payload)})
+        mock_service.on_message_received.assert_not_called()
+
+    def test_backlog_timer_fires_clears_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()   # → ACTIVE; sets backend._backlog_timer_id
+        timers[backend._backlog_timer_id]()
+        assert backend._backlog_suppress is False
+
+    def test_backlog_timer_fires_clears_timer_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        tid = backend._backlog_timer_id
+        timers[tid]()
+        assert backend._backlog_timer_id is None
+
+    def test_app_notification_dispatched_after_backlog_window(self, lc):
+        backend, mock_service, _, _, timers, _ = lc
+        timers[1]()
+        timers[backend._backlog_timer_id]()   # backlog window closed
+        payload = _data_source_tlv(uid=3, title="Hey", message="New",
+                                   app_id="com.apple.WhatsApp")
+        backend._on_data_source_changed({"Value": list(payload)})
+        mock_service.on_app_notification_received.assert_called_once()
+
+    def test_stop_from_active_clears_backlog_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend.stop()
+        assert backend._backlog_suppress is False
+
+    def test_stop_from_active_clears_backlog_timer_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend.stop()
+        assert backend._backlog_timer_id is None
+
+    def test_disconnect_clears_backlog_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend._on_device_disconnected()
+        assert backend._backlog_suppress is False
+
+    def test_disconnect_clears_backlog_timer_id(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend._on_device_disconnected()
+        assert backend._backlog_timer_id is None
+
+    def test_enter_healing_clears_backlog_suppress(self, lc):
+        backend, _, _, _, timers, _ = lc
+        timers[1]()
+        backend._enter_healing()
+        assert backend._backlog_suppress is False
+
+    def test_enter_healing_cancels_backlog_timer(self, lc):
+        backend, _, _, mock_glib, timers, _ = lc
+        timers[1]()
+        backlog_tid = backend._backlog_timer_id
+        assert backlog_tid is not None
+        backend._enter_healing()
+        mock_glib.source_remove.assert_any_call(backlog_tid)
+        assert backend._backlog_timer_id is None
+
+    def test_healing_path_does_not_set_backlog_suppress(self, lc):
+        backend, _, _, _, timers, notifying = lc
+        notifying[_NOTIF_SRC_PATH] = False
+        timers[1]()   # → HEALING (not ACTIVE)
+        assert backend._backlog_suppress is False
+
+
+# ---------------------------------------------------------------------------
+# §25 StartNotify InProgress race: prior subscribe still pending on reconnect
+# ---------------------------------------------------------------------------
+
+def _make_inprogress_ctx(inprogress_on_retry=False):
+    """Factory for started backends where StartNotify raises InProgress.
+
+    inprogress_on_retry=False (default): only first call raises InProgress;
+    second call succeeds (retry recovers).
+    inprogress_on_retry=True: BOTH calls raise InProgress (retry fails too).
+    """
+    mock_bus = MagicMock(name="SystemBus")
+    mock_ctrl_pt = MagicMock(name="ControlPoint")
+    mock_service = MagicMock(name="TincanService")
+    mock_device = MagicMock(name="Device1")
+    mock_device.Get.return_value = True  # Bonded=True
+
+    obj_mgr_mock = MagicMock(name="ObjectManager")
+    obj_mgr_mock.GetManagedObjects.return_value = _make_managed_objects()
+
+    def _get_object(service, path):
+        obj = MagicMock(name=f"obj({path})")
+        obj._dbus_path = str(path)
+        return obj
+
+    mock_bus.get_object.side_effect = _get_object
+
+    call_count = [0]
+
+    def _make_interface(obj, iface):
+        path = getattr(obj, "_dbus_path", "")
+        if iface == "org.freedesktop.DBus.ObjectManager":
+            return obj_mgr_mock
+        if iface == "org.bluez.Device1":
+            return mock_device
+        if iface == _GATT_CHAR_IFACE and path == _CTRL_PT_PATH:
+            return mock_ctrl_pt
+        if iface == _GATT_CHAR_IFACE:
+            char = MagicMock()
+            call_count[0] += 1
+            if call_count[0] <= 2 or inprogress_on_retry:
+                char.StartNotify.side_effect = Exception("org.bluez.Error.InProgress")
+            return char
+        return MagicMock(name=f"Interface({iface}@{path})")
+
+    mock_glib = MagicMock(name="GLib")
+    mock_glib.SOURCE_REMOVE = False
+    mock_glib.SOURCE_CONTINUE = True
+    _timers: dict = {}
+    _next_id = [0]
+
+    def _timeout_add(*args):
+        _next_id[0] += 1
+        tid = _next_id[0]
+        # args[0]=interval, args[1]=callback, args[2:]=callback args
+        cb = args[1]
+        cb_args = args[2:]
+        _timers[tid] = (cb, cb_args)
+        return tid
+
+    mock_glib.timeout_add.side_effect = _timeout_add
+    mock_glib.source_remove.side_effect = lambda tid: _timers.pop(tid, None)
+
+    return (mock_bus, mock_service, mock_glib, _timers, _make_interface)
+
+
+class TestStartNotifyInProgress:
+    """StartNotify InProgress on reconnect: schedule retry instead of giving up."""
+
+    @pytest.fixture
+    def ip_ctx(self):
+        """Backend started; first _on_device_connected raises InProgress on both chars."""
+        mock_bus, mock_service, mock_glib, _timers, _make_interface = _make_inprogress_ctx()
+        with (
+            patch("dbus.service.Object.__init__", return_value=None),
+            patch("tincand.backends.ancs.dbus.SystemBus", return_value=mock_bus),
+            patch("tincand.backends.ancs.dbus.Interface", side_effect=_make_interface),
+            patch("tincand.backends.ancs.dbus.exceptions") as mock_exc,
+            patch("tincand.backends.ancs.GLib", mock_glib),
+        ):
+            mock_exc.DBusException = Exception
+            backend = ANCSBackend()
+            backend.register_service(mock_service)
+            backend.start()
+            backend._on_device_connected(_DEV_PATH)
+            # timers[1] = retry _on_device_connected (1500 ms)
+            yield backend, mock_service, mock_glib, _timers
+
+    def test_inprogress_does_not_immediately_fail_ancs(self, ip_ctx):
+        backend, mock_service, _, _ = ip_ctx
+        # Should NOT have set capability False (that would be "ANCS unavailable")
+        false_calls = [c for c in mock_service.set_capability.call_args_list
+                       if list(c.args) == ["ancs", False]]
+        assert not false_calls
+
+    def test_inprogress_sets_subscribe_pending(self, ip_ctx):
+        backend, _, _, _ = ip_ctx
+        assert backend._subscribe_pending is True
+
+    def test_inprogress_schedules_retry_timer_at_1500ms(self, ip_ctx):
+        backend, _, mock_glib, _ = ip_ctx
+        intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
+        assert 1500 in intervals
+
+    def test_inprogress_does_not_set_notif_src_path(self, ip_ctx):
+        backend, _, _, _ = ip_ctx
+        assert backend._notif_src_path is None
+
+    def test_retry_after_inprogress_recovers_ancs(self, ip_ctx):
+        backend, mock_service, _, _timers = ip_ctx
+        # timers[1] is the retry callback (cb, args) tuple
+        cb, cb_args = _timers[1]
+        cb(*cb_args)   # second call — StartNotify succeeds this time
+        assert backend._notif_src_path is not None
+
+    def test_retry_sets_capability_ancs_true(self, ip_ctx):
+        backend, mock_service, _, _timers = ip_ctx
+        cb, cb_args = _timers[1]
+        cb(*cb_args)
+        mock_service.set_capability.assert_called_with("ancs", True)
+
+    def test_disconnect_clears_subscribe_pending(self, ip_ctx):
+        backend, _, _, _ = ip_ctx
+        assert backend._subscribe_pending is True
+        backend._on_device_disconnected()
+        assert backend._subscribe_pending is False
+
+    def test_stop_clears_subscribe_pending(self, ip_ctx):
+        backend, _, _, _ = ip_ctx
+        assert backend._subscribe_pending is True
+        backend.stop()
+        assert backend._subscribe_pending is False

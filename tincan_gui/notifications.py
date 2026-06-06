@@ -79,7 +79,7 @@ class DesktopNotifier:
             if self._on_mark_read and conv_id:
                 self._on_mark_read(conv_id)
         elif action_id in ("default", "open", "reply"):
-            if self._on_action_invoked and conv_id:
+            if self._on_action_invoked and nid in self._notif_to_conv:
                 self._on_action_invoked(conv_id)
 
     def dispatch(self, message: dict) -> None:
@@ -92,6 +92,10 @@ class DesktopNotifier:
 
     def dispatch_app_notification(self, notif: dict) -> None:
         """Send a desktop notification for a non-SMS iOS app notification."""
+        from tincan_gui._settings import app_settings
+        if not app_settings().value("notifications/desktop_enabled", True, type=bool):
+            return
+
         import dbus
 
         app_id = str(notif.get("app_id", ""))
