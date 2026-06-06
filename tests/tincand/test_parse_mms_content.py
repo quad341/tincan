@@ -35,10 +35,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from tincand.backends.bluez_map import _parse_mms_content
-
 
 # ---------------------------------------------------------------------------
 # Helpers
