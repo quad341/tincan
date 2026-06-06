@@ -187,6 +187,7 @@ class ANCSBackend(BackendInterface):
         self._heal_attempts: int = 0
         self._backlog_suppress: bool = False
         self._backlog_timer_id: int | None = None
+        self._subscribe_pending: bool = False
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -331,6 +332,7 @@ class ANCSBackend(BackendInterface):
             GLib.source_remove(self._backlog_timer_id)
             self._backlog_timer_id = None
         self._backlog_suppress = False
+        self._subscribe_pending = False
         self._notif_src_path = None
         self._data_src_path = None
 
@@ -465,7 +467,11 @@ class ANCSBackend(BackendInterface):
                 self._service.set_capability("ancs", False)
             return
 
+        subscribe_was_pending = self._subscribe_pending
+        self._subscribe_pending = False
+
         notify_ok = 0
+        any_in_progress = False
         for path, name in (
             (notif_src_path, "NotifSource"),
             (data_src_path, "DataSource"),
@@ -478,7 +484,18 @@ class ANCSBackend(BackendInterface):
                 _log.debug("ANCSBackend: StartNotify on %s (%s)", name, path)
                 notify_ok += 1
             except dbus.exceptions.DBusException as exc:
-                _log.warning("ANCSBackend: StartNotify failed for %s: %s", name, exc)
+                if "InProgress" in str(exc) and not subscribe_was_pending:
+                    any_in_progress = True
+                    _log.warning(
+                        "ANCSBackend: StartNotify InProgress for %s — retry in 1.5 s", name
+                    )
+                else:
+                    _log.warning("ANCSBackend: StartNotify failed for %s: %s", name, exc)
+
+        if any_in_progress:
+            self._subscribe_pending = True
+            GLib.timeout_add(1500, self._on_device_connected, device_path)
+            return
 
         if notify_ok < 2:
             _log.warning(
@@ -527,6 +544,7 @@ class ANCSBackend(BackendInterface):
             GLib.source_remove(self._backlog_timer_id)
             self._backlog_timer_id = None
         self._backlog_suppress = False
+        self._subscribe_pending = False
         if self._bus is not None:
             if self._notif_src_path:
                 try:

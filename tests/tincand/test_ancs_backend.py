@@ -1576,3 +1576,137 @@ class TestBacklogSuppression:
         notifying[_NOTIF_SRC_PATH] = False
         timers[1]()   # → HEALING (not ACTIVE)
         assert backend._backlog_suppress is False
+
+
+# ---------------------------------------------------------------------------
+# §25 StartNotify InProgress race: prior subscribe still pending on reconnect
+# ---------------------------------------------------------------------------
+
+def _make_inprogress_ctx(inprogress_on_retry=False):
+    """Factory for started backends where StartNotify raises InProgress.
+
+    inprogress_on_retry=False (default): only first call raises InProgress;
+    second call succeeds (retry recovers).
+    inprogress_on_retry=True: BOTH calls raise InProgress (retry fails too).
+    """
+    mock_bus = MagicMock(name="SystemBus")
+    mock_ctrl_pt = MagicMock(name="ControlPoint")
+    mock_service = MagicMock(name="TincanService")
+    mock_device = MagicMock(name="Device1")
+    mock_device.Get.return_value = True  # Bonded=True
+
+    obj_mgr_mock = MagicMock(name="ObjectManager")
+    obj_mgr_mock.GetManagedObjects.return_value = _make_managed_objects()
+
+    def _get_object(service, path):
+        obj = MagicMock(name=f"obj({path})")
+        obj._dbus_path = str(path)
+        return obj
+
+    mock_bus.get_object.side_effect = _get_object
+
+    call_count = [0]
+
+    def _make_interface(obj, iface):
+        path = getattr(obj, "_dbus_path", "")
+        if iface == "org.freedesktop.DBus.ObjectManager":
+            return obj_mgr_mock
+        if iface == "org.bluez.Device1":
+            return mock_device
+        if iface == _GATT_CHAR_IFACE and path == _CTRL_PT_PATH:
+            return mock_ctrl_pt
+        if iface == _GATT_CHAR_IFACE:
+            char = MagicMock()
+            call_count[0] += 1
+            if call_count[0] <= 2 or inprogress_on_retry:
+                char.StartNotify.side_effect = Exception("org.bluez.Error.InProgress")
+            return char
+        return MagicMock(name=f"Interface({iface}@{path})")
+
+    mock_glib = MagicMock(name="GLib")
+    mock_glib.SOURCE_REMOVE = False
+    mock_glib.SOURCE_CONTINUE = True
+    _timers: dict = {}
+    _next_id = [0]
+
+    def _timeout_add(*args):
+        _next_id[0] += 1
+        tid = _next_id[0]
+        # args[0]=interval, args[1]=callback, args[2:]=callback args
+        cb = args[1]
+        cb_args = args[2:]
+        _timers[tid] = (cb, cb_args)
+        return tid
+
+    mock_glib.timeout_add.side_effect = _timeout_add
+    mock_glib.source_remove.side_effect = lambda tid: _timers.pop(tid, None)
+
+    return (mock_bus, mock_service, mock_glib, _timers, _make_interface)
+
+
+class TestStartNotifyInProgress:
+    """StartNotify InProgress on reconnect: schedule retry instead of giving up."""
+
+    @pytest.fixture
+    def ip_ctx(self):
+        """Backend started; first _on_device_connected raises InProgress on both chars."""
+        mock_bus, mock_service, mock_glib, _timers, _make_interface = _make_inprogress_ctx()
+        with (
+            patch("dbus.service.Object.__init__", return_value=None),
+            patch("tincand.backends.ancs.dbus.SystemBus", return_value=mock_bus),
+            patch("tincand.backends.ancs.dbus.Interface", side_effect=_make_interface),
+            patch("tincand.backends.ancs.dbus.exceptions") as mock_exc,
+            patch("tincand.backends.ancs.GLib", mock_glib),
+        ):
+            mock_exc.DBusException = Exception
+            backend = ANCSBackend()
+            backend.register_service(mock_service)
+            backend.start()
+            backend._on_device_connected(_DEV_PATH)
+            # timers[1] = retry _on_device_connected (1500 ms)
+            yield backend, mock_service, mock_glib, _timers
+
+    def test_inprogress_does_not_immediately_fail_ancs(self, ip_ctx):
+        backend, mock_service, _, _ = ip_ctx
+        # Should NOT have set capability False (that would be "ANCS unavailable")
+        false_calls = [c for c in mock_service.set_capability.call_args_list
+                       if list(c.args) == ["ancs", False]]
+        assert not false_calls
+
+    def test_inprogress_sets_subscribe_pending(self, ip_ctx):
+        backend, _, _, _ = ip_ctx
+        assert backend._subscribe_pending is True
+
+    def test_inprogress_schedules_retry_timer_at_1500ms(self, ip_ctx):
+        backend, _, mock_glib, _ = ip_ctx
+        intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
+        assert 1500 in intervals
+
+    def test_inprogress_does_not_set_notif_src_path(self, ip_ctx):
+        backend, _, _, _ = ip_ctx
+        assert backend._notif_src_path is None
+
+    def test_retry_after_inprogress_recovers_ancs(self, ip_ctx):
+        backend, mock_service, _, _timers = ip_ctx
+        # timers[1] is the retry callback (cb, args) tuple
+        cb, cb_args = _timers[1]
+        cb(*cb_args)   # second call — StartNotify succeeds this time
+        assert backend._notif_src_path is not None
+
+    def test_retry_sets_capability_ancs_true(self, ip_ctx):
+        backend, mock_service, _, _timers = ip_ctx
+        cb, cb_args = _timers[1]
+        cb(*cb_args)
+        mock_service.set_capability.assert_called_with("ancs", True)
+
+    def test_disconnect_clears_subscribe_pending(self, ip_ctx):
+        backend, _, _, _ = ip_ctx
+        assert backend._subscribe_pending is True
+        backend._on_device_disconnected()
+        assert backend._subscribe_pending is False
+
+    def test_stop_clears_subscribe_pending(self, ip_ctx):
+        backend, _, _, _ = ip_ctx
+        assert backend._subscribe_pending is True
+        backend.stop()
+        assert backend._subscribe_pending is False
