@@ -156,6 +156,20 @@ class TitleBar(QWidget):
         )
         layout.addWidget(self._bug_btn)
 
+        layout.addSpacing(4)
+
+        self._bell_btn = QToolButton()
+        self._bell_btn.setText("🔔")
+        self._bell_btn.setFixedSize(32, 32)
+        self._bell_btn.setToolTip("Notification center")
+        self._bell_btn.setAccessibleName("Notification center")
+        self._bell_btn.setStyleSheet(
+            "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
+            " background: transparent; }"
+            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+        )
+        layout.addWidget(self._bell_btn)
+
         layout.addSpacing(8)
 
         self._status_chip = QLabel("○ Disconnected")
@@ -173,6 +187,10 @@ class TitleBar(QWidget):
     @property
     def bug_button(self) -> QToolButton:
         return self._bug_btn
+
+    @property
+    def bell_button(self) -> QToolButton:
+        return self._bell_btn
 
     @property
     def status_chip(self) -> QLabel:
@@ -551,6 +569,7 @@ class MainWindow(QMainWindow):
         self._compose.send_requested.connect(self._on_send)
         self._title_bar.gear_button.clicked.connect(self._open_settings)
         self._title_bar.bug_button.clicked.connect(self._on_file_bug)
+        self._title_bar.bell_button.clicked.connect(self._on_open_notif_center)
         self._banner_a.reconnect_clicked.connect(self._on_reconnect_clicked)
         self._banner_ancs_repair.reconnect_clicked.connect(self._open_pairing_wizard)
 
@@ -1072,6 +1091,10 @@ class MainWindow(QMainWindow):
             "Bug Report Saved",
             f"Report saved to:\n{report_path}\n\nHand the path to the mayor.",
         )
+
+    def _on_open_notif_center(self) -> None:
+        from tincan_gui.notification_center import NotificationCenterDialog
+        NotificationCenterDialog(self._notifier, parent=self).exec()
 
     def _open_settings(self) -> None:
         from tincan_gui.settings_dialog import SettingsDialog
