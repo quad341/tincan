@@ -946,14 +946,16 @@ class MapBackend(BackendInterface):
             )
             svc.upsert_conversation(conv)  # type: ignore[attr-defined]
             for msg in msgs:
+                direction = msg.get("direction", "inbound")
                 msg_dict = {
                     "conversation_id": key,
                     "body": msg["body"],
                     "timestamp": msg["timestamp"],
-                    "direction": msg.get("direction", "inbound"),
+                    "direction": direction,
                     "status": "read" if (not notify or msg["read"]) else "unread",
                     "from": msg["sender"],
                     "attachments": msg.get("attachments", "[]"),
+                    "is_new": notify and direction == "inbound",
                 }
                 if is_group:
                     msg_dict["group_hint"] = True
