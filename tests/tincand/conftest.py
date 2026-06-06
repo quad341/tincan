@@ -50,10 +50,8 @@ _KNOWN_BROKEN_CONTRACT = {
         "tincan-3vakg: ContactPhotoReceived handler missing @Slot(str, QByteArray) "
         "— avatars do not update live (caught at 2026-06-06 deploy, 7/8 signals)."
     ),
-    "test_called_method_exists_in_daemon[Daemon.RequestReconnect]": (
-        "tincan-zqtbj/s7569: GUI reconnect button calls im.tincan.Daemon.RequestReconnect "
-        "but the daemon does not export it on main yet — button is a no-op until it lands."
-    ),
+    # RequestReconnect xfail removed: the daemon now exports it (tincan-s7569,
+    # landed in this PR) so the contract case passes for real.
 }
 
 
