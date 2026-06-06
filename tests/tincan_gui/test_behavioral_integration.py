@@ -18,6 +18,7 @@ Coverage (acceptance criteria from tincan-iplg1, tincan-tqsre):
   §8  no-duplicate-reload    — ISO-ts daemon echo is deduped to 1 bubble (tincan-0an0b)
   §9  long-unbroken-wrap     — 200-char unbroken body wraps instead of clipping
   §10 cache-immediate-select — cache shown instantly on conversation select (tincan-tqsre)
+  §11 cache-key-mismatch     — conv_id-written messages found via current_phone read (tincan-tqsre)
 """
 from __future__ import annotations
 
@@ -521,3 +522,62 @@ class TestCacheImmediateOnSelect:
         )
 
         win._load_thread_messages = original_load
+
+
+# ---------------------------------------------------------------------------
+# §11 cache-key-mismatch — messages written under conv_id appear when read via
+# current_phone (tincan-tqsre root cause fix)
+# ---------------------------------------------------------------------------
+
+class TestCacheKeyMismatch:
+    """Regression for write key (conv_id-first) vs read key (phone-first) mismatch.
+
+    Before the fix, _on_message_received cached under conv_id-first while
+    _load_thread_messages read under current_phone-first, scattering history
+    across multiple cache files that reads never found.
+    """
+
+    def test_messages_cached_under_conv_id_appear_via_load(self, qtbot, tmp_path):
+        """Messages stored under the short conv_id key surface after migration on load.
+
+        Mismatch scenario: daemon sends conv_id="5551234567" (no country code) but
+        conv_data.phone="+15551234567" (full E.164). _same_conv says equal; _safe_name
+        produces different filenames, so pre-fix writes went to the wrong file.
+        """
+        phone_full = "+15551234567"   # current_phone format — read key
+        phone_short = "5551234567"    # conv_id format — old write key
+        win = _make_window(qtbot, tmp_path=tmp_path, phone=phone_full)
+
+        win._msg_cache.add_message(
+            phone_short, "inbound", "Miskeyed history", "Alice",
+            "20260101T120000", "20260101T120000",
+        )
+
+        win._load_thread_messages(phone_short, "Alice")
+
+        bodies = [b._data.body for b in _bubble_widgets(win)]
+        assert "Miskeyed history" in bodies, (
+            f"migration must surface short-key ({phone_short}) msgs via full-key "
+            f"({phone_full}) read — bubbles: {bodies}"
+        )
+
+    def test_received_message_written_to_current_phone_key(self, qtbot, tmp_path):
+        """After write-key fix, inbound messages cache under current_phone, not conv_id."""
+        phone_full = "+15551234567"
+        phone_short = "5551234567"
+        win = _make_window(qtbot, tmp_path=tmp_path, phone=phone_full)
+
+        win._on_message_received({
+            "direction": "inbound",
+            "body": "Inbound msg",
+            "conversation_id": phone_short,
+            "sender": phone_short,
+            "timestamp": "20260101T120000",
+        })
+
+        msgs = win._msg_cache.get_messages(phone_full)
+        bodies = [m["body"] for m in msgs]
+        assert "Inbound msg" in bodies, (
+            f"write key must be current_phone ({phone_full}), not conv_id ({phone_short}) — "
+            f"cache files: {[f.name for f in tmp_path.iterdir()]}"
+        )
