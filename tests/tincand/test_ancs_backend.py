@@ -1513,20 +1513,21 @@ class TestBacklogSuppression:
 
     def test_backlog_timer_fires_clears_suppress(self, lc):
         backend, _, _, _, timers, _ = lc
-        timers[1]()   # → ACTIVE; timers[3] = _end_backlog_suppress
-        timers[3]()
+        timers[1]()   # → ACTIVE; sets backend._backlog_timer_id
+        timers[backend._backlog_timer_id]()
         assert backend._backlog_suppress is False
 
     def test_backlog_timer_fires_clears_timer_id(self, lc):
         backend, _, _, _, timers, _ = lc
         timers[1]()
-        timers[3]()
+        tid = backend._backlog_timer_id
+        timers[tid]()
         assert backend._backlog_timer_id is None
 
     def test_app_notification_dispatched_after_backlog_window(self, lc):
         backend, mock_service, _, _, timers, _ = lc
         timers[1]()
-        timers[3]()   # backlog window closed
+        timers[backend._backlog_timer_id]()   # backlog window closed
         payload = _data_source_tlv(uid=3, title="Hey", message="New",
                                    app_id="com.apple.WhatsApp")
         backend._on_data_source_changed({"Value": list(payload)})
