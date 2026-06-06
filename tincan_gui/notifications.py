@@ -7,8 +7,10 @@ the main window and selects the conversation on click.
 """
 from __future__ import annotations
 
+import collections
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -21,6 +23,20 @@ _log = logging.getLogger(__name__)
 _NOTIF_SERVICE = "org.freedesktop.Notifications"
 _NOTIF_PATH = "/org/freedesktop/Notifications"
 _NOTIF_IFACE = "org.freedesktop.Notifications"
+
+
+_HISTORY_SIZE = 100  # max entries kept in the in-memory notification history
+
+
+@dataclass
+class NotificationEntry:
+    """One record in the in-app notification history."""
+    ts: float         # time.time() at dispatch
+    kind: str         # 'sms' or 'app'
+    sender: str       # contact name / app display name
+    summary: str      # one-line heading
+    body: str         # preview text (may be truncated)
+    conv_id: str      # conversation ID for SMS; '' for app notifications
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -57,6 +73,13 @@ class DesktopNotifier:
         self._bus = None
         self._repair_notif_id: int = 0
         self._repair_on_reconnect: Callable[[], None] | None = None
+        self._history: collections.deque[NotificationEntry] = collections.deque(
+            maxlen=_HISTORY_SIZE
+        )
+
+    def history(self) -> list[NotificationEntry]:
+        """Return notification history (oldest first)."""
+        return list(self._history)
 
     def _ensure_bus(self) -> object | None:
         if self._bus is not None:
@@ -108,6 +131,18 @@ class DesktopNotifier:
                    message.get("conversation_id", "?"))
         _trace.emit("notif_dispatch", conv_id=str(message.get("conversation_id", "")),
                     body_len=len(str(message.get("body", ""))))
+        sender = str(
+            message.get("display_name") or message.get("from")
+            or message.get("conversation_id") or ""
+        ).strip()
+        self._history.append(NotificationEntry(
+            ts=time.time(),
+            kind="sms",
+            sender=sender or "Unknown",
+            summary=sender or "tincan",
+            body=str(message.get("body", "")).strip(),
+            conv_id=str(message.get("conversation_id") or message.get("from") or ""),
+        ))
         self._notify(message)
 
     def dispatch_app_notification(self, notif: dict) -> None:
@@ -115,8 +150,6 @@ class DesktopNotifier:
         from tincan_gui._settings import app_settings
         if not app_settings().value("notifications/desktop_enabled", True, type=bool):
             return
-
-        import dbus
 
         app_id = str(notif.get("app_id", ""))
         title = str(notif.get("title", ""))
@@ -129,7 +162,7 @@ class DesktopNotifier:
         if last is not None and now - last < self._APP_NOTIF_DEDUP_TTL:
             return
         # Prune expired entries (prevent unbounded growth in long sessions)
-        self._seen_app = {k: t for k, t in self._seen_app.items() if now - t < self._APP_NOTIF_DEDUP_TTL}
+        self._seen_app = {k: t for k, t in self._seen_app.items() if now - t < self._APP_NOTIF_DEDUP_TTL}  # noqa: E501
         self._seen_app[key] = now
 
         summary = title if title else (f"Notification from {app_id}".strip() or "Notification")
@@ -139,6 +172,17 @@ class DesktopNotifier:
             body = body_text
         else:
             body = "New notification"
+
+        self._history.append(NotificationEntry(
+            ts=time.time(),
+            kind="app",
+            sender=app_id or "Unknown app",
+            summary=summary,
+            body=body,
+            conv_id="",
+        ))
+
+        import dbus
 
         try:
             bus = self._ensure_bus()
