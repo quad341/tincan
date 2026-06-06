@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from tincan_gui import trace as _trace
+
 _ICON_PATH = str(Path(__file__).parent / "assets" / "tincan-icon.png")
 
 _log = logging.getLogger(__name__)
@@ -84,11 +86,12 @@ class DesktopNotifier:
 
     def _on_action_invoked_signal(self, notif_id: int, action_id: str) -> None:
         nid = int(notif_id)
+        conv_id = self._notif_to_conv.get(nid, "")
+        _trace.emit("notif_action", notif_id=nid, action_id=action_id, conv_id=conv_id)
         if nid == self._repair_notif_id and self._repair_notif_id != 0:
             if action_id == "default" and self._repair_on_reconnect:
                 self._repair_on_reconnect()
             return
-        conv_id = self._notif_to_conv.get(nid, "")
         if action_id == "mark-read":
             if self._on_mark_read and conv_id:
                 self._on_mark_read(conv_id)
@@ -99,9 +102,12 @@ class DesktopNotifier:
     def dispatch(self, message: dict) -> None:
         """Send a desktop notification if the message warrants one."""
         if not self._should_notify(message):
+            _trace.emit("notif_suppressed", conv_id=str(message.get("conversation_id", "")))
             return
         _log.debug("DesktopNotifier.dispatch: sending notification for conv=%s",
                    message.get("conversation_id", "?"))
+        _trace.emit("notif_dispatch", conv_id=str(message.get("conversation_id", "")),
+                    body_len=len(str(message.get("body", ""))))
         self._notify(message)
 
     def dispatch_app_notification(self, notif: dict) -> None:

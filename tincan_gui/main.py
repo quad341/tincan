@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tincan_gui import trace as _trace
 from tincan_gui.avatar import _color_for_name
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
@@ -642,6 +643,7 @@ class MainWindow(QMainWindow):
         return self._compose
 
     def _on_conversation_selected(self, conv_id: str) -> None:
+        _trace.emit("conversation_switch", cid=_trace.new_cid(), conv_id=conv_id)
         self.conversation_opened.emit(conv_id)
         conv_data = self._conversations_by_id.get(conv_id)
         if conv_data:
@@ -720,6 +722,8 @@ class MainWindow(QMainWindow):
 
         if extras:
             messages = sorted(messages + extras, key=lambda m: m.sort_key or m.timestamp)
+        _trace.emit("thread_load", conv_id=conv_id, live=len(raw_msgs),
+                    extras=len(extras), total=len(messages))
         self._thread_view.load_thread(
             name, conv_id, messages, "SMS",
             failures=self._failed_sends.get(cache_key, set()),
@@ -787,6 +791,7 @@ class MainWindow(QMainWindow):
             self._tray.increment_unread()
         conv_id = str(message.get("conversation_id", ""))
         if conv_id and not self._current_phone:
+            _trace.emit("msg_dropped", reason="no_conv_selected", conv_id=conv_id)
             return  # no conversation selected; don't append routed messages to thread view
         if self._current_phone and conv_id and not _same_conv(conv_id, self._current_phone):
             return  # message is for a different conversation; notification already sent
@@ -798,6 +803,8 @@ class MainWindow(QMainWindow):
         if direction == "outbound" and any(
             _same_conv(k, conv_id) and b == body for k, b in self._pending_sends
         ):
+            _trace.emit("msg_suppressed", reason="pending_send",
+                        conv_id=conv_id, body_hash=_trace.body_hash(body))
             return
         # Suppress MAP-poll duplicates (poll re-emits the sent message from 'sent'
         # folder after _pending_sends is cleared; _sent_bodies persists longer).
@@ -805,6 +812,8 @@ class MainWindow(QMainWindow):
             _same_conv(k, conv_id) and body in bodies
             for k, bodies in self._sent_bodies.items()
         ):
+            _trace.emit("msg_suppressed", reason="sent_bodies",
+                        conv_id=conv_id, body_hash=_trace.body_hash(body))
             return
         # iOS MAP delivers messages sent to yourself back to the inbox as "inbound".
         # Use the echo arrival as a delivery confirmation, then fall through so it
@@ -822,6 +831,8 @@ class MainWindow(QMainWindow):
             )
             if _echo_key is not None:
                 self._self_echo_guard.discard(_echo_key)
+                _trace.emit("self_echo_confirmed",
+                            conv_id=conv_id, body_hash=_trace.body_hash(body))
                 self._thread_view.mark_last_send_delivered()
         sender = str(message.get("sender", "") or message.get("from", ""))
         raw_ts = str(message.get("timestamp", ""))
@@ -848,6 +859,8 @@ class MainWindow(QMainWindow):
         if group_hint and bubble_type == BubbleType.INBOUND:
             bubble_type = BubbleType.GROUP_UNKNOWN_SENDER
 
+        _trace.emit("msg_received", direction=direction, bubble=bubble_type.name,
+                    conv_id=conv_id, body_hash=_trace.body_hash(body), body_len=len(body))
         self._thread_view.append_message(
             MessageData(
                 bubble_type, body, sender, timestamp,
@@ -928,20 +941,28 @@ class MainWindow(QMainWindow):
         )
 
     def _on_send(self, text: str) -> None:
+        cid = _trace.new_cid()
+        _trace.emit("send_start", cid=cid, phone=self._current_phone,
+                    body_hash=_trace.body_hash(text), body_len=len(text),
+                    dialable=self._current_phone_dialable)
         self.message_send_requested.emit(text)
         self._compose.hide_send_error()
         if not self._current_phone or not self._current_phone_dialable:
+            _trace.emit("send_blocked", cid=cid, reason="not_dialable")
             self._compose.show_send_error(text)
             return
         phone = self._current_phone
         # In-flight guard: prevent double-submit while a send of same (phone, text) is pending.
         if (phone, text) in self._pending_sends:
+            _trace.emit("send_blocked", cid=cid, reason="duplicate_in_flight")
             return
         now = datetime.now()
         ts = now.strftime("%H:%M")
         sent_msg = MessageData(
             BubbleType.OUTBOUND, text, "", ts, sort_key=now.strftime("%Y%m%dT%H%M%S")
         )
+        _trace.emit("send_optimistic", cid=cid, phone=phone, body_hash=_trace.body_hash(text),
+                    pending_before=len(self._pending_sends))
         self._thread_view.append_message(sent_msg)
         # Cache sent message for thread reload (iOS MAP sent folder returns 0 messages).
         self._sent_cache.setdefault(phone, []).append(sent_msg)
@@ -970,6 +991,7 @@ class MainWindow(QMainWindow):
         self._dbus_client.send_message_async(phone, text)
 
     def _on_send_accepted(self, to: str, body: str, message_id: str) -> None:
+        _trace.emit("send_accepted", to=to, body_hash=_trace.body_hash(body), msg_id=message_id)
         # Defer cleanup so daemon's MessageReceived echo arrives first and is suppressed.
         QTimer.singleShot(0, lambda: self._pending_sends.discard((to, body)))
         self._failed_sends.get(to, set()).discard(body)
@@ -979,6 +1001,7 @@ class MainWindow(QMainWindow):
             self._sent_bodies.setdefault(to, set()).add(body)
 
     def _on_send_failed(self, to: str, body: str) -> None:
+        _trace.emit("send_failed", to=to, body_hash=_trace.body_hash(body))
         QTimer.singleShot(0, lambda: self._pending_sends.discard((to, body)))
         self._failed_sends.setdefault(to, set()).add(body)
         self._thread_view.mark_last_send_failed()
@@ -1152,6 +1175,8 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    if os.environ.get("TINCAN_TRACE"):
+        _trace.emit("session_init")  # triggers lazy file open
     if os.environ.get("TINCAN_DEBUG"):
         from tincan_gui.debug_log import install, install_excepthook  # noqa: PLC0415
         install()

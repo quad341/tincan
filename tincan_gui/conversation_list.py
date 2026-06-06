@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tincan_gui import trace as _trace
 from tincan_gui.archived_conversations import ArchivedConversations
 from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
 from tincan_gui.theme import is_dark_theme
@@ -586,6 +587,8 @@ class ConversationListWidget(QWidget):
             if match:
                 visible_count += 1
         self._no_results.setVisible(visible_count == 0 and bool(query))
+        _trace.emit("contact_filter", query_len=len(query),
+                    visible=visible_count, total=len(self._items))
 
     def clear_filter(self) -> None:
         """Clear search input and show all rows."""

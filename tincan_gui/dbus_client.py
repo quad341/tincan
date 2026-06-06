@@ -18,6 +18,8 @@ from PySide6.QtDBus import (
     QDBusReply,
 )
 
+from tincan_gui import trace as _trace
+
 try:
     import dbus as _dbus
     _HAVE_DBUS = True
@@ -383,11 +385,13 @@ class TincandClient(QObject):
             return []
         result = self._dbus_call(_IFACE_MESSAGES, "GetMessages", str(conv_id))
         if result is not None:
-            return [
+            msgs = [
                 {str(k): v for k, v in msg.items()}
                 for msg in result
                 if hasattr(msg, "items")
             ]
+            _trace.emit("dbus_in", method="GetMessages", conv_id=conv_id, count=len(msgs))
+            return msgs
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
         if not iface.isValid():
             return []
@@ -397,12 +401,16 @@ class TincandClient(QObject):
                 _log.debug("GetMessages failed: %s", raw.errorMessage())
                 return []
             args = raw.arguments()
-            return _demarshal_list_of_maps(args[0] if args else [])
+            msgs = _demarshal_list_of_maps(args[0] if args else [])
+            _trace.emit("dbus_in", method="GetMessages", conv_id=conv_id, count=len(msgs))
+            return msgs
         reply = _wrap_reply(raw)
         if not reply.isValid():
             _log.debug("GetMessages failed: %s", reply.error().message())
             return []
-        return _demarshal_list_of_maps(reply.value())
+        msgs = _demarshal_list_of_maps(reply.value())
+        _trace.emit("dbus_in", method="GetMessages", conv_id=conv_id, count=len(msgs))
+        return msgs
 
     def send_message(self, to: str, body: str) -> str:
         """Call SendMessage.  Returns the new message_id or '' on error."""
@@ -421,6 +429,8 @@ class TincandClient(QObject):
 
     def send_message_async(self, to: str, body: str) -> None:
         """Call SendMessage asynchronously; emits message_send_accepted or message_send_failed."""
+        _trace.emit("dbus_out", method="SendMessage", to=to,
+                    body_hash=_trace.body_hash(body), body_len=len(body))
         if not self._bus.isConnected():
             _log.warning("send_message_async: no D-Bus session bus")
             self.message_send_failed.emit(to, body)
