@@ -92,6 +92,10 @@ class DesktopNotifier:
 
     def dispatch_app_notification(self, notif: dict) -> None:
         """Send a desktop notification for a non-SMS iOS app notification."""
+        from tincan_gui._settings import app_settings
+        if not app_settings().value("notifications/desktop_enabled", True, type=bool):
+            return
+
         import dbus
 
         app_id = str(notif.get("app_id", ""))

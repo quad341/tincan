@@ -241,9 +241,10 @@ class TestDispatchAppNotification:
         mock_bus.get_object.return_value = MagicMock()
         mock_dbus.Interface.return_value = mock_iface
         notif = {"app_id": "com.foo.App", "title": "Title", "body": "Hello"}
-        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
-            notifier.dispatch_app_notification(notif)
-            notifier.dispatch_app_notification(notif)
+        with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+            with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+                notifier.dispatch_app_notification(notif)
+                notifier.dispatch_app_notification(notif)
         assert mock_iface.Notify.call_count == 1
 
     def test_distinct_body_passes_through(self):
@@ -254,9 +255,10 @@ class TestDispatchAppNotification:
         mock_dbus.Interface.return_value = mock_iface
         notif1 = {"app_id": "com.foo.App", "title": "Title", "body": "First"}
         notif2 = {"app_id": "com.foo.App", "title": "Title", "body": "Second"}
-        with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
-            notifier.dispatch_app_notification(notif1)
-            notifier.dispatch_app_notification(notif2)
+        with patch("tincan_gui._settings.app_settings", return_value=_mock_settings(True)):
+            with patch.dict(sys.modules, _dbus_patches(mock_dbus, mock_glib)):
+                notifier.dispatch_app_notification(notif1)
+                notifier.dispatch_app_notification(notif2)
         assert mock_iface.Notify.call_count == 2
 
 
