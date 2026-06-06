@@ -9,6 +9,7 @@ Coverage:
   §5 label_hint used as display name when present; app_id used as fallback
   §6 Allow button clicked → set_app_filter(app_id, 'allow') called
   §7 Per-app list opacity reflects global toggle state
+  §8 Buttons always visible (tincan-6a8t7): row widget min-width <= dialog width even with long app IDs
 """
 from __future__ import annotations
 
@@ -256,3 +257,50 @@ class TestPerAppListOpacityState:
         dlg._mirror_cb.setChecked(True)
 
         assert dlg._opacity_effect.opacity() == 1.0
+
+
+# ---------------------------------------------------------------------------
+# §8 Buttons always visible (tincan-6a8t7)
+# ---------------------------------------------------------------------------
+
+class TestAppRowButtonsAlwaysVisible:
+    """Allow/Deny buttons must not be pushed off-screen by a long app ID label.
+
+    Root cause: _AppRowWidget used addStretch() between label and buttons,
+    giving the label its full natural text width before placing buttons.
+    With a long app ID (e.g. 'com.apple.mobilecal') the row minimum width
+    could exceed the dialog width, causing horizontal scroll to reveal buttons.
+
+    Fix: give the label a stretch factor of 1 with setMinimumWidth(0) so it
+    fills available space but can shrink; buttons retain their minimum sizes.
+    """
+
+    def test_row_minimum_width_does_not_exceed_dialog_minimum(self, qtbot):
+        long_app_id = "com.verylongcompanyname.app.notification.service.extended"
+        seen = [{"app_id": long_app_id, "label_hint": "LongApp"}]
+        client = _make_client(seen_apps=seen)
+        dlg = _make_dialog(qtbot, client=client)
+
+        row = dlg._row_widgets[0]
+        row_min_width = row.minimumSizeHint().width()
+        dialog_min_width = dlg.minimumWidth()  # 400 per setMinimumSize
+
+        assert row_min_width <= dialog_min_width, (
+            f"Row minimum width {row_min_width}px exceeds dialog minimum "
+            f"{dialog_min_width}px — Allow/Deny buttons would be off-screen"
+        )
+
+    def test_allow_button_visible_geometry_in_narrow_row(self, qtbot):
+        from tincan_gui.settings_dialog import _AppRowWidget
+        long_app_id = "com.verylongcompanyname.app.notification.service.extended"
+        row = _AppRowWidget(long_app_id, "LongApp", "allow", None, False)
+        qtbot.addWidget(row)
+        row.resize(400, row.minimumSizeHint().height() or 36)
+        row.show()
+        qtbot.waitExposed(row)
+
+        allow_btn = row.allow_button
+        btn_right = allow_btn.x() + allow_btn.width()
+        assert btn_right <= row.width(), (
+            f"Allow button right edge ({btn_right}px) exceeds row width ({row.width()}px)"
+        )

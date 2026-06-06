@@ -5,7 +5,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import QSize, Qt, Signal, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -87,8 +87,11 @@ class _AppRowWidget(QWidget):
         lbl.setFont(lbl_font)
         lbl.setStyleSheet("color: #f4f4f5;" if dark else "color: #111827;")
         lbl.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        layout.addWidget(lbl)
-        layout.addStretch()
+        # Ignored policy: label doesn't contribute to minimumSizeHint() so buttons
+        # are never pushed off-screen by a long app ID string.
+        lbl.setMinimumWidth(0)
+        lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        layout.addWidget(lbl, 1)  # stretch=1: fills available space, can shrink to 0
 
         self._allow_btn = QPushButton("Allow")
         self._allow_btn.setCheckable(True)
@@ -441,7 +444,7 @@ class SettingsDialog(QDialog):
             action = self._filter_apps.get(app_id, "allow")
             row = _AppRowWidget(app_id, label_hint, action, self._client, self._dark)
             item = QListWidgetItem()
-            item.setSizeHint(row.sizeHint())
+            item.setSizeHint(QSize(1, row.sizeHint().height()))  # width=1: let view use viewport width
             self._list_widget.addItem(item)
             self._list_widget.setItemWidget(item, row)
             self._row_widgets.append(row)
