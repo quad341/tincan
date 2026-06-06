@@ -180,7 +180,12 @@ _MAX_WORD_LEN = 30  # insert <wbr> after this many consecutive non-space chars
 
 
 def _break_long_words(html: str) -> str:
-    """Insert <wbr> hints every _MAX_WORD_LEN chars outside HTML tags (tincan-5hcyf)."""
+    """Insert zero-width spaces every _MAX_WORD_LEN chars outside HTML tags.
+
+    Uses &#8203; (U+200B) rather than <wbr>: Qt's text engine respects the
+    Unicode ZW (zero-width space) line-break class in its layout algorithm,
+    whereas <wbr> was not reliably lowering the label's minimumSizeHint width.
+    """
     out = []
     run = 0
     in_tag = False
@@ -194,7 +199,7 @@ def _break_long_words(html: str) -> str:
         if not in_tag and ch != ">":
             run = 0 if ch.isspace() else run + 1
             if run == _MAX_WORD_LEN:
-                out.append("<wbr>")
+                out.append("&#8203;")  # U+200B zero-width space — Qt ZW break class
                 run = 0
     return "".join(out)
 
@@ -414,6 +419,7 @@ class MessageBubble(QWidget):
         body_font.setPointSize(13)
         body_label.setFont(body_font)
         body_label.setWordWrap(True)
+        body_label.setMinimumWidth(0)  # override natural-text minimumSizeHint so layout can shrink/wrap
         body_label.setStyleSheet(f"color: {fg};")
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
             body_label.setText("⚠ Message content unavailable")
