@@ -1,4 +1,4 @@
-"""Behavioral integration tests: user-visible flows (tincan-iplg1, tincan-0an0b).
+"""Behavioral integration tests: user-visible flows (tincan-iplg1, tincan-0an0b, tincan-tqsre).
 
 These tests assert user-visible behavior for flows that were shipping broken.
 Each test uses FakeMapBackend-compatible patterns and targets the GUI component
@@ -7,15 +7,17 @@ boundaries WITHOUT a real D-Bus connection.
 ALL tests in this file must FAIL against the current branch code and become
 regression guards once the bugs are fixed.
 
-Coverage (acceptance criteria from tincan-iplg1):
-  §1 cache-as-source     — sent message appears in thread after reload
-  §2 self-convo-live     — self-message shows BOTH sent bubble AND inbound bubble
-  §3 send-fail-status    — failed send shows '⚠ Failed' in thread immediately
-  §4 send-fail-reload    — '⚠ Failed' state preserved after thread navigation
-  §5 failed-notif-scope  — send-error bar is scoped to its conversation
-  §6 contact-names       — contact name resolved via ConversationUpdated shows in header
-  §7 inline-image        — MMS attachment produces image or download affordance
-  §8 no-duplicate-reload — ISO-ts daemon echo is deduped to 1 bubble (tincan-0an0b)
+Coverage (acceptance criteria from tincan-iplg1, tincan-tqsre):
+  §1  cache-as-source        — sent message appears in thread after reload
+  §2  self-convo-live        — self-message shows BOTH sent bubble AND inbound bubble
+  §3  send-fail-status       — failed send shows '⚠ Failed' in thread immediately
+  §4  send-fail-reload       — '⚠ Failed' state preserved after thread navigation
+  §5  failed-notif-scope     — send-error bar is scoped to its conversation
+  §6  contact-names          — contact name resolved via ConversationUpdated shows in header
+  §7  inline-image           — MMS attachment produces image or download affordance
+  §8  no-duplicate-reload    — ISO-ts daemon echo is deduped to 1 bubble (tincan-0an0b)
+  §9  long-unbroken-wrap     — 200-char unbroken body wraps instead of clipping
+  §10 cache-immediate-select — cache shown instantly on conversation select (tincan-tqsre)
 """
 from __future__ import annotations
 
@@ -461,3 +463,61 @@ class TestLongUnbrokenWrap:
             f"heightForWidth(300) = {h}px — expected >30px for a 200-char body at 300px width.\n"
             f"Text is not wrapping; it will be clipped in the thread view."
         )
+
+
+# ---------------------------------------------------------------------------
+# §10 cache-immediate-select — cache shown instantly on conversation select
+# (tincan-tqsre)
+# ---------------------------------------------------------------------------
+
+class TestCacheImmediateOnSelect:
+    """Cache is the primary display source: messages appear before MAP responds.
+
+    Without this fix, _on_conversation_selected rendered an empty thread and
+    deferred ALL content to the MAP round trip. With this fix, the cache is
+    shown immediately so the user sees previous messages with no flash of empty.
+    """
+
+    def test_cached_messages_shown_before_map_call(self, qtbot, tmp_path):
+        """Cached messages appear synchronously at conversation-select time."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+
+        win._msg_cache.add_message(
+            "+15550001", "inbound", "Cached hello", "Alice",
+            "20260101T120000", "20260101T120000",
+        )
+
+        # Block the deferred MAP load so only the initial synchronous render runs.
+        deferred_calls: list = []
+        original_load = win._load_thread_messages
+        win._load_thread_messages = lambda *a, **kw: deferred_calls.append((a, kw))  # noqa: ARG005
+
+        win._on_conversation_selected("+15550001")
+
+        bodies = [b._data.body for b in _bubble_widgets(win)]
+        assert "Cached hello" in bodies, (
+            f"cached message must appear immediately on select (before MAP call) — "
+            f"bubbles: {bodies}"
+        )
+
+        win._load_thread_messages = original_load
+
+    def test_sent_cache_shown_before_map_call(self, qtbot, tmp_path):
+        """In-session sent messages appear synchronously at conversation-select time."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+
+        win._on_send("Sent before reload")
+
+        deferred_calls: list = []
+        original_load = win._load_thread_messages
+        win._load_thread_messages = lambda *a, **kw: deferred_calls.append((a, kw))  # noqa: ARG005
+
+        win._on_conversation_selected("+15550001")
+
+        bodies = [b._data.body for b in _bubble_widgets(win)]
+        assert "Sent before reload" in bodies, (
+            f"sent message must appear immediately on select (before MAP call) — "
+            f"bubbles: {bodies}"
+        )
+
+        win._load_thread_messages = original_load
