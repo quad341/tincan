@@ -8,7 +8,11 @@ import re as _re
 from PySide6.QtCore import QBuffer, QIODevice, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter
 
-_URL_RE = _re.compile(r"(https?://[^\s<>\"']+)")
+_URL_RE = _re.compile(
+    r"(https?://[^\s<>\"']+"  # schemed URLs
+    r"|(?:[a-zA-Z0-9][a-zA-Z0-9\-]*\.)+[a-zA-Z]{2,}/[^\s<>\"']*)"  # scheme-less: host.tld/path
+
+)
 
 # Matches emoji codepoints and combining characters as a greedy sequence.
 # Including ZWJ (U+200D), VS-16 (U+FE0F), skin tones, and regional indicators
@@ -138,6 +142,12 @@ def _emoji_to_img_tag(emoji: str, point_size: int) -> str:
     return tag
 
 
+def _linkify_sub(m: _re.Match) -> str:
+    url = m.group(1)
+    href = url if url.startswith(("http://", "https://")) else f"https://{url}"
+    return f'<a href="{href}">{url}</a>'
+
+
 _MAX_WORD_LEN = 30  # insert <wbr> after this many consecutive non-space chars
 
 
@@ -174,13 +184,13 @@ def render_message_body(text: str, emoji_size: int = 13) -> str:
         before = text[last:m.start()]
         if before:
             parts.append(
-                _break_long_words(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(before)))
+                _break_long_words(_URL_RE.sub(_linkify_sub, _html.escape(before)))
             )
         parts.append(_emoji_to_img_tag(m.group(), emoji_size))
         last = m.end()
     after = text[last:]
     if after:
         parts.append(
-            _break_long_words(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(after)))
+            _break_long_words(_URL_RE.sub(_linkify_sub, _html.escape(after)))
         )
     return "".join(parts)

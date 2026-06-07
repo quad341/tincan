@@ -114,7 +114,35 @@ class TestLinkifyBreaksLongWords:
 
 
 # ---------------------------------------------------------------------------
-# §3 MessageBubble — body label text has &#8203; for long-word body
+# §3 Scheme-less URL linkification (tincan-09dwq)
+# ---------------------------------------------------------------------------
+
+class TestSchemelessUrlLinkify:
+    """Scheme-less URLs like 'i.cvs.com/wg' must be linkified with an https:// href."""
+
+    def test_schemeless_url_wrapped_in_anchor(self):
+        result = _linkify("Check i.cvs.com/wg for updates")
+        assert '<a href="https://i.cvs.com/wg">i.cvs.com/wg</a>' in result
+
+    def test_schemeless_url_href_gets_https_prefix(self):
+        result = _linkify("Visit example.com/path")
+        assert 'href="https://example.com/path"' in result
+
+    def test_schemed_url_href_unchanged(self):
+        result = _linkify("See https://example.com/path here")
+        assert 'href="https://example.com/path"' in result
+
+    def test_bare_domain_without_path_not_linkified(self):
+        result = _linkify("Visit example.com today")
+        assert "<a href=" not in result
+
+    def test_subdomain_schemeless_url_linkified(self):
+        result = _linkify("Go to cdn.example.com/asset.png")
+        assert 'href="https://cdn.example.com/asset.png"' in result
+
+
+# ---------------------------------------------------------------------------
+# §4 MessageBubble — body label text has &#8203; for long-word body
 # ---------------------------------------------------------------------------
 
 class TestMessageBubbleLongWordWrap:
