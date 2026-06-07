@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QColor, QFont, QIcon, QImage, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -57,6 +57,43 @@ from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
 
 _ASSETS = Path(__file__).parent / "assets"
+
+_BUG_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"
+     stroke="#000000" stroke-width="1.5" stroke-linecap="round">
+  <ellipse cx="8" cy="5.5" rx="3" ry="2.5"/>
+  <line x1="8" y1="3" x2="5" y2="1"/>
+  <line x1="8" y1="3" x2="11" y2="1"/>
+  <ellipse cx="8" cy="10" rx="4.5" ry="4.5"/>
+  <line x1="3.5" y1="8.5" x2="1" y2="7"/>
+  <line x1="3.5" y1="11" x2="1" y2="10.5"/>
+  <line x1="12.5" y1="8.5" x2="15" y2="7"/>
+  <line x1="12.5" y1="11" x2="15" y2="10.5"/>
+</svg>"""
+
+_BELL_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="#000000"
+     stroke="#000000" stroke-width="0.5" stroke-linecap="round">
+  <line x1="7" y1="2" x2="9" y2="2" stroke-width="1.5"/>
+  <path d="M8 2 C5.5 2 3.5 4.5 3.5 7.5 L3.5 11 L12.5 11 L12.5 7.5 C12.5 4.5 10.5 2 8 2 Z"/>
+  <ellipse cx="8" cy="12.5" rx="1.5" ry="1" stroke-width="0"/>
+</svg>"""
+
+_BTN_STYLE = (
+    "QToolButton { border: none; background: transparent; }"
+    " QToolButton:hover { background: rgba(255,255,255,0.12); border-radius: 4px; }"
+    " QToolButton:pressed { background: rgba(255,255,255,0.20); border-radius: 4px; }"
+)
+
+
+def _svg_icon(svg_bytes: bytes, size: int = 18) -> QIcon:
+    """Render an SVG to a QIcon tinted to #ccfbf1."""
+    img = QImage.fromData(svg_bytes, "SVG")
+    img = img.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    pix = QPixmap.fromImage(img)
+    tinted = QPixmap(pix.size())
+    tinted.fill(QColor("#ccfbf1"))
+    tinted.setMask(pix.createMaskFromColor(QColor(0, 0, 0, 0), Qt.MaskMode.MaskInColor))
+    return QIcon(tinted)
+
 
 _NON_DIGIT_RE = re.compile(r"\D")
 
@@ -174,29 +211,25 @@ class TitleBar(QWidget):
         layout.addSpacing(4)
 
         self._bug_btn = QToolButton()
-        self._bug_btn.setText("🐞")
+        self._bug_btn.setIcon(_svg_icon(_BUG_SVG))
+        self._bug_btn.setText("")
+        self._bug_btn.setIconSize(QSize(18, 18))
         self._bug_btn.setFixedSize(32, 32)
         self._bug_btn.setToolTip("File a bug report")
         self._bug_btn.setAccessibleName("File a bug report")
-        self._bug_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
-            " background: transparent; }"
-            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
-        )
+        self._bug_btn.setStyleSheet(_BTN_STYLE)
         layout.addWidget(self._bug_btn)
 
         layout.addSpacing(4)
 
         self._bell_btn = QToolButton()
-        self._bell_btn.setText("🔔")
+        self._bell_btn.setIcon(_svg_icon(_BELL_SVG))
+        self._bell_btn.setText("")
+        self._bell_btn.setIconSize(QSize(18, 18))
         self._bell_btn.setFixedSize(32, 32)
         self._bell_btn.setToolTip("Notification center")
         self._bell_btn.setAccessibleName("Notification center")
-        self._bell_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
-            " background: transparent; }"
-            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
-        )
+        self._bell_btn.setStyleSheet(_BTN_STYLE)
         layout.addWidget(self._bell_btn)
 
         layout.addSpacing(8)
