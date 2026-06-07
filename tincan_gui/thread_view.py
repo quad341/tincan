@@ -613,7 +613,9 @@ class MessageBubble(QWidget):
         if chosen is None:
             return
         if chosen is copy_act:
-            self._body_label.copy()
+            selected = self._body_label.selectedText()
+            if selected:
+                QApplication.clipboard().setText(selected)
         elif chosen is copy_msg_act:
             QApplication.clipboard().setText(self._data.body or "")
         elif chosen is copy_link_act and urls:
