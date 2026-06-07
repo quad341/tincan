@@ -478,6 +478,13 @@ class SettingsDialog(QDialog):
     # Slots
     # ------------------------------------------------------------------
 
+    def reject(self) -> None:
+        s = app_settings()
+        s.setValue("notifications/desktop_enabled", self._desktop_cb.isChecked())
+        s.sync()
+        super().reject()
+
+    @Slot(bool)
     def _on_notif_toggled(self, checked: bool) -> None:
         s = app_settings()
         s.setValue("notifications/desktop_enabled", checked)
