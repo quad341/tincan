@@ -26,6 +26,91 @@ Messaging **sends and receives today**, live-tested against an iPhone over Bluet
 
 Reference setup: iPhone (iOS 26.x) ↔ Fedora 44, BlueZ 5.86, PipeWire, PySide6, Python 3.14.
 
+## Installation
+
+### Requirements
+
+- **Linux** desktop with systemd (Fedora 40+, Ubuntu 24.04+, or equivalent)
+- **BlueZ 5.72+** with `bluez-obexd` — available in most distributions
+- **Python 3.10+** (3.12+ recommended)
+- **PySide6** — `python3-pyside6` on Fedora / `pip install PySide6` elsewhere
+- **python3-dbus** and **python3-gobject** (`python3-gi`) for D-Bus and ANCS
+- **python3-vobject** for vCard parsing (PBAP contacts)
+- An **iPhone** running iOS 14+ with Bluetooth on and already paired to the Linux host
+
+> ⚠️ **BlueZ experimental features are required**
+>
+> Tincan uses ANCS (Apple Notification Center Service), which needs the
+> `Experimental` flag in BlueZ.  Without it the daemon starts, but ANCS
+> notifications will not arrive.
+>
+> Edit `/etc/bluetooth/main.conf`:
+>
+> ```ini
+> [General]
+> Experimental = true
+> ```
+>
+> Then restart BlueZ:
+>
+> ```bash
+> sudo systemctl restart bluetooth
+> ```
+>
+> Verify it took effect:
+>
+> ```bash
+> bluetoothctl show | grep -i experimental
+> # Expected: ExperimentalFeatures: yes
+> ```
+
+### Install from PyPI
+
+```bash
+pip install tincan
+```
+
+### Install from source
+
+```bash
+git clone https://github.com/quad341/tincan.git
+cd tincan
+pip install -e .
+```
+
+### Start the daemon
+
+```bash
+# Replace AA:BB:CC:DD:EE:FF with your iPhone's Bluetooth address
+python -m tincand --device AA:BB:CC:DD:EE:FF
+```
+
+Find your iPhone's address in `bluetoothctl devices` or System Settings → Bluetooth.
+
+### Start the GUI
+
+```bash
+python -m tincan_gui
+```
+
+The GUI connects to the running daemon over D-Bus automatically.
+
+### Pair your iPhone
+
+1. On the iPhone: **Settings → Bluetooth** — find your Linux hostname in the device list.
+2. Tap it and accept the pairing PIN shown on both devices.
+3. On first ANCS connect, iOS shows a **"Show Notifications"** consent prompt — accept it on the phone.
+4. If the daemon was already running, restart it after pairing.
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| Daemon exits "not connected" immediately | iPhone not paired or Bluetooth off | Pair via `bluetoothctl` first; check `hciconfig` |
+| No app notifications | BlueZ experimental not enabled | Follow the `Experimental = true` steps above |
+| No messages / contacts | obexd not running | `sudo systemctl start bluetooth-obexd` or check `obexd --nodetach` |
+| GUI shows "daemon not found" | Daemon not started | Run `python -m tincand` in a terminal first |
+
 ## Architecture
 
 A headless **bus** (daemon) with thin **clients**:
