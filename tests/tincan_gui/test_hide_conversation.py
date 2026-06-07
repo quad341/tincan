@@ -9,17 +9,21 @@ Coverage:
      - hide_requested is wired to archive_conversation
      - archived conversation is no longer visible in the list
      - non-archived conversations remain visible
+
+  §3 Auto-select after hide (tincan-ckvz4)
+     - hiding the selected conversation auto-selects the next visible one
+     - hiding the only conversation emits conversation_selected("")
+     - hiding a non-selected conversation leaves selection unchanged
 """
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from tincan_gui.conversation_list import ConversationData, ConversationItem, ConversationListWidget
 from tincan_gui.archived_conversations import ArchivedConversations
+from tincan_gui.conversation_list import ConversationData, ConversationItem, ConversationListWidget
 
 
 @pytest.fixture(autouse=True)
@@ -120,3 +124,66 @@ class TestConversationListHide:
 
         visible_ids = [i.conversation_id for i in widget._items if i.isVisible()]
         assert sorted(visible_ids) == ["alice", "carol"]
+
+
+# ---------------------------------------------------------------------------
+# §3 Auto-select after hiding selected conversation (tincan-ckvz4)
+# ---------------------------------------------------------------------------
+
+class TestAutoSelectAfterHide:
+    """Hiding the selected conversation must auto-select another or clear the view."""
+
+    def _make_widget(self, conv_ids: list[str], qtbot) -> tuple:
+        """Return (widget, archived_mock) with conv_ids loaded, none archived."""
+        archived = MagicMock(spec=ArchivedConversations)
+        archived.is_archived.return_value = False
+        widget = ConversationListWidget(archived=archived)
+        qtbot.addWidget(widget)
+        widget.load_conversations([_make_conv(cid) for cid in conv_ids])
+        return widget, archived
+
+    def test_hiding_selected_emits_next_conversation(self, qtbot):
+        widget, archived = self._make_widget(["c1", "c2", "c3"], qtbot)
+        # Select c1
+        widget._on_item_activated("c1")
+        selected = []
+        widget.conversation_selected.connect(selected.append)
+
+        archived.is_archived.side_effect = lambda cid: cid == "c1"
+        widget.archive_conversation("c1")
+
+        assert selected and selected[-1] != "c1"
+        assert selected[-1] in ("c2", "c3")
+
+    def test_hiding_selected_deselects_it(self, qtbot):
+        widget, archived = self._make_widget(["c1", "c2"], qtbot)
+        widget._on_item_activated("c1")
+        c1_item = next(i for i in widget._items if i.conversation_id == "c1")
+
+        archived.is_archived.side_effect = lambda cid: cid == "c1"
+        widget.archive_conversation("c1")
+
+        assert not c1_item._selected
+
+    def test_hiding_only_conversation_emits_empty(self, qtbot):
+        widget, archived = self._make_widget(["solo"], qtbot)
+        widget._on_item_activated("solo")
+        selected = []
+        widget.conversation_selected.connect(selected.append)
+
+        archived.is_archived.side_effect = lambda cid: cid == "solo"
+        widget.archive_conversation("solo")
+
+        assert selected == [""]
+
+    def test_hiding_non_selected_leaves_selection_unchanged(self, qtbot):
+        widget, archived = self._make_widget(["c1", "c2"], qtbot)
+        widget._on_item_activated("c1")
+        selected = []
+        widget.conversation_selected.connect(selected.append)
+
+        archived.is_archived.side_effect = lambda cid: cid == "c2"
+        widget.archive_conversation("c2")
+
+        # conversation_selected should NOT have fired (selection unchanged)
+        assert selected == []

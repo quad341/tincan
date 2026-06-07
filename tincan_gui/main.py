@@ -745,6 +745,11 @@ class MainWindow(QMainWindow):
         return self._compose
 
     def _on_conversation_selected(self, conv_id: str) -> None:
+        if not conv_id:
+            self._current_phone = ""
+            self._thread_view.load_thread("", "", [], "SMS")
+            self._sync_compose_state()
+            return
         _trace.emit("conversation_switch", cid=_trace.new_cid(), conv_id=conv_id)
         self.conversation_opened.emit(conv_id)
         conv_data = self._conversations_by_id.get(conv_id)
