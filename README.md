@@ -64,6 +64,17 @@ Reference setup: iPhone (iOS 26.x) ↔ Fedora 44, BlueZ 5.86, PipeWire, PySide6,
 > # Expected: ExperimentalFeatures: yes
 > ```
 
+### Install via COPR (Fedora / RHEL)
+
+```bash
+sudo dnf copr enable quad341/tincan
+sudo dnf install tincan
+```
+
+All dependencies (`python3-pyside6`, `python3-dbus`, `python3-gobject`,
+`python3-vobject`, `bluez-obexd`) are available in the official Fedora 42+
+repositories — no third-party repos required beyond the COPR itself.
+
 ### Install from PyPI
 
 ```bash
