@@ -1315,7 +1315,7 @@ class MainWindow(QMainWindow):
         """Create page 3 (DTMFKeypad + InCallPanel) with timer synced to current call."""
         if self._dtmf_page is not None or self._incall_panel is None:
             return
-        elapsed = self._incall_panel._elapsed
+        elapsed = self._incall_panel.elapsed
         self._dtmf_page = QWidget(self._compose_stack)
         dtmf_layout = QVBoxLayout(self._dtmf_page)
         dtmf_layout.setContentsMargins(0, 0, 0, 0)
@@ -1394,7 +1394,7 @@ class MainWindow(QMainWindow):
                 self._compose_stack.setCurrentIndex(self._PAGE_DTMF)
         else:
             if self._incall_panel is not None:
-                self._incall_panel._keypad_btn.setChecked(False)
+                self._incall_panel.set_keypad_checked(False)
                 self._compose_stack.setCurrentIndex(self._PAGE_INCALL)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:

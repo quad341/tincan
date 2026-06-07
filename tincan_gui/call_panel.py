@@ -214,6 +214,13 @@ class InCallPanel(QWidget):
         m, s = divmod(rem, 60)
         self._timer_lbl.setText(f"{h}:{m:02d}:{s:02d}")
 
+    @property
+    def elapsed(self) -> int:
+        return self._elapsed
+
+    def set_keypad_checked(self, state: bool) -> None:
+        self._keypad_btn.setChecked(state)
+
 
 class DTMFKeypad(QWidget):
     """4×3 DTMF key grid with tone display (tincan-fx79v stretch goal)."""

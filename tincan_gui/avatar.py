@@ -117,7 +117,9 @@ class GroupAvatarWidget(QWidget):
 class AvatarWidget(QLabel):
     """Circular avatar — PBAP photo or initials fallback. Default size is 40×40."""
 
-    def __init__(self, name: str, size: int = _AVATAR_SIZE, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, name: str, size: int = _AVATAR_SIZE, parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self._name = name
         self._size = size
