@@ -22,6 +22,7 @@ Run with: QT_QPA_PLATFORM=offscreen python -m pytest tests/tincand/test_ancs_bac
 from __future__ import annotations
 
 import inspect
+import logging
 import struct
 from unittest.mock import MagicMock, patch
 
@@ -1711,3 +1712,41 @@ class TestStartNotifyInProgress:
         assert backend._subscribe_pending is True
         backend.stop()
         assert backend._subscribe_pending is False
+
+
+# ---------------------------------------------------------------------------
+# §14  _on_adv_error and _probe_le_advertising — actionable diagnostics
+# (tincan-1d69e)
+# ---------------------------------------------------------------------------
+
+
+class TestAdvErrorDiagnostics:
+    def test_adv_error_sets_capability_false_and_logs_remedy(self, ctx, caplog):
+        backend, _, _, mock_service = ctx
+        backend._adapter_path = "/org/bluez/hci0"
+        exc = Exception("org.bluez.Error.Failed: Failed to register advertisement")
+        with caplog.at_level(logging.WARNING, logger="tincand.backends.ancs"):
+            backend._on_adv_error(exc)
+        mock_service.set_capability.assert_called_with("ancs", False)
+        assert "/org/bluez/hci0" in caplog.text
+        assert "USB" in caplog.text or "--experimental" in caplog.text
+
+    def test_adv_error_without_service_does_not_raise(self, ctx):
+        backend, _, _, _ = ctx
+        backend._service = None
+        exc = Exception("org.bluez.Error.Failed")
+        backend._on_adv_error(exc)  # must not raise
+
+    def test_startup_probe_reports_zero_supported_instances(self, ctx, caplog):
+        backend, mock_bus, _, mock_service = ctx
+        backend._bus = mock_bus
+        backend._adapter_path = "/org/bluez/hci0"
+        props_mock = MagicMock()
+        props_mock.GetAll.return_value = {"SupportedInstances": 0, "ActiveInstances": 0}
+        with patch(
+            "tincand.backends.ancs.dbus.Interface", return_value=props_mock
+        ):
+            with caplog.at_level(logging.WARNING, logger="tincand.backends.ancs"):
+                backend._probe_le_advertising()
+        mock_service.set_capability.assert_called_with("ancs", False)
+        assert "USB" in caplog.text or "--experimental" in caplog.text
