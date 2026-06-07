@@ -61,14 +61,19 @@ class MessageCache:
         if not body:
             return
         messages = self.get_messages(conv_id)
-        dedup_key = (direction, sort_key or timestamp, body)
-        existing_keys = {
-            (m.get("direction"), m.get("sort_key") or m.get("timestamp"), m.get("body"))
-            for m in messages
-        }
-        if dedup_key in existing_keys:
-            _trace.emit("cache_dedup", key=conv_id, direction=direction)
-            return
+        if direction == "outbound":
+            if any(m.get("direction") == "outbound" and m.get("body") == body for m in messages):
+                _trace.emit("cache_dedup", key=conv_id, direction=direction)
+                return
+        else:
+            dedup_key = (direction, sort_key or timestamp, body)
+            existing_keys = {
+                (m.get("direction"), m.get("sort_key") or m.get("timestamp"), m.get("body"))
+                for m in messages
+            }
+            if dedup_key in existing_keys:
+                _trace.emit("cache_dedup", key=conv_id, direction=direction)
+                return
         messages.append(
             {
                 "direction": direction,
