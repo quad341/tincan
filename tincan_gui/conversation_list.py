@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from tincan_gui import trace as _trace
 from tincan_gui.archived_conversations import ArchivedConversations
 from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
+from tincan_gui.text_render import render_message_body
 from tincan_gui.theme import is_dark_theme
 
 
@@ -53,6 +54,10 @@ class ConversationData:
     preview_sender: str = ""  # sender name prefix for group preview
 
 
+def _truncate_preview(raw: str, max_chars: int = 36) -> str:
+    return raw[:max_chars] + "…" if len(raw) > max_chars else raw
+
+
 class ConversationItem(QWidget):
     """Single conversation row (h=72)."""
 
@@ -81,6 +86,7 @@ class ConversationItem(QWidget):
         self._data = data
         self._selected = False
         self._dark = is_dark_theme()
+        self._preview_color = "#a1a1aa"
         self.setFixedHeight(72)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -235,18 +241,24 @@ class ConversationItem(QWidget):
             preview_color = "#a1a1aa" if self._dark else "#6b7280"
             no_preview_color = "#71717a" if self._dark else "#9ca3af"
         if raw:
+            self._preview_color = preview_color
             direction = getattr(self._data, "preview_direction", "")
             if self._data.is_group and self._data.preview_sender:
-                body = raw[:40] + "…" if len(raw) > 40 else raw
-                display = f"{self._data.preview_sender}: {body}"
+                display_raw = _truncate_preview(raw, 40)
+                display_raw = f"{self._data.preview_sender}: {display_raw}"
             elif direction == "outbound":
-                body = raw[:30] + "…" if len(raw) > 30 else raw
-                display = f"You: {body}"
+                display_raw = f"You: {_truncate_preview(raw, 30)}"
             else:
-                display = raw[:36] + "…" if len(raw) > 36 else raw
-            self._preview_label.setText(display)
+                display_raw = _truncate_preview(raw)
+            html_body = render_message_body(display_raw, emoji_size=11)
+            html_display = (
+                f"<span style='color: {preview_color}; background: transparent;'>"
+                f"{html_body}</span>"
+            )
+            self._preview_label.setTextFormat(Qt.TextFormat.RichText)
+            self._preview_label.setText(html_display)
             self._preview_label.setStyleSheet(
-                f"background: transparent; border: none; outline: none; color: {preview_color};"
+                "background: transparent; border: none; outline: none;"
             )
             f = self._preview_label.font()
             if self._data.is_group:
@@ -255,6 +267,7 @@ class ConversationItem(QWidget):
             self._preview_label.setFont(f)
             self._preview_label.setAccessibleName(raw)
         else:
+            self._preview_label.setTextFormat(Qt.TextFormat.PlainText)
             self._preview_label.setText("—")
             self._preview_label.setStyleSheet(
                 f"background: transparent; border: none; outline: none; color: {no_preview_color};"
@@ -408,11 +421,7 @@ class ConversationItem(QWidget):
 
     def preview_label_color(self) -> str:
         """Return the hex color applied to the preview label (used by a11y tests)."""
-        style = self._preview_label.styleSheet()
-        for part in style.split(";"):
-            if "color" in part:
-                return part.split(":")[1].strip()
-        return "#6b7280"
+        return self._preview_color
 
     @property
     def conversation_id(self) -> str:

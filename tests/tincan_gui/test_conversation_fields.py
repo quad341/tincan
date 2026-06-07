@@ -9,6 +9,8 @@ Coverage (additional to tincan-a3n and tincan-f0e):
 """
 from __future__ import annotations
 
+import html as _html
+import re
 from unittest.mock import MagicMock, patch
 
 import dbus
@@ -16,6 +18,13 @@ import dbus.service
 import pytest
 
 from tincan_gui.conversation_list import ConversationData, ConversationItem
+
+
+def _label_plain(label) -> str:
+    """Strip HTML tags, unescape entities, and remove zero-width spaces."""
+    t = re.sub(r"<[^>]+>", "", label.text())
+    t = _html.unescape(t)
+    return t.replace("​", "")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -162,7 +171,7 @@ class TestOutboundPreview:
         preview = "a" * 30
         item = self._make_outbound(preview)
         qtbot.addWidget(item)
-        assert item._preview_label.text() == f"You: {preview}"
+        assert _label_plain(item._preview_label) == f"You: {preview}"
 
     def test_outbound_30_char_preview_has_no_ellipsis(self, qtbot):
         preview = "a" * 30
@@ -174,7 +183,7 @@ class TestOutboundPreview:
         preview = "a" * 31
         item = self._make_outbound(preview)
         qtbot.addWidget(item)
-        assert item._preview_label.text() == "You: " + "a" * 30 + "…"
+        assert _label_plain(item._preview_label) == "You: " + "a" * 30 + "…"
 
     def test_outbound_empty_preview_shows_em_dash_not_you_prefix(self, qtbot):
         # Empty preview falls through to the placeholder branch regardless of direction

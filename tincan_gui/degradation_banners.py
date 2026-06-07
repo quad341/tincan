@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tincan_gui.capability_banner import CapabilityBanner
+from tincan_gui.capability_banner import CapabilityBanner  # noqa: F401 — re-exported
 
 # ---------------------------------------------------------------------------
 # State A: Disconnected

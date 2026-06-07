@@ -28,12 +28,10 @@ from PySide6.QtWidgets import (
 from tincan_gui import trace as _trace
 from tincan_gui.avatar import AvatarWidget, _color_for_name
 from tincan_gui.text_render import (
-    _EMOJI_CACHE,
+    _EMOJI_CACHE,  # noqa: F401 — re-exported for tests
     _URL_RE,
-    _break_long_words,
-    _emoji_to_img_tag,
-    _has_visible_pixels,
-    _render_emoji_cairo,
+    _break_long_words,  # noqa: F401 — re-exported for tests
+    _emoji_to_img_tag,  # noqa: F401 — re-exported for tests
     render_message_body,
 )
 from tincan_gui.theme import is_dark_theme
@@ -274,7 +272,7 @@ class MessageBubble(QWidget):
         body_font.setPointSize(13)
         body_label.setFont(body_font)
         body_label.setWordWrap(True)
-        body_label.setMinimumWidth(0)  # override natural-text minimumSizeHint so layout can shrink/wrap
+        body_label.setMinimumWidth(0)  # override minimumSizeHint so layout can shrink/wrap
         body_label.setStyleSheet(f"color: {fg};")
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
             body_label.setText("⚠ Message content unavailable")

@@ -15,6 +15,8 @@ Coverage:
 """
 from __future__ import annotations
 
+import html as _html
+import re
 from unittest.mock import patch
 
 from tincan_gui.conversation_list import ConversationData, ConversationItem, ConversationListWidget
@@ -22,6 +24,13 @@ from tincan_gui.conversation_list import ConversationData, ConversationItem, Con
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _label_plain(label) -> str:
+    """Return label display text as plain string, stripping HTML/entities/ZWS."""
+    t = re.sub(r"<[^>]+>", "", label.text())
+    t = _html.unescape(t)
+    return t.replace("​", "")
 
 def _make_data(**overrides) -> ConversationData:
     defaults = {
@@ -77,7 +86,7 @@ class TestApplyPreviewNonEmpty:
         preview = "a" * 36
         item = ConversationItem(_make_data(preview=preview))
         qtbot.addWidget(item)
-        assert item._preview_label.text() == preview
+        assert _label_plain(item._preview_label) == preview
 
     def test_36_char_preview_has_no_ellipsis(self, qtbot):
         preview = "a" * 36
@@ -89,7 +98,7 @@ class TestApplyPreviewNonEmpty:
         preview = "a" * 37
         item = ConversationItem(_make_data(preview=preview))
         qtbot.addWidget(item)
-        assert item._preview_label.text() == "a" * 36 + "…"
+        assert _label_plain(item._preview_label) == "a" * 36 + "…"
 
     def test_non_empty_preview_is_not_italic(self, qtbot):
         item = ConversationItem(_make_data(preview="Hello"))
@@ -168,7 +177,7 @@ class TestUpdateData:
         item = ConversationItem(_make_data(preview="Old message"))
         qtbot.addWidget(item)
         item.update_data(_make_data(preview="New message"))
-        assert item._preview_label.text() == "New message"
+        assert _label_plain(item._preview_label) == "New message"
 
     def test_update_shows_dot_when_unread_increments(self, qtbot):
         item = ConversationItem(_make_data(unread_count=0))
@@ -271,7 +280,7 @@ class TestConversationListUpdateItem:
         assert w._update_timer.isActive()
         # Wait past the 200ms window for the timer to fire
         qtbot.wait(250)
-        assert w._items[0]._preview_label.text() == "Third"
+        assert _label_plain(w._items[0]._preview_label) == "Third"
 
     def test_update_not_applied_before_timer_fires(self, qtbot):
         w = ConversationListWidget()
@@ -282,4 +291,4 @@ class TestConversationListUpdateItem:
 
         # Timer started but not yet fired — item still shows original preview
         assert w._update_timer.isActive()
-        assert w._items[0]._preview_label.text() == "Original"
+        assert _label_plain(w._items[0]._preview_label) == "Original"

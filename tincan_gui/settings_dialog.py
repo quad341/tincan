@@ -444,7 +444,7 @@ class SettingsDialog(QDialog):
             action = self._filter_apps.get(app_id, "allow")
             row = _AppRowWidget(app_id, label_hint, action, self._client, self._dark)
             item = QListWidgetItem()
-            item.setSizeHint(QSize(1, row.sizeHint().height()))  # width=1: let view use viewport width
+            item.setSizeHint(QSize(1, row.sizeHint().height()))  # width=1: viewport controls width
             self._list_widget.addItem(item)
             self._list_widget.setItemWidget(item, row)
             self._row_widgets.append(row)

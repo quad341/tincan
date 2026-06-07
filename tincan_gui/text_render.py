@@ -126,7 +126,11 @@ def _emoji_to_img_tag(emoji: str, point_size: int) -> str:
 
     if png_bytes:
         b64 = base64.b64encode(png_bytes).decode("ascii")
-        tag = f'<img src="data:image/png;base64,{b64}" style="vertical-align:middle" />'
+        alt = _html.escape(emoji)
+        tag = (
+            f'<img src="data:image/png;base64,{b64}"'
+            f' alt="{alt}" style="vertical-align:middle" />'
+        )
     else:
         tag = _html.escape(emoji)
 

@@ -117,23 +117,26 @@ class GroupAvatarWidget(QWidget):
 class AvatarWidget(QLabel):
     """40×40 circular avatar — PBAP photo or initials fallback."""
 
-    def __init__(self, name: str, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, name: str, size: int = _AVATAR_SIZE, parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self._name = name
-        self.setFixedSize(_AVATAR_SIZE, _AVATAR_SIZE)
+        self._size = size
+        self.setFixedSize(size, size)
         self.setFocusPolicy(Qt.NoFocus)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setStyleSheet("border: none; outline: none; background: transparent;")
         self._show_initials()
 
     def _show_initials(self) -> None:
-        px = _make_initials_pixmap(self._name, _AVATAR_SIZE)
+        px = _make_initials_pixmap(self._name, self._size)
         self.setPixmap(px)
         self.setAccessibleName(self.tr("Contact photo for {}").format(self._name))
 
     def set_photo(self, data: bytes) -> None:
         """Display PBAP photo (raw JPEG/PNG bytes). Falls back to initials on decode error."""
-        px = _make_photo_pixmap(data, _AVATAR_SIZE)
+        px = _make_photo_pixmap(data, self._size)
         if px.isNull():
             self._show_initials()
         else:

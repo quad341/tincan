@@ -13,8 +13,19 @@ Coverage:
 """
 from __future__ import annotations
 
+import html as _html
+import re
+
 from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
 from tincan_gui.conversation_list import ConversationData, ConversationItem
+
+
+def _label_plain(label) -> str:
+    """Strip HTML tags, unescape entities, and remove zero-width spaces."""
+    t = re.sub(r"<[^>]+>", "", label.text())
+    t = _html.unescape(t)
+    return t.replace("​", "")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -178,7 +189,7 @@ class TestGroupCardPreview:
             )
         )
         qtbot.addWidget(item)
-        assert item._preview_label.text() == "Alice: hi"
+        assert _label_plain(item._preview_label) == "Alice: hi"
 
     def test_preview_without_sender_shows_body_only(self, qtbot):
         item = ConversationItem(
