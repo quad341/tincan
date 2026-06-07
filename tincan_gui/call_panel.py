@@ -48,7 +48,7 @@ class IncomingCallDialog(QDialog):
 
         avatar = AvatarWidget(caller_name, size=68)
         if avatar_pixmap:
-            avatar.set_photo(avatar_pixmap)
+            avatar.set_photo_pixmap(avatar_pixmap)
         layout.addWidget(avatar, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         name_lbl = QLabel(caller_name or caller_number)
@@ -127,12 +127,13 @@ class InCallPanel(QWidget):
         caller_name: str,
         avatar_pixmap: QPixmap | None,
         parent: QWidget,
+        elapsed_offset: int = 0,
     ) -> None:
         super().__init__(parent)
         self.setStyleSheet("background: #18181b; border-top: 2px solid #0d9488;")
         self.setFixedHeight(88)
         self._held = False
-        self._elapsed = 0
+        self._elapsed = elapsed_offset
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick)
@@ -144,7 +145,7 @@ class InCallPanel(QWidget):
 
         avatar = AvatarWidget(caller_name, size=44)
         if avatar_pixmap:
-            avatar.set_photo(avatar_pixmap)
+            avatar.set_photo_pixmap(avatar_pixmap)
         row.addWidget(avatar)
 
         info_col = QVBoxLayout()
@@ -218,6 +219,7 @@ class DTMFKeypad(QWidget):
     """4×3 DTMF key grid with tone display (tincan-fx79v stretch goal)."""
 
     tone_pressed = Signal(str)
+    close_requested = Signal()   # emitted on Escape; callers should hide or page-switch
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -259,7 +261,7 @@ class DTMFKeypad(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self.hide()
+            self.close_requested.emit()
         else:
             super().keyPressEvent(event)
 
