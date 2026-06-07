@@ -349,7 +349,7 @@ class DesktopNotifier:
                 summary,
                 body,
                 dbus.Array(
-                    ["default", "Open", "reply", "Reply", "mark-read", "Mark as Read"],
+                    ["default", "Open", "mark-read", "Mark as Read"],
                     signature="s",
                 ),
                 dbus.Dictionary(_hints, signature="sv"),

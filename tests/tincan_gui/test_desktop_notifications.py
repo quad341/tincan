@@ -13,7 +13,7 @@ Coverage:
   - TrayIcon.sync_notifications_action(): checkbox state synchronization
   - TrayIcon._on_menu_about_to_show(): reads desktop_enabled from QSettings on open
   - §4b Persistence (tincan-nxino): setting survives across QSettings instances (simulate restart)
-  - §11 Actionable notifications (tincan-5ptsg): reply + mark-read action buttons
+  - §11 Actionable notifications (tincan-5ptsg): mark-read action button
 """
 from __future__ import annotations
 
@@ -899,16 +899,19 @@ class TestMessageReceivedTriggersNotification:
 
 
 # ---------------------------------------------------------------------------
-# §11 Actionable notifications — reply + mark-read buttons (tincan-5ptsg)
+# §11 Actionable notifications — mark-read button (tincan-5ptsg)
 # ---------------------------------------------------------------------------
 
 class TestActionableNotifications:
-    """Notifications expose 'reply' and 'mark-read' action buttons; each fires the right callback.
+    """Notifications expose 'mark-read' action button; 'reply' was removed (tincan-simoa):
+    KDE Plasma intercepts 'reply' as a special inline-reply action, preventing
+    ActionInvoked from firing, so the action was removed to avoid the broken UX.
+    The signal handler still accepts 'reply' defensively for other daemons.
     """
 
     # --- action buttons appear in Notify() call ---
 
-    def test_notify_call_includes_reply_action(self):
+    def test_notify_call_does_not_include_reply_action(self):
         mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
         mock_iface.Notify.return_value = 1
         notifier, mock_bus = _make_notifier_with_mock_bus()
@@ -920,7 +923,7 @@ class TestActionableNotifications:
                 notifier.dispatch(_INBOUND_NEW)
 
         actions = mock_iface.Notify.call_args[0][5]
-        assert "reply" in actions, f"'reply' action id missing from {actions}"
+        assert "reply" not in actions, f"'reply' action id should be absent from {actions}"
 
     def test_notify_call_includes_mark_read_action(self):
         mock_dbus, mock_glib, mock_iface = _make_dbus_mock()
