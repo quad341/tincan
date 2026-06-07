@@ -94,6 +94,34 @@ def _same_conv(a: str, b: str) -> bool:
     return na == nb
 
 
+def _within_window(a: str, b: str, window_s: int) -> bool:
+    """True if two YYYYMMDDTHHMMSS stamps are within window_s seconds.
+    Returns False on any parse failure (never collapse on bad data)."""
+    try:
+        ta = datetime.strptime(a, "%Y%m%dT%H%M%S")
+        tb = datetime.strptime(b, "%Y%m%dT%H%M%S")
+    except (ValueError, TypeError):
+        return False
+    return abs((ta - tb).total_seconds()) <= window_s
+
+
+def _collapse_outbound_echoes(messages: list, window_s: int = 300) -> list:
+    """Drop OUTBOUND duplicates: same body within window_s of an earlier kept
+    outbound copy. Keeps intentional re-sends (far apart) and all inbound.
+    Assumes *messages* is sorted ascending by sort_key/timestamp."""
+    kept = []
+    last_out: dict[str, str] = {}  # body -> sort_key of last kept outbound copy
+    for m in messages:
+        if m.bubble_type == BubbleType.OUTBOUND and m.body:
+            prev = last_out.get(m.body)
+            cur = m.sort_key or m.timestamp
+            if prev is not None and _within_window(prev, cur, window_s):
+                continue
+            last_out[m.body] = cur
+        kept.append(m)
+    return kept
+
+
 class TitleBar(QWidget):
     """Title bar (h=48, forest teal): wordmark + gear + bug-report button + connection status."""
 
@@ -731,6 +759,7 @@ class MainWindow(QMainWindow):
         ]
         cached += self._sent_cache.get(cache_key, [])
         cached.sort(key=lambda m: m.sort_key or m.timestamp)
+        cached = _collapse_outbound_echoes(cached)
         self._compose.hide_send_error()
         self._thread_view.load_thread(
             name, conv_id, cached, "SMS",
@@ -778,6 +807,7 @@ class MainWindow(QMainWindow):
 
         if extras:
             messages = sorted(messages + extras, key=lambda m: m.sort_key or m.timestamp)
+        messages = _collapse_outbound_echoes(messages)
         _trace.emit("thread_load", conv_id=conv_id, live=len(raw_msgs),
                     extras=len(extras), total=len(messages))
         self._thread_view.load_thread(
