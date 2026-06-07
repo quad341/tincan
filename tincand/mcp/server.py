@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 
 from tincand.mcp.dbus_bridge import (
     TincandDBusBridge,
@@ -80,7 +80,20 @@ def get_daemon_status() -> dict:
     """
     try:
         return _bridge.get_status()
-    except (TincandNotRunning, TincandNotConnected, TincandInvalidArgument, TincandError) as e:
+    except TincandNotRunning:
+        return {
+            "connected": False,
+            "device_address": "",
+            "device_name": "",
+            "capabilities": {
+                "messages": False,
+                "contacts": False,
+                "contacts_empty": True,
+                "ancs": False,
+                "ancs_needs_repair": False,
+            },
+        }
+    except (TincandNotConnected, TincandInvalidArgument, TincandError) as e:
         _mcp_error(e)
 
 
@@ -247,6 +260,8 @@ def set_app_filter(app_id: str, action: str) -> dict:
     """Set the notification filter action for a specific app.
 
     ⚠️  SIDE EFFECT: Persists immediately to ~/.config/tincan/tincan.ini.
+    Takes effect on the next notification from this app — does not affect
+    any notifications already queued.
 
     Args:
       app_id: iOS bundle identifier (e.g. "com.apple.mobilesms").
@@ -334,7 +349,6 @@ def resource_status() -> str:
     try:
         return json.dumps(_bridge.get_status(), ensure_ascii=False)
     except (TincandNotRunning, TincandNotConnected, TincandInvalidArgument, TincandError) as e:
-        from mcp.server.fastmcp.exceptions import ResourceError
         raise ResourceError(str(e)) from e
 
 
@@ -344,7 +358,6 @@ def resource_conversations() -> str:
     try:
         return json.dumps(_bridge.list_conversations(), ensure_ascii=False)
     except (TincandNotRunning, TincandNotConnected, TincandInvalidArgument, TincandError) as e:
-        from mcp.server.fastmcp.exceptions import ResourceError
         raise ResourceError(str(e)) from e
 
 
@@ -356,7 +369,6 @@ def resource_messages(id: str) -> str:
     try:
         return json.dumps(_bridge.get_messages(id), ensure_ascii=False)
     except (TincandNotRunning, TincandNotConnected, TincandInvalidArgument, TincandError) as e:
-        from mcp.server.fastmcp.exceptions import ResourceError
         raise ResourceError(str(e)) from e
 
 
@@ -366,5 +378,4 @@ def resource_contacts() -> str:
     try:
         return json.dumps(_bridge.get_contacts(), ensure_ascii=False)
     except (TincandNotRunning, TincandNotConnected, TincandInvalidArgument, TincandError) as e:
-        from mcp.server.fastmcp.exceptions import ResourceError
         raise ResourceError(str(e)) from e

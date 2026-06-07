@@ -80,10 +80,10 @@ class DaemonSettings:
         """Atomically flush the in-memory parser to disk."""
         self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = self._path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as fh:
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(fd, "w", encoding="utf-8") as fh:
             self._parser.write(fh)
         os.replace(tmp, self._path)
-        self._path.chmod(0o600)
 
     def beginGroup(self, group: str) -> None:
         """Push *group* onto the group stack (QSettings.beginGroup semantics)."""
