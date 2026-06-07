@@ -11,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui import trace as _trace
-from tincan_gui.avatar import _color_for_name
+from tincan_gui.avatar import _color_for_name, _make_initials_pixmap
 from tincan_gui.bug_report import BugReportDialog as _BugReportDialog
 from tincan_gui.bug_report import write_report as _write_bug_report
 from tincan_gui.compose_panel import ComposePanel
@@ -282,6 +282,39 @@ class _ChipWidget(QWidget):
         return self._phone
 
 
+class _ContactSuggestionRow(QWidget):
+    """Autocomplete row: 20px avatar circle + name (12px) + phone (10px)."""
+
+    def __init__(self, name: str, phone: str, dim: bool = False):
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
+
+        avatar_lbl = QLabel()
+        avatar_lbl.setFixedSize(20, 20)
+        avatar_lbl.setPixmap(_make_initials_pixmap(name or phone, 20))
+        layout.addWidget(avatar_lbl)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(0)
+        name_lbl = QLabel(name or phone)
+        name_lbl.setStyleSheet(
+            f"color: {'#9ca3af' if dim else '#f4f4f5'}; font-size: 12px;"
+        )
+        text_col.addWidget(name_lbl)
+        if name and phone:
+            phone_lbl = QLabel(phone)
+            phone_lbl.setStyleSheet("color: #9ca3af; font-size: 10px;")
+            text_col.addWidget(phone_lbl)
+
+        layout.addLayout(text_col)
+        layout.addStretch()
+
+
+MAX_SUGGESTIONS = 8
+
+
 class NewConversationDialog(QDialog):
     """Multi-chip compose dialog for starting a new 1:1 or group conversation."""
 
@@ -342,7 +375,7 @@ class NewConversationDialog(QDialog):
             "QListWidget::item:selected { background: #3f3f46; }"
             "QListWidget::item:hover { background: #3f3f46; }"
         )
-        self._autocomplete.setMaximumHeight(120)
+        self._autocomplete.setMaximumHeight(MAX_SUGGESTIONS * 34 + 4)
         self._autocomplete.itemActivated.connect(self._on_autocomplete_selected)
         self._autocomplete.setAccessibleName("Autocomplete suggestions")
         layout.addWidget(self._autocomplete)
@@ -417,15 +450,33 @@ class NewConversationDialog(QDialog):
         self._update_ok_button()
         self._refresh_autocomplete(self._text_input.text())
 
+    def _add_suggestion_item(self, contact: dict, dim: bool = False) -> None:
+        name = str(contact.get("name", ""))
+        phone = str(contact.get("phone", ""))
+        item = QListWidgetItem()
+        item.setData(Qt.UserRole, {"name": name, "phone": phone})
+        item.setSizeHint(QSize(0, 34))
+        self._autocomplete.addItem(item)
+        self._autocomplete.setItemWidget(item, _ContactSuggestionRow(name, phone, dim=dim))
+
+    def _show_quick_picks(self, chipped_phones: set) -> None:
+        recent = [c for c in self._contacts if c.get("phone") not in chipped_phones]
+        recent = recent[:MAX_SUGGESTIONS]
+        for contact in recent:
+            self._add_suggestion_item(contact, dim=True)
+        self._autocomplete.setVisible(bool(recent))
+        self._autocomplete.setAccessibleName(f"{len(recent)} recent contacts")
+
     def _refresh_autocomplete(self, query: str) -> None:
         self._autocomplete.clear()
         chipped_phones = {c.phone for c in self._chips}
         query = query.strip().lower()
+
         if not query:
-            # Don't flood the list before the user has typed anything.
-            self._autocomplete.setVisible(False)
+            self._show_quick_picks(chipped_phones)
             return
-        contact_found = False
+
+        matches = []
         for contact in self._contacts:
             name = str(contact.get("name", ""))
             phone = str(contact.get("phone", ""))
@@ -433,23 +484,36 @@ class NewConversationDialog(QDialog):
                 continue
             if query not in name.lower() and query not in phone.lower():
                 continue
-            contact_found = True
-            display = f"{name}  {phone}" if name else phone
-            item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, {"name": name, "phone": phone})
-            self._autocomplete.addItem(item)
-        if not contact_found:
-            # Allow arbitrary phone/name entry: show an "Add as recipient" item.
-            raw_query = self._text_input.text().strip()
-            add_item = QListWidgetItem(f"Add '{raw_query}' as recipient")
-            add_item.setData(Qt.UserRole, {"name": raw_query, "phone": raw_query})
+            matches.append(contact)
+
+        visible = matches[:MAX_SUGGESTIONS]
+        overflow = len(matches) - len(visible)
+
+        for contact in visible:
+            self._add_suggestion_item(contact)
+
+        if not visible:
+            raw = self._text_input.text().strip()
+            add_item = QListWidgetItem(f"Add '{raw}' as recipient")
+            add_item.setData(Qt.UserRole, {"name": raw, "phone": raw})
             add_item.setForeground(self._autocomplete.palette().placeholderText())
             self._autocomplete.addItem(add_item)
-        count = self._autocomplete.count()
-        self._autocomplete.setVisible(count > 0)
-        self._autocomplete.setAccessibleName(f"{count} suggestions")
+        elif overflow > 0:
+            word = "match" if overflow == 1 else "matches"
+            footer = QListWidgetItem(
+                f"{overflow} more {word} — type more to narrow"
+            )
+            footer.setFlags(Qt.ItemFlag.NoItemFlags)
+            footer.setForeground(QColor("#6b7280"))
+            footer.setBackground(QColor("#1f2937"))
+            self._autocomplete.addItem(footer)
+
+        self._autocomplete.setVisible(self._autocomplete.count() > 0)
+        self._autocomplete.setAccessibleName(f"{min(len(matches), MAX_SUGGESTIONS)} suggestions")
 
     def _on_autocomplete_selected(self, item: QListWidgetItem) -> None:
+        if not (item.flags() & Qt.ItemFlag.ItemIsSelectable):
+            return
         data = item.data(Qt.UserRole)
         if data:
             display = data.get("name") or data.get("phone", "")
