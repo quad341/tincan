@@ -499,6 +499,8 @@ class MainWindow(QMainWindow):
         self._sent_cache: dict[str, list[MessageData]] = {}  # conv_id → sent msgs; thread render
         self._failed_sends: dict[str, set[str]] = {}  # phone → {body}; survives reload
         self._msg_cache = MessageCache()
+        self._avatar_prefetch_timer: QTimer | None = None
+        self._avatar_prefetch_queue: list[str] = []
         self._notifier = DesktopNotifier(
             on_action_invoked=self._on_notification_clicked,
             on_mark_read=self._on_notification_mark_read,
@@ -832,8 +834,31 @@ class MainWindow(QMainWindow):
         self._apply_capabilities(caps)
         self._tray.set_connected(True)
         self._load_conversations()
+        QTimer.singleShot(500, self._schedule_avatar_prefetch)
+
+    def _schedule_avatar_prefetch(self) -> None:
+        if self._avatar_prefetch_timer and self._avatar_prefetch_timer.isActive():
+            return
+        self._avatar_prefetch_queue = list(self._conversations_by_id.keys())
+        if not self._avatar_prefetch_queue:
+            return
+        self._avatar_prefetch_timer = QTimer(self)
+        self._avatar_prefetch_timer.setInterval(200)
+        self._avatar_prefetch_timer.timeout.connect(self._prefetch_next_avatar)
+        self._avatar_prefetch_timer.start()
+
+    def _prefetch_next_avatar(self) -> None:
+        if not self._avatar_prefetch_queue:
+            if self._avatar_prefetch_timer:
+                self._avatar_prefetch_timer.stop()
+            return
+        conv_id = self._avatar_prefetch_queue.pop(0)
+        self._dbus_client.fetch_contact_photo(conv_id)
 
     def _on_daemon_disconnected(self) -> None:
+        if self._avatar_prefetch_timer:
+            self._avatar_prefetch_timer.stop()
+        self._avatar_prefetch_queue.clear()
         self._connected_device = ""
         self._messages_ok = False
         self._sent_bodies.clear()
