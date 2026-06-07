@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
 from tincan_gui import trace as _trace
 from tincan_gui.avatar import _color_for_name
 from tincan_gui.bug_report import write_report as _write_bug_report
+from tincan_gui.call_panel import AudioErrorPanel, DTMFKeypad, InCallPanel, IncomingCallDialog
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.daemon_config import load_daemon_config
@@ -474,6 +476,13 @@ class MainWindow(QMainWindow):
             on_action_invoked=self._on_notification_clicked,
             on_mark_read=self._on_notification_mark_read,
         )
+        # HFP call state (tincan-fx79v.2)
+        self._call_caller_name: str = ""
+        self._incall_dialog: IncomingCallDialog | None = None
+        self._incall_panel: InCallPanel | None = None
+        self._audio_err_panel: AudioErrorPanel | None = None
+        self._dtmf_page: QWidget | None = None
+        self._dtmf_keypad: DTMFKeypad | None = None
         self._build()
         self._wire()
         self._dbus_client = TincandClient(self)
@@ -532,7 +541,7 @@ class MainWindow(QMainWindow):
         self._conv_list.setMinimumWidth(200)
         splitter.addWidget(self._conv_list)
 
-        # Right: thread view + compose panel
+        # Right: thread view + compose/call stack
         right_pane = QWidget()
         right_layout = QVBoxLayout(right_pane)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -541,8 +550,11 @@ class MainWindow(QMainWindow):
         self._thread_view = ThreadView()
         right_layout.addWidget(self._thread_view, stretch=1)
 
+        # compose_stack: page 0=ComposePanel (always present); pages 1-3 added per-call
+        self._compose_stack = QStackedWidget()
         self._compose = ComposePanel()
-        right_layout.addWidget(self._compose)
+        self._compose_stack.addWidget(self._compose)   # index 0
+        right_layout.addWidget(self._compose_stack)
 
         splitter.addWidget(right_pane)
         splitter.setSizes([300, 724])
@@ -585,6 +597,12 @@ class MainWindow(QMainWindow):
         c.message_send_accepted.connect(self._on_send_accepted)
         c.message_send_failed.connect(self._on_send_failed)
         self.refresh_requested.connect(self._load_conversations)
+        # HFP call signals (tincan-fx79v.2)
+        c.call_incoming.connect(self._on_call_incoming)
+        c.call_connected.connect(self._on_call_connected)
+        c.call_ended.connect(self._on_call_ended)
+        c.audio_error.connect(self._on_audio_error)
+        c.audio_restored.connect(self._on_audio_restored)
 
     def _maybe_spawn_daemon(self) -> None:
         """Spawn tincand if config has a device and no spawn has been attempted yet."""
@@ -1235,6 +1253,149 @@ class MainWindow(QMainWindow):
             warnings.simplefilter("ignore", DeprecationWarning)
             QApplication.setActiveWindow(self)
         widget.setFocus()
+
+    # ------------------------------------------------------------------
+    # HFP call state machine (tincan-fx79v.2)
+    # Pages: 0=ComposePanel, 1=InCallPanel, 2=AudioErrorPanel, 3=DTMFPage
+    # ------------------------------------------------------------------
+
+    _PAGE_COMPOSE = 0
+    _PAGE_INCALL = 1
+    _PAGE_AUDIO_ERR = 2
+    _PAGE_DTMF = 3
+
+    def _on_call_incoming(self, caller_name: str, caller_number: str) -> None:
+        """Show IncomingCallDialog; answer/decline handled by dialog signals."""
+        self._call_caller_name = caller_name or caller_number
+        dlg = IncomingCallDialog(
+            caller_name=caller_name,
+            caller_number=caller_number,
+            avatar_pixmap=None,
+            parent=self,
+        )
+        self._incall_dialog = dlg
+        dlg.answered.connect(
+            lambda: self._enter_call(self._call_caller_name)
+        )
+        dlg.declined.connect(self._on_call_decline)
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+
+    def _on_call_decline(self) -> None:
+        self._incall_dialog = None
+
+    def _enter_call(self, caller_name: str) -> None:
+        """Build pages 1-2 and switch compose_stack to InCallPanel (page 1).
+
+        Page 3 (DTMFKeypad+InCallPanel) is created lazily on first keypad open
+        so the embedded InCallPanel timer is synced to the actual call elapsed time.
+        """
+        self._incall_dialog = None
+        self._call_caller_name = caller_name
+
+        # Page 1: InCallPanel
+        self._incall_panel = InCallPanel(caller_name, None, self._compose_stack)
+        self._incall_panel.hang_up_requested.connect(self._on_hang_up)
+        self._incall_panel.hold_toggled.connect(self._on_hold_toggled)
+        self._incall_panel.keypad_toggled.connect(self._on_keypad_toggled)
+        self._compose_stack.insertWidget(self._PAGE_INCALL, self._incall_panel)
+
+        # Page 2: AudioErrorPanel
+        self._audio_err_panel = AudioErrorPanel(self._compose_stack)
+        self._audio_err_panel.hang_up_requested.connect(self._on_hang_up)
+        self._audio_err_panel.retry_requested.connect(self._on_retry_audio)
+        self._compose_stack.insertWidget(self._PAGE_AUDIO_ERR, self._audio_err_panel)
+
+        # Page 3 is created in _on_keypad_toggled(True) with synced elapsed time
+
+        self._compose_stack.setCurrentIndex(self._PAGE_INCALL)
+
+    def _build_dtmf_page(self) -> None:
+        """Create page 3 (DTMFKeypad + InCallPanel) with timer synced to current call."""
+        if self._dtmf_page is not None or self._incall_panel is None:
+            return
+        elapsed = self._incall_panel.elapsed
+        self._dtmf_page = QWidget(self._compose_stack)
+        dtmf_layout = QVBoxLayout(self._dtmf_page)
+        dtmf_layout.setContentsMargins(0, 0, 0, 0)
+        dtmf_layout.setSpacing(0)
+        self._dtmf_keypad = DTMFKeypad(self._dtmf_page)
+        self._dtmf_keypad.tone_pressed.connect(self._on_dtmf_tone)
+        self._dtmf_keypad.close_requested.connect(lambda: self._on_keypad_toggled(False))
+        dtmf_layout.addWidget(self._dtmf_keypad)
+        dtmf_incall = InCallPanel(
+            self._call_caller_name, None, self._dtmf_page, elapsed_offset=elapsed,
+        )
+        dtmf_incall.hang_up_requested.connect(self._on_hang_up)
+        dtmf_incall.hold_toggled.connect(self._on_hold_toggled)
+        dtmf_incall.keypad_toggled.connect(
+            lambda on: self._on_keypad_toggled(on) if not on else None
+        )
+        dtmf_layout.addWidget(dtmf_incall)
+        self._compose_stack.insertWidget(self._PAGE_DTMF, self._dtmf_page)
+
+    def _exit_call(self) -> None:
+        """Remove pages 1-3 and restore ComposePanel (page 0)."""
+        self._compose_stack.setCurrentIndex(self._PAGE_COMPOSE)
+        for attr in ("_dtmf_page", "_audio_err_panel", "_incall_panel"):
+            w = getattr(self, attr)
+            if w is not None:
+                self._compose_stack.removeWidget(w)
+                w.deleteLater()
+                setattr(self, attr, None)
+        self._dtmf_keypad = None
+
+    def _on_call_connected(self) -> None:
+        """CallConnected: ensure we're on the InCallPanel page (answer already switches)."""
+        if self._incall_panel is not None:
+            self._compose_stack.setCurrentIndex(self._PAGE_INCALL)
+
+    def _on_call_ended(self) -> None:
+        self._exit_call()
+
+    def _on_audio_error(self, reason: str) -> None:
+        if self._audio_err_panel is not None:
+            self._compose_stack.setCurrentIndex(self._PAGE_AUDIO_ERR)
+
+    def _on_audio_restored(self) -> None:
+        if self._incall_panel is not None:
+            self._compose_stack.setCurrentIndex(self._PAGE_INCALL)
+
+    def _on_hang_up(self) -> None:
+        try:
+            self._dbus_client._dbus_call(
+                "im.tincan.Calls", "HangUp"
+            )
+        except Exception:
+            pass
+        self._exit_call()
+
+    def _on_hold_toggled(self, held: bool) -> None:
+        try:
+            method = "Hold" if held else "Unhold"
+            self._dbus_client._dbus_call("im.tincan.Calls", method)
+        except Exception:
+            pass
+
+    def _on_retry_audio(self) -> None:
+        try:
+            self._dbus_client._dbus_call("im.tincan.Calls", "RetrySco")
+        except Exception:
+            pass
+
+    def _on_dtmf_tone(self, key: str) -> None:
+        self._dbus_client.send_dtmf(key)
+
+    def _on_keypad_toggled(self, on: bool) -> None:
+        if on:
+            self._build_dtmf_page()
+            if self._dtmf_page is not None:
+                self._compose_stack.setCurrentIndex(self._PAGE_DTMF)
+        else:
+            if self._incall_panel is not None:
+                self._incall_panel.set_keypad_checked(False)
+                self._compose_stack.setCurrentIndex(self._PAGE_INCALL)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()

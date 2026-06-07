@@ -73,6 +73,12 @@ _GUI_SUBSCRIPTIONS: list[tuple[str, str, str, str]] = [
     (IFACE_MESSAGES, "MessageSent",             "_on_message_sent",            "QString"),
     (IFACE_MESSAGES, "ConversationUpdated",     "_on_conversation_updated",    "QVariantMap"),
     (IFACE_MESSAGES, "ContactPhotoReceived",    "_on_contact_photo_received",  "QString,QByteArray"),
+    # im.tincan.Calls — HFP call signals (pending daemon implementation; tincan-xohrx)
+    ("im.tincan.Calls", "IncomingCall",   "_on_call_incoming",  "QString,QString"),
+    ("im.tincan.Calls", "CallConnected",  "_on_call_connected", ""),
+    ("im.tincan.Calls", "CallEnded",      "_on_call_ended",     ""),
+    ("im.tincan.Calls", "AudioError",     "_on_audio_error",    "QString"),
+    ("im.tincan.Calls", "AudioRestored",  "_on_audio_restored", ""),
 ]
 
 # (interface, method_name) — every iface.call()/asyncCall()/_dbus_call() in TincandClient
@@ -99,8 +105,17 @@ _DBUS_SIG_ARG_COUNT = {
     "s": 1,      # string
     "b": 1,      # bool
     "sb": 2,     # string + bool
+    "ss": 2,     # two strings (e.g. IncomingCall: caller_name, caller_number)
     "a{sv}": 1,  # variant map
     "say": 2,    # string + byte array
+}
+
+# Interfaces whose signals are not yet exported by the daemon.
+# §1 (test_signal_exists_in_daemon) xfails for entries whose iface is in this set
+# so the contract table stays complete without requiring the daemon to implement
+# those interfaces first.
+_KNOWN_PENDING_DAEMON_IFACES: set[str] = {
+    "im.tincan.Calls",  # HFP call/audio signals — pending tincan-xohrx
 }
 
 
@@ -169,6 +184,10 @@ class TestGuiSubscriptionsMatchDaemonSignals:
         ids=[f"{iface.split('.')[-1]}.{sig}" for iface, sig, *_ in _GUI_SUBSCRIPTIONS],
     )
     def test_signal_exists_in_daemon(self, iface, signal, handler, slot_types):
+        if iface in _KNOWN_PENDING_DAEMON_IFACES:
+            pytest.xfail(
+                f"{iface} not yet exported by daemon — pending tincan-xohrx"
+            )
         signals = _daemon_signals()
         assert (iface, signal) in signals, (
             f"GUI subscribes to {iface}.{signal} but TincanService has no "
