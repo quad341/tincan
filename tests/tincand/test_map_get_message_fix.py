@@ -5,7 +5,7 @@ org.bluez.obex.Message1.Get(targetfile, attachment) on each message's own
 D-Bus object, not MessageAccess1.GetMessage(handle, targetfile, options).
 
 Coverage:
-  - _fetch_raw_bmsg calls Message1.Get("", False) — not GetMessage
+  - _fetch_raw_bmsg calls Message1.Get(tmpfile, False) — not GetMessage
   - _fetch_raw_bmsg does NOT call MessageAccess1.GetMessage at all
   - The message's D-Bus object is fetched by path (not by handle extraction)
   - Failed Get() is cached in _failed_handles — same backoff as before
@@ -75,12 +75,12 @@ class TestFetchRawBmsgUsesMessage1Get:
         backend._fetch_raw_bmsg(_MSG_PATH)
         assert mock_msg1.Get.called, "Message1.Get() must be called to fetch body"
 
-    def test_message1_get_called_with_empty_targetfile(self, _patched):
+    def test_message1_get_called_with_tmpfile_targetfile(self, _patched):
         backend, _access, mock_msg1 = _patched
         backend._fetch_raw_bmsg(_MSG_PATH)
         assert mock_msg1.Get.called, "Message1.Get() must have been called"
         args = mock_msg1.Get.call_args
-        assert args[0][0] == "", "targetfile must be empty string (obexd picks path)"
+        assert args[0][0] != "", "targetfile must be a real path (tincan-fu6xq: empty string causes UnknownObject)"
 
     def test_message1_get_called_with_attachment_false(self, _patched):
         backend, _access, mock_msg1 = _patched
@@ -293,3 +293,47 @@ class TestFailedHandlesDoesNotBlockRetrieval:
             result = backend._fetch_raw_bmsg(_MSG_PATH)
         assert result == bmsg
         mock_msg1.Get.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# §5 tmpfile success path (tincan-p74b6 / tincan-fu6xq fix)
+# ---------------------------------------------------------------------------
+
+_FULL_BODY_BMSG = (
+    "BEGIN:MSG\r\n"
+    "This is the full message body that is much longer than the truncated "
+    "Subject preview. It includes the complete URL: "
+    "https://example.com/very/long/path?query=that_gets_cut_off_in_Subject\r\n"
+    "END:MSG\r\n"
+)
+
+
+def test_message1_get_tmpfile_fetches_full_body():
+    """When Message1.Get(tmpfile) succeeds, poll_inbox returns the full body.
+
+    This is the success path that was broken on live hardware (tincan-fu6xq):
+    Get("") raised UnknownObject; Get(real_path) must succeed and the transfer
+    content must reach the message body — not the truncated Subject.
+    """
+    backend = MapBackend()
+    mock_access = MagicMock(name="MessageAccess1")
+    mock_access.ListMessages.side_effect = (
+        lambda folder, opts={}: {_MSG_PATH: dict(_INBOX_PROPS)} if folder == "inbox" else {}
+    )
+    backend._msg_access = mock_access
+
+    mock_msg1 = MagicMock(name="Message1")
+    mock_msg1.Get.return_value = (_TRANSFER_PATH, {})
+
+    with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+         patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_msg1), \
+         patch.object(backend, "_wait_transfer_recv_raw", return_value=_FULL_BODY_BMSG):
+        result = backend.poll_inbox()
+
+    assert result, "poll_inbox must return at least one message"
+    body = result[0]["body"]
+    # Full body from bMessage — not the truncated Subject fallback
+    assert "complete URL" in body, f"body was the Subject fallback, not full content: {body!r}"
+    assert len(body) > len(_INBOX_PROPS["Subject"]), (
+        f"body ({len(body)}) must be longer than Subject fallback ({len(_INBOX_PROPS['Subject'])})"
+    )

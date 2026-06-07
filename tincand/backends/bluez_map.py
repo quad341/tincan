@@ -397,7 +397,10 @@ class MapBackend(BackendInterface):
 
         parsed: list[dict] = []
 
-        inbox_raw = self._retry(self._msg_access.ListMessages, "inbox", {})
+        inbox_raw = self._retry(
+            self._msg_access.ListMessages, "inbox",
+            {"SubjectLength": dbus.UInt16(1000)},
+        )
         _first_inbox = True
         for msg_path, props in inbox_raw.items():
             if _first_inbox:
@@ -450,7 +453,10 @@ class MapBackend(BackendInterface):
         _sent_folder_used = None
         for _sent_folder in ("sent", "outbox"):
             try:
-                sent_raw = self._retry(self._msg_access.ListMessages, _sent_folder, {})
+                sent_raw = self._retry(
+                    self._msg_access.ListMessages, _sent_folder,
+                    {"SubjectLength": dbus.UInt16(1000)},
+                )
                 _sent_folder_used = _sent_folder
                 break
             except dbus.exceptions.DBusException:
@@ -767,21 +773,32 @@ class MapBackend(BackendInterface):
             return None
         if msg_path in self._failed_handles:
             return None
+        # BlueZ requires a non-empty targetfile — empty string causes
+        # UnknownObject on some BlueZ/obexd versions (tincan-fu6xq).
+        fd, tmp_path = tempfile.mkstemp(prefix="tincan_body_")
+        os.close(fd)
         try:
-            bus = dbus.SessionBus()
-            msg1 = dbus.Interface(
-                bus.get_object(_OBEX_CLIENT, msg_path),
-                _MAP_MESSAGE_IFACE,
-            )
-            result = self._retry(msg1.Get, "", dbus.Boolean(attachment))
-            if result is None:
+            try:
+                bus = dbus.SessionBus()
+                msg1 = dbus.Interface(
+                    bus.get_object(_OBEX_CLIENT, msg_path),
+                    _MAP_MESSAGE_IFACE,
+                )
+                result = self._retry(msg1.Get, tmp_path, dbus.Boolean(attachment))
+                if result is None:
+                    return None
+                transfer_path, _ = result
+                return self._wait_transfer_recv_raw(str(transfer_path))
+            except dbus.exceptions.DBusException as exc:
+                _log.warning("Get failed for %s: %s", msg_path, exc)
+                self._failed_handles.add(msg_path)
                 return None
-            transfer_path, _ = result
-            return self._wait_transfer_recv_raw(str(transfer_path))
-        except dbus.exceptions.DBusException as exc:
-            _log.warning("Get failed for %s: %s", msg_path, exc)
-            self._failed_handles.add(msg_path)
-            return None
+        finally:
+            # Deleted by _wait_transfer_recv_raw on success; clean up on failure.
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     def _fetch_full_body(self, msg_path: str) -> str | None:
         """GetMessage for *msg_path*, wait for transfer, return parsed body."""
