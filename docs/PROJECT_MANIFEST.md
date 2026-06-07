@@ -95,6 +95,14 @@ attribution loss — happens here, never in the UI.)
   **capability detection + graceful degradation**, never hardcoded version assumptions.
 - **Clean separation of bridge and clients.** The daemon owns all Bluetooth; GUI and
   MCP are just clients of one stable internal API. This boundary is load-bearing.
+- **GUI is a thin shim; the daemon is stateless.** Push capabilities/logic into
+  `tincand` (exposed over its D-Bus API); `tincan_gui` stays a thin client —
+  reinforcing *Clean separation* above. **But the daemon has no memory:** it is a
+  live relay + capability surface, not a store (its OBEX-handle dedup ledger is not
+  an archive). Any persistence — message/history cache and **user settings** —
+  lives client-side or in a **neutral shared module**, never inside `tincand`;
+  shared non-GUI code goes in a neutral module, not the daemon. *(Operator
+  principle, 2026-06-07.)*
 - **No full message history** — MAP exposes only a recent window (~10 inbox messages)
   plus live session updates; not an archive.
 - **No external DB server / cloud** — single-machine, local.
