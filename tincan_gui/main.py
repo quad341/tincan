@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from tincan_gui import trace as _trace
 from tincan_gui.avatar import _color_for_name
+from tincan_gui.bug_report import BugReportDialog as _BugReportDialog
 from tincan_gui.bug_report import write_report as _write_bug_report
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
@@ -1002,63 +1003,6 @@ class MainWindow(QMainWindow):
         if conversation_id:
             self._dbus_client.mark_conversation_read(conversation_id)
 
-    def _on_file_bug(self) -> None:
-        """Show the File-a-Bug dialog and write a local structured report."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("File a Bug Report")
-        dlg.setMinimumWidth(440)
-        dlg.setStyleSheet("background: #18181b; color: #f4f4f5;")
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
-
-        prompt = QLabel("Describe what looks wrong:")
-        prompt_font = QFont()
-        prompt_font.setPointSize(12)
-        prompt.setFont(prompt_font)
-        layout.addWidget(prompt)
-
-        note_edit = QTextEdit()
-        note_edit.setPlaceholderText("e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'")
-        note_edit.setFixedHeight(80)
-        note_edit.setStyleSheet(
-            "QTextEdit { background: #27272a; border: 1px solid #3f3f46;"
-            " border-radius: 4px; color: #f4f4f5; padding: 4px; }"
-        )
-        layout.addWidget(note_edit)
-
-        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btn_box.button(QDialogButtonBox.Ok).setText("Submit Report")
-        btn_box.accepted.connect(dlg.accept)
-        btn_box.rejected.connect(dlg.reject)
-        layout.addWidget(btn_box)
-
-        if dlg.exec() != QDialog.Accepted:
-            return
-
-        note = note_edit.toPlainText().strip()
-        if not note:
-            return
-
-        app_state = {
-            "current_phone": self._current_phone,
-            "connected_device": self._connected_device,
-            "messages_ok": self._messages_ok,
-            "pending_sends": len(self._pending_sends),
-            "conversations_loaded": len(self._conversations_by_id),
-            "trace_enabled": _trace._ENABLED,
-            "trace_cid": _trace.current_cid(),
-        }
-        report_path = _write_bug_report(note, app_state, _trace.recent_events(100))
-        _trace.emit("bug_report_filed", path=str(report_path), note_len=len(note))
-
-        QMessageBox.information(
-            self,
-            "Bug Report Saved",
-            f"Report saved to:\n{report_path}\n\nThank you — hand the path to the mayor.",
-        )
-
     def _open_pairing_wizard(self) -> None:
         from tincan_gui.pairing_wizard import PairingWizard
         from tincand.pairing import PairingOrchestrator
@@ -1068,39 +1012,11 @@ class MainWindow(QMainWindow):
 
     def _on_file_bug(self) -> None:
         """Show the File-a-Bug dialog and write a local structured report."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("File a Bug Report")
-        dlg.setMinimumWidth(440)
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
-
-        prompt = QLabel("Describe what looks wrong:")
-        prompt_font = QFont()
-        prompt_font.setPointSize(12)
-        prompt.setFont(prompt_font)
-        layout.addWidget(prompt)
-
-        note_edit = QTextEdit()
-        note_edit.setPlaceholderText(
-            "e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'"
-        )
-        note_edit.setFixedHeight(80)
-        layout.addWidget(note_edit)
-
-        btn_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        btn_box.button(QDialogButtonBox.StandardButton.Ok).setText("Submit Report")
-        btn_box.accepted.connect(dlg.accept)
-        btn_box.rejected.connect(dlg.reject)
-        layout.addWidget(btn_box)
-
+        dlg = _BugReportDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        note = note_edit.toPlainText().strip()
+        note = dlg.note()
         if not note:
             return
 
