@@ -277,6 +277,7 @@ class ANCSBackend(BackendInterface):
         # Probe for devices already connected before start() was called
         # (daemon restart or phone auto-reconnect before daemon starts).
         self._probe_connected_devices()
+        self._probe_le_advertising()
 
     def _probe_connected_devices(self) -> None:
         """Schedule _on_device_connected for any device already connected at start().
@@ -311,11 +312,57 @@ class ANCSBackend(BackendInterface):
             )
             GLib.idle_add(self._on_device_connected, str(obj_path))
 
+    def _probe_le_advertising(self) -> None:
+        """Log LEAdvertisingManager1 capacity; degrade early if advertising unsupported."""
+        if self._bus is None:
+            return
+        _REMEDY = (
+            "Remedies: use a USB BT adapter (RTL8761B, e.g. ASUS USB-BT500), "
+            "or run bluetoothd --experimental and restart bluetooth."
+        )
+        try:
+            props_iface = dbus.Interface(
+                self._bus.get_object("org.bluez", self._adapter_path),
+                _PROPS_IFACE,
+            )
+            props = props_iface.GetAll(_LE_ADV_MANAGER_IFACE)
+            supported = int(props.get("SupportedInstances", -1))
+            active = int(props.get("ActiveInstances", -1))
+            _log.info(
+                "ANCSBackend: LEAdvertisingManager1 probe on %s — "
+                "SupportedInstances=%d ActiveInstances=%d",
+                self._adapter_path, supported, active,
+            )
+            if supported == 0:
+                _log.warning(
+                    "ANCSBackend: adapter %s reports SupportedInstances=0 — LE advertising "
+                    "not supported. ANCS will not arm. %s",
+                    self._adapter_path, _REMEDY,
+                )
+                if self._service is not None:
+                    self._service.set_capability("ancs", False)
+        except dbus.exceptions.DBusException as exc:
+            _log.warning(
+                "ANCSBackend: LEAdvertisingManager1 probe failed on %s: %s — "
+                "cannot confirm LE advertising support. %s",
+                self._adapter_path, exc, _REMEDY,
+            )
+            if self._service is not None:
+                self._service.set_capability("ancs", False)
+
     def _on_adv_registered(self) -> None:
         _log.info("ANCSBackend: SolicitUUIDs advertisement registered — soliciting ANCS")
 
     def _on_adv_error(self, exc) -> None:
-        _log.warning("ANCSBackend: RegisterAdvertisement failed: %s", exc)
+        if self._service is not None:
+            self._service.set_capability("ancs", False)
+        _log.warning(
+            "ANCSBackend: RegisterAdvertisement failed (%s). ANCS needs LE advertising; "
+            "this BT controller (%s) may not support it. Remedies: use a USB BT adapter "
+            "(RTL8761B, e.g. ASUS USB-BT500), or run bluetoothd --experimental and "
+            "restart bluetooth.",
+            exc, self._adapter_path,
+        )
 
     def stop(self) -> None:
         """Unregister advertisement + agent; clean up."""
