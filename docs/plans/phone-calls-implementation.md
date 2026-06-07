@@ -1,7 +1,7 @@
 # Phone Calls Implementation Plan
 
 **PM:** tincan/pm  
-**Date:** 2026-06-07  
+**Last updated:** 2026-06-07  
 **Architecture ref:** tincan-xohrx (closed)  
 **Spike ref:** tincan-xy2sb (blocked — hardware not present)
 
@@ -14,39 +14,31 @@ with oFono to control call state; the GUI shows an incoming-call dialog and
 in-call panel. All implementation is gated on the SCO audio spike passing on
 real RTL8761B hardware.
 
+Designer completed all 4 designs on 2026-06-07. Three builder beads are slung
+to tincan/builder and waiting on tincan-xy2sb to pass.
+
 ---
 
 ## Bead Tree
 
-### Immediately actionable (spike not required)
+### In builder queue — blocked on spike tincan-xy2sb
 
-| Bead | Title | Status | Target |
-|------|-------|--------|--------|
-| tincan-fx79v.2 | Wire MainWindow: QStackedWidget panel-swap state machine | ready-to-build | tincan/builder |
-
-Architecture (tincan-xohrx) is confirmed — D-Bus signal names locked. Builder
-can stub with local signals while waiting for the full daemon integration.
-
-### Blocked on spike tincan-xy2sb
-
-| Bead | Title | Status | Target |
-|------|-------|--------|--------|
-| tincan-0e6na | Implement tincand/call_controller.py + im.tincan.Calls D-Bus interface | blocked | tincan/builder |
-| tincan-jni3z | Build tincan_gui call UI: IncomingCallDialog, InCallPanel, DTMFKeypad | blocked | tincan/builder |
-| tincan-pqq3a | Amend tincan.spec: add oFono dependency for phone calls feature | blocked | tincan/builder |
+| Bead | Title | Design ref | Target |
+|------|-------|------------|--------|
+| tincan-jni3z | Build tincan_gui call UI: IncomingCallDialog, InCallPanel, DTMFKeypad | tincan-ts1yc ✓ | tincan/builder |
+| tincan-0e6na | Implement tincand/call_controller.py + im.tincan.Calls D-Bus interface | tincan-qp8mi ✓ | tincan/builder |
+| tincan-pqq3a | Amend tincan.spec: add oFono dependency for phone calls feature | tincan-hp8wf ✓ | tincan/builder |
 
 These unblock automatically once tincan-xy2sb passes.
 
----
+### Closed design beads (reference only)
 
-## Design References
-
-| Design bead | Covers |
-|-------------|--------|
-| tincan-qp8mi | tincand/call_controller.py + im.tincan.Calls D-Bus interface spec |
-| tincan-ts1yc | tincan_gui/call_dialog.py + tincan_gui/incall_panel.py + dbus_client.py additions |
-| tincan-fx79v  | Full GUI wireframe + state machine spec (parent of fx79v.2) |
-| tincan-hp8wf  | Packaging amendment: oFono COPR vs bundle vs manual options |
+| Bead | Covers | Closed |
+|------|--------|--------|
+| tincan-ts1yc | GUI call UI wireframes (IncomingCallDialog + InCallPanel + DTMFKeypad) | 2026-06-07 |
+| tincan-qp8mi | tincand/call_controller.py + im.tincan.Calls D-Bus spec | 2026-06-07 |
+| tincan-fx79v.2 | MainWindow QStackedWidget state machine design | 2026-06-07 (covered by tincan-jni3z) |
+| tincan-hp8wf | Packaging amendment: oFono COPR vs bundle vs manual | 2026-06-07 |
 
 ---
 
@@ -55,28 +47,22 @@ These unblock automatically once tincan-xy2sb passes.
 ```
 tincan-m9bbs (operator: plug RTL8761B + install oFono)
   → tincan-xy2sb (SCO audio spike)
-       → tincan-0e6na (call_controller.py)
-       → tincan-jni3z (call_dialog.py / incall_panel.py)
-       → tincan-pqq3a (tincan.spec oFono dep)
-
-tincan-xohrx (architecture, closed)
-  → tincan-fx79v.2 (wire MainWindow QStackedWidget) ← immediately actionable
+       → tincan-jni3z (call_dialog.py / incall_panel.py / main.py wiring) → tincan/builder
+       → tincan-0e6na (call_controller.py + D-Bus) → tincan/builder
+       → tincan-pqq3a (tincan.spec oFono dep) → tincan/builder
 ```
 
 ---
 
-## Known Risk: tincan-fx79v.1 Closure Gap
+## fx79v.1 / fx79v.2 Clarification (2026-06-07)
 
-tincan-fx79v.1 ("Build call_panel.py") was marked **closed** but no corresponding
-commit or PR exists, and `tincan_gui/call_panel.py` is absent from the repo.
+tincan-fx79v.1 ("Build call_panel.py") was a false-close — `call_panel.py` was never
+implemented. This was caught and resolved:
 
-**Impact:** tincan-fx79v.2 (wiring the panel-swap) references widget classes that
-do not yet exist. The builder should stub the wiring against the tincan-ts1yc
-design (call_dialog.py / incall_panel.py file names) rather than the fx79v.1
-design (call_panel.py), since tincan-ts1yc is the current canonical spec.
-
-tincan-jni3z (new bead, blocked) covers the actual widget implementation.
-Mayor has been notified.
+- tincan-fx79v.1: noted as **superseded by tincan-jni3z** (confirmed by mayor)
+- tincan-fx79v.2: closed — state machine wiring is included in tincan-jni3z scope
+- tincan-jni3z uses the correct file names from tincan-ts1yc: `call_dialog.py` and
+  `incall_panel.py` (not the abandoned `call_panel.py` from fx79v)
 
 ---
 
@@ -85,8 +71,8 @@ Mayor has been notified.
 When the user plugs in the RTL8761B and installs oFono (tincan-m9bbs), the
 investigator runs tincan-xy2sb. If all 5 acceptance criteria pass:
 1. Investigator closes tincan-xy2sb and mails tincan/architect
-2. Three blocked builder beads (tincan-0e6na, tincan-jni3z, tincan-pqq3a) become ready
-3. Builder picks them up and routes tincan-pqq3a's chosen option (A/B/C) per spike notes
+2. Three builder beads (tincan-jni3z, tincan-0e6na, tincan-pqq3a) become unblocked
+3. Builder picks them up; tincan-pqq3a's implementation method is determined by OQ-1 in spike notes
 
 ---
 
