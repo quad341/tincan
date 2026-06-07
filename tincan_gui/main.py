@@ -1149,6 +1149,7 @@ class MainWindow(QMainWindow):
         if not note:
             return
 
+        cid = _trace.new_cid()
         app_state = {
             "current_phone": self._current_phone,
             "connected_device": self._connected_device,
@@ -1156,10 +1157,10 @@ class MainWindow(QMainWindow):
             "pending_sends": len(self._pending_sends),
             "conversations_loaded": len(self._conversations_by_id),
             "trace_enabled": _trace._ENABLED,
-            "trace_cid": _trace.current_cid(),
+            "trace_cid": cid,
         }
         report_path = _write_bug_report(note, app_state, _trace.recent_events(100))
-        _trace.emit("bug_report_filed", path=str(report_path), note_len=len(note))
+        _trace.emit("bug_report_filed", cid=cid, path=str(report_path), note_len=len(note))
 
         QMessageBox.information(
             self,

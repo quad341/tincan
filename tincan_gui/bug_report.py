@@ -96,5 +96,9 @@ def write_report(
         "trace_events": trace_events,
     }
     path = _report_dir() / f"bug-{epoch}.json"
+    n = 0
+    while path.exists():
+        n += 1
+        path = _report_dir() / f"bug-{epoch}-{n}.json"
     path.write_text(json.dumps(report, indent=2, default=str))
     return path

@@ -17,6 +17,44 @@ from typing import Callable
 from tincan_gui import trace as _trace
 
 _ICON_PATH = str(Path(__file__).parent / "assets" / "tincan-icon.png")
+_ICON_HINT_CACHE: object | None = None
+
+
+def _get_icon_hint() -> object | None:
+    """Return a cached freedesktop image-data hint (64×64 RGBA) for the app icon.
+
+    Scales the 1254×1254 icon down to 64×64 so notification daemons that reject
+    large icons still display the image. Returns None if PySide6 is unavailable.
+    """
+    global _ICON_HINT_CACHE
+    if _ICON_HINT_CACHE is not None:
+        return _ICON_HINT_CACHE
+    try:
+        import dbus
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QImage
+        img = QImage(_ICON_PATH)
+        if img.isNull():
+            return None
+        img = img.scaled(
+            64, 64,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        img = img.convertToFormat(QImage.Format.Format_RGBA8888)
+        w, h, rowstride = img.width(), img.height(), img.bytesPerLine()
+        data = bytes(img.constBits())
+        _ICON_HINT_CACHE = dbus.Struct(
+            [
+                dbus.Int32(w), dbus.Int32(h), dbus.Int32(rowstride),
+                dbus.Boolean(True), dbus.Int32(8), dbus.Int32(4),
+                dbus.Array(data, signature="y"),
+            ],
+            signature="iiibiiay",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return _ICON_HINT_CACHE
 
 _log = logging.getLogger(__name__)
 
@@ -190,6 +228,10 @@ class DesktopNotifier:
                 bus = dbus.SessionBus()
             proxy = bus.get_object(_NOTIF_SERVICE, _NOTIF_PATH)
             iface = dbus.Interface(proxy, _NOTIF_IFACE)
+            _hints_app: dict = {}
+            _icon_app = _get_icon_hint()
+            if _icon_app is not None:
+                _hints_app["image-data"] = _icon_app
             notif_id = iface.Notify(
                 "tincan",
                 dbus.UInt32(0),
@@ -197,7 +239,7 @@ class DesktopNotifier:
                 _truncate(summary, 30),
                 _truncate(body, 100),
                 dbus.Array(["open", "Open"], signature="s"),
-                dbus.Dictionary({}, signature="sv"),
+                dbus.Dictionary(_hints_app, signature="sv"),
                 dbus.Int32(0),
             )
             self._notif_to_conv[int(notif_id)] = ""  # no conv to select; raises window only
@@ -219,6 +261,10 @@ class DesktopNotifier:
                 bus = dbus.SessionBus()
             proxy = bus.get_object(_NOTIF_SERVICE, _NOTIF_PATH)
             iface = dbus.Interface(proxy, _NOTIF_IFACE)
+            _hints_rep: dict = {}
+            _icon_rep = _get_icon_hint()
+            if _icon_rep is not None:
+                _hints_rep["image-data"] = _icon_rep
             notif_id = iface.Notify(
                 "Tin Can",
                 dbus.UInt32(0),
@@ -229,7 +275,7 @@ class DesktopNotifier:
                     ["default", "Reconnect...", "dismiss", "Dismiss"],
                     signature="s",
                 ),
-                dbus.Dictionary({}, signature="sv"),
+                dbus.Dictionary(_hints_rep, signature="sv"),
                 dbus.Int32(0),
             )
             self._repair_notif_id = int(notif_id)
@@ -292,6 +338,10 @@ class DesktopNotifier:
                 bus = dbus.SessionBus()
             proxy = bus.get_object(_NOTIF_SERVICE, _NOTIF_PATH)
             iface = dbus.Interface(proxy, _NOTIF_IFACE)
+            _hints: dict = {}
+            _icon = _get_icon_hint()
+            if _icon is not None:
+                _hints["image-data"] = _icon
             notif_id = iface.Notify(
                 "tincan",
                 dbus.UInt32(0),
@@ -302,7 +352,7 @@ class DesktopNotifier:
                     ["default", "Open", "reply", "Reply", "mark-read", "Mark as Read"],
                     signature="s",
                 ),
-                dbus.Dictionary({}, signature="sv"),
+                dbus.Dictionary(_hints, signature="sv"),
                 dbus.Int32(0),
             )
             if conv_id:
