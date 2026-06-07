@@ -630,9 +630,32 @@ class ConversationListWidget(QWidget):
         self._search.clear()
 
     def archive_conversation(self, conv_id: str) -> None:
-        """Archive *conv_id*: remove from active list, add to archived."""
+        """Archive *conv_id*: remove from active list, add to archived.
+
+        If the archived conversation was currently selected, auto-selects the
+        first remaining visible conversation (or emits "" to clear the thread).
+        """
+        hiding_selected = (
+            0 <= self._selected_index < len(self._items)
+            and self._items[self._selected_index].conversation_id == conv_id
+        )
+        if hiding_selected:
+            self._items[self._selected_index].set_selected(False)
+            self._selected_index = -1
+
         self._archived.archive(conv_id)
         self._on_filter_changed(self._search.text())
+
+        if hiding_selected:
+            for i, item in enumerate(self._items):
+                if item.isVisible():
+                    self._select_index(i)
+                    item.set_read()
+                    self.conversation_selected.emit(item.conversation_id)
+                    self.focus_thread_requested.emit()
+                    break
+            else:
+                self.conversation_selected.emit("")
 
     def restore_conversation(self, conv_id: str) -> None:
         """Restore *conv_id* from archive back to the active list."""
