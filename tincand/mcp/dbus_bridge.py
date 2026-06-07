@@ -6,6 +6,8 @@ structured bridge exceptions.
 """
 from __future__ import annotations
 
+from typing import NoReturn
+
 import dbus
 import dbus.exceptions  # noqa: F401 (dbus.exceptions must be imported for the submodule)
 
@@ -39,7 +41,7 @@ class TincandError(Exception):
 # ---------------------------------------------------------------------------
 
 
-def _translate(exc: dbus.exceptions.DBusException) -> None:
+def _translate(exc: dbus.exceptions.DBusException) -> NoReturn:
     name = exc.get_dbus_name()
     msg = str(exc)
     if name in (
