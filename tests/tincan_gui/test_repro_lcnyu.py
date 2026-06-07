@@ -92,7 +92,10 @@ class TestDivergentTimestampDuplicates:
 
 
 class TestPersistentAccumulation:
-    def test_map_poll_echoes_accumulate_in_persistent_cache(self, qtbot, tmp_path):
+    def test_map_poll_echoes_do_not_write_cache(self, qtbot, tmp_path):
+        # After tincan-20s4y: the direction != 'outbound' guard means outbound
+        # messages received via _on_message_received are never written to the
+        # persistent cache — display is handled by the thread view directly.
         win = _make_window(qtbot, tmp_path=tmp_path)
         body = "Accumulation probe"
         for ts in ("20260607T101500", "20260607T101503"):
@@ -101,7 +104,9 @@ class TestPersistentAccumulation:
                 "conversation_id": PHONE, "sender": "", "timestamp": ts,
             })
         stored = [m for m in win._msg_cache.get_messages(PHONE) if m["body"] == body]
-        assert len(stored) == 1, f"persistent cache accumulated {len(stored)} copies"
+        assert len(stored) == 0, (
+            f"outbound echo should not write to cache, got {len(stored)} copies"
+        )
 
 
 class TestIntentionalResendPreserved:

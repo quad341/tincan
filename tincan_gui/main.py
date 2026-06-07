@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
-    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -87,7 +86,11 @@ _BTN_STYLE = (
 def _svg_icon(svg_bytes: bytes, size: int = 18) -> QIcon:
     """Render an SVG to a QIcon tinted to #ccfbf1."""
     img = QImage.fromData(svg_bytes, "SVG")
-    img = img.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    img = img.scaled(
+        size, size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
     pix = QPixmap.fromImage(img)
     tinted = QPixmap(pix.size())
     tinted.fill(QColor("#ccfbf1"))
@@ -1079,7 +1082,11 @@ class MainWindow(QMainWindow):
         # Use current_phone-first to match the read key in _load_thread_messages;
         # conv_id-first caused miskeyed writes that read operations never found.
         cache_id = self._current_phone or conv_id
-        if body and cache_id and bubble_type != BubbleType.BODY_UNAVAILABLE:
+        if (
+            body and cache_id
+            and bubble_type != BubbleType.BODY_UNAVAILABLE
+            and direction != "outbound"
+        ):
             self._msg_cache.add_message(cache_id, direction, body, sender, raw_ts, raw_ts)
 
     def _on_conversation_updated(self, conversation: dict) -> None:
