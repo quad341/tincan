@@ -32,6 +32,8 @@ _BUS_NAME = "im.tincan.Daemon"
 _OBJECT = "/im/tincan"
 _IFACE_DAEMON = "im.tincan.Daemon"
 _IFACE_MESSAGES = "im.tincan.Messages"
+# TODO(tincan-xohrx): confirm exact interface name with architect
+_IFACE_CALLS = "im.tincan.Calls"
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +185,13 @@ class TincandClient(QObject):
     message_send_accepted = Signal(str, str, str)
     message_send_failed = Signal(str, str)
 
+    # Calls interface (HFP) — signals from im.tincan.Calls (tincan-xohrx pending)
+    call_incoming = Signal(str, str)   # (caller_name, caller_number)
+    call_connected = Signal()
+    call_ended = Signal()
+    audio_error = Signal(str)          # reason
+    audio_restored = Signal()
+
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._bus = QDBusConnection.sessionBus()
@@ -214,11 +223,22 @@ class TincandClient(QObject):
                       self, "1_on_conversation_updated(QVariantMap)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, "ContactPhotoReceived",
                       self, "1_on_contact_photo_received(QString,QByteArray)"),
+            # HFP call signals — interface subject to confirmation (tincan-xohrx)
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "IncomingCall",
+                      self, "1_on_call_incoming(QString,QString)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "CallConnected",
+                      self, "1_on_call_connected()"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "CallEnded",
+                      self, "1_on_call_ended()"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "AudioError",
+                      self, "1_on_audio_error(QString)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "AudioRestored",
+                      self, "1_on_audio_restored()"),
         ]
         if not all(_ok):
             _log.warning("tincan D-Bus: some signal subscriptions failed: %s", _ok)
         else:
-            _log.debug("tincan D-Bus: all 8 signal subscriptions registered")
+            _log.debug("tincan D-Bus: all 13 signal subscriptions registered")
 
     # ------------------------------------------------------------------
     # D-Bus signal → Qt signal bridges
@@ -601,3 +621,45 @@ class TincandClient(QObject):
         except (TypeError, ValueError):
             photo_bytes = b""
         self.contact_photo_received.emit(str(conv_id), photo_bytes)
+
+    # ------------------------------------------------------------------
+    # HFP call slot handlers (im.tincan.Calls — tincan-xohrx pending)
+    # ------------------------------------------------------------------
+
+    @Slot(str, str)
+    def _on_call_incoming(self, caller_name: str, caller_number: str) -> None:
+        _log.debug("tincand: IncomingCall(%s, %s)", caller_name, caller_number)
+        self.call_incoming.emit(str(caller_name), str(caller_number))
+
+    @Slot()
+    def _on_call_connected(self) -> None:
+        _log.debug("tincand: CallConnected")
+        self.call_connected.emit()
+
+    @Slot()
+    def _on_call_ended(self) -> None:
+        _log.debug("tincand: CallEnded")
+        self.call_ended.emit()
+
+    @Slot(str)
+    def _on_audio_error(self, reason: str) -> None:
+        _log.debug("tincand: AudioError(%s)", reason)
+        self.audio_error.emit(str(reason))
+
+    @Slot()
+    def _on_audio_restored(self) -> None:
+        _log.debug("tincand: AudioRestored")
+        self.audio_restored.emit()
+
+    def send_dtmf(self, key: str) -> None:
+        """Send a DTMF tone during an active HFP call.
+
+        Calls im.tincan.Calls.SendDtmf(key) on tincand.
+        Silently no-ops on method-not-found or any bus error (interface name
+        pending architect confirmation via tincan-xohrx).
+        """
+        # TODO(tincan-xohrx): update _IFACE_CALLS and method name once confirmed
+        try:
+            self._dbus_call(_IFACE_CALLS, "SendDtmf", key)
+        except Exception as exc:
+            _log.debug("send_dtmf(%r) failed: %s", key, exc)
