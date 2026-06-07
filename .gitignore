@@ -2,3 +2,7 @@ tincan_gui/__pycache__/
 __pycache__/
 *.pyc
 *.pyo
+
+# Gas City
+.beads/*
+!.beads/identity.toml
