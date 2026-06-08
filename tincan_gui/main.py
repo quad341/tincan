@@ -1216,10 +1216,9 @@ class MainWindow(QMainWindow):
         # Defer cleanup so daemon's MessageReceived echo arrives first and is suppressed.
         QTimer.singleShot(0, lambda: self._pending_sends.discard((to, body)))
         self._failed_sends.get(to, set()).discard(body)
-        if message_id:
-            # Track sent body so MAP-poll echoes (which arrive after _pending_sends
-            # is cleared) are suppressed without showing a duplicate bubble.
-            self._sent_bodies.setdefault(to, set()).add(body)
+        # Always track sent body regardless of whether obexd returns a message_id.
+        # MAP-poll echoes arrive after _pending_sends is cleared and must be suppressed.
+        self._sent_bodies.setdefault(to, set()).add(body)
 
     def _on_send_failed(self, to: str, body: str) -> None:
         _trace.emit("send_failed", to=to, body_hash=_trace.body_hash(body))
@@ -1443,11 +1442,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Hide to tray or quit on window close, per behavior/close_to_tray setting."""
-        from tincan_gui._settings import app_settings  # noqa: PLC0415
+        from tincan_gui._settings import app_settings, bool_value  # noqa: PLC0415
         s = app_settings()
         s.sync()  # flush before exit so prefs survive crashes/kills
         if hasattr(self, "_tray") and self._tray.isSystemTrayAvailable():
-            close_to_tray = s.value("behavior/close_to_tray", True, type=bool)
+            close_to_tray = bool_value(s, "behavior/close_to_tray", True)
             if close_to_tray:
                 event.ignore()
                 self.hide()

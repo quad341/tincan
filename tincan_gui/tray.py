@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from tincan_gui._settings import app_settings
+from tincan_gui._settings import app_settings, bool_value
 
 if TYPE_CHECKING:
     from tincan_gui.main import MainWindow
@@ -127,7 +127,7 @@ class TrayIcon(QSystemTrayIcon):
         self._notif_action = QAction(self.tr("Desktop notifications"), menu)
         self._notif_action.setCheckable(True)
         self._notif_action.setChecked(
-            app_settings().value("notifications/desktop_enabled", True, type=bool)
+            bool_value(app_settings(), "notifications/desktop_enabled", True)
         )
         self._notif_action.triggered.connect(self._on_notifications_toggled)
         menu.addAction(self._notif_action)
@@ -151,7 +151,7 @@ class TrayIcon(QSystemTrayIcon):
         self.setContextMenu(menu)
 
     def _on_menu_about_to_show(self) -> None:
-        enabled = app_settings().value("notifications/desktop_enabled", True, type=bool)
+        enabled = bool_value(app_settings(), "notifications/desktop_enabled", True)
         self._notif_action.setChecked(enabled)
 
     def _on_notifications_toggled(self, checked: bool) -> None:

@@ -24,6 +24,7 @@ from tincan_gui import trace as _trace
 from tincan_gui.archived_conversations import ArchivedConversations
 from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
 from tincan_gui.theme import is_dark_theme
+from tincan_gui.thread_view import _linkify_preview as _linkify_text
 
 
 class _SearchLineEdit(QLineEdit):
@@ -179,6 +180,7 @@ class ConversationItem(QWidget):
 
         # Preview row (tincan-33k)
         self._preview_label = QLabel()
+        self._preview_label.setTextFormat(Qt.TextFormat.RichText)
         prev_font = QFont()
         prev_font.setPointSize(12)
         self._preview_label.setFont(prev_font)
@@ -244,7 +246,7 @@ class ConversationItem(QWidget):
                 display = f"You: {body}"
             else:
                 display = raw[:36] + "…" if len(raw) > 36 else raw
-            self._preview_label.setText(display)
+            self._preview_label.setText(_linkify_text(display, emoji_size=11))
             self._preview_label.setStyleSheet(
                 f"background: transparent; border: none; outline: none; color: {preview_color};"
             )
