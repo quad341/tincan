@@ -29,6 +29,8 @@ _TRANSFER_IFACE = "org.bluez.obex.Transfer1"
 _PROPS_IFACE = "org.freedesktop.DBus.Properties"
 
 _POLL_INTERVAL_MS = 500
+_MAX_RETRIES = 3
+_RETRY_DELAY_S = 5
 
 
 class PBAPContactSync:
@@ -38,9 +40,21 @@ class PBAPContactSync:
         self._service = service
         self._store = service._contact_store
         self.session_path: str | None = None
+        self._pbap_iface: object | None = None
+        self._device_addr: str | None = None
+        self._retry_count: int = 0
 
     def connect(self, device_addr: str) -> None:
         """Create PBAP session, run PullAll, parse vCards, update service contacts."""
+        self._device_addr = device_addr
+        self._retry_count = 0
+        self._do_connect()
+
+    def _do_connect(self) -> None:
+        """Open PBAP session and start PullAll — used by connect() and retries."""
+        device_addr = self._device_addr
+        if device_addr is None:
+            return
         try:
             bus = dbus.SessionBus()
             client = dbus.Interface(
@@ -55,6 +69,7 @@ class PBAPContactSync:
                 bus.get_object(_OBEX_CLIENT, self.session_path),
                 _PBAP_ACCESS_IFACE,
             )
+            self._pbap_iface = pbap
             # PBAP 1.1+ (iOS) uses "telecom/pb"; PBAP 1.0 uses "pb".
             _selected = False
             for _pb_path in ("telecom/pb", "pb"):
@@ -88,6 +103,29 @@ class PBAPContactSync:
         except dbus.exceptions.DBusException as exc:
             _log.warning("PBAP connect failed for %s: %s", device_addr, exc)
 
+    def _retry_pullall(self) -> bool:
+        """Re-run PullAll on the stored session — iOS approval-race recovery."""
+        if self._pbap_iface is None or self.session_path is None:
+            return False
+        _log.debug("PBAP PullAll retry %d/%d", self._retry_count, _MAX_RETRIES)
+        try:
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".vcf", delete=False, encoding="utf-8"
+            )
+            tmp_path = tmp.name
+            tmp.close()
+            result = self._pbap_iface.PullAll(
+                tmp_path,
+                {"Format": dbus.String("vcard21")},
+            )
+            transfer_path = str(result[0]) if isinstance(result, (list, tuple)) else str(result)
+            self._wait_transfer(transfer_path, lambda error=False: self._on_pullall_complete(
+                tmp_path, error
+            ))
+        except dbus.exceptions.DBusException as exc:
+            _log.warning("PBAP retry PullAll failed: %s", exc)
+        return False
+
     def disconnect(self) -> None:
         """Remove the PBAP session if one is active."""
         if self.session_path is None:
@@ -103,6 +141,7 @@ class PBAPContactSync:
             _log.debug("PBAP RemoveSession failed (already gone?): %s", exc)
         finally:
             self.session_path = None
+            self._pbap_iface = None
 
     def _wait_transfer(self, transfer_path: str, callback: Callable) -> None:
         """Poll Transfer1.Status every 500ms via GLib.timeout_add."""
@@ -180,6 +219,20 @@ class PBAPContactSync:
                     "PBAP PullAll: vCard parse error (partial load %d contacts): %s",
                     count, exc,
                 )
+
+            if count == 0 and self._retry_count < _MAX_RETRIES:
+                # 0 contacts on a fresh pairing typically means iOS hasn't yet
+                # approved "Sync Contacts." Retry on the existing session after a
+                # short delay; iOS grants access asynchronously post-approval.
+                self._retry_count += 1
+                _log.warning(
+                    "PBAP PullAll: 0 contacts — retry %d/%d in %ds "
+                    "(iOS Sync-Contacts approval race?)",
+                    self._retry_count, _MAX_RETRIES, _RETRY_DELAY_S,
+                )
+                GLib.timeout_add_seconds(_RETRY_DELAY_S, self._retry_pullall)
+                self._service.set_capability("contacts", True)
+                return
 
             level = _log.info if count > 0 else _log.warning
             level(
