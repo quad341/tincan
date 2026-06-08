@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Can body: rounded rectangle for the cylinder -->
+  <rect x="72" y="80" width="112" height="130" rx="12" fill="#0d9488"/>
+
+  <!-- Can top ellipse (rim) -->
+  <ellipse cx="128" cy="80" rx="56" ry="18" fill="#5eead4"/>
+
+  <!-- Can bottom ellipse (base) -->
+  <ellipse cx="128" cy="210" rx="56" ry="18" fill="#0f7270"/>
+
+  <!-- Horizontal label band -->
+  <rect x="72" y="130" width="112" height="30" fill="#0f7270"/>
+
+  <!-- String hole dots on rim -->
+  <circle cx="128" cy="62" r="4" fill="#0f4c3a"/>
+
+  <!-- Speech bubble (top-right, overlapping can) -->
+  <rect x="148" y="44" width="76" height="52" rx="10" fill="#ccfbf1"/>
+  <!-- Bubble tail pointing to can -->
+  <polygon points="168,96 148,96 158,112" fill="#ccfbf1"/>
+
+  <!-- Bubble content: three dots (typing indicator) -->
+  <circle cx="168" cy="70" r="5" fill="#0f4c3a"/>
+  <circle cx="186" cy="70" r="5" fill="#0f4c3a"/>
+  <circle cx="204" cy="70" r="5" fill="#0f4c3a"/>
+</svg>
