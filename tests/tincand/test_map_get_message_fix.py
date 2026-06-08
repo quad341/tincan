@@ -337,3 +337,62 @@ def test_message1_get_tmpfile_fetches_full_body():
     assert len(body) > len(_INBOX_PROPS["Subject"]), (
         f"body ({len(body)}) must be longer than Subject fallback ({len(_INBOX_PROPS['Subject'])})"
     )
+
+
+# ---------------------------------------------------------------------------
+# §6 _wait_transfer_recv_raw — transfer object vanishes after completing
+#    (tincan-opd3k): obexd removes the Transfer object the instant it
+#    completes, so the Status poll races it and sees UnknownObject. The body
+#    is already in our targetfile — read it, don't bail.
+# ---------------------------------------------------------------------------
+
+def _dbus_unknown_object():
+    return dbus.exceptions.DBusException(name="org.freedesktop.DBus.Error.UnknownObject")
+
+
+def test_wait_transfer_reads_targetfile_when_transfer_vanishes(tmp_path):
+    """Status poll raises UnknownObject (transfer already removed) → read the
+    targetfile that already holds the downloaded body, not return None."""
+    backend = MapBackend()
+    body = "BEGIN:MSG\nFull body obexd already wrote to the file\nEND:MSG\n"
+    target = tmp_path / "body.bmsg"
+    target.write_text(body)
+
+    mock_props = MagicMock(name="TransferProps")
+    mock_props.Get.side_effect = _dbus_unknown_object()
+    with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+         patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_props):
+        result = backend._wait_transfer_recv_raw(_TRANSFER_PATH, fallback_path=str(target))
+
+    assert result == body, "must return the body already written to the targetfile"
+
+
+def test_wait_transfer_reads_file_on_status_complete(tmp_path):
+    """When Status==complete is observed, read the file (Filename/fallback)."""
+    backend = MapBackend()
+    body = "BEGIN:MSG\nCompleted body\nEND:MSG\n"
+    target = tmp_path / "body.bmsg"
+    target.write_text(body)
+
+    mock_props = MagicMock(name="TransferProps")
+    mock_props.Get.side_effect = (
+        lambda iface, prop: "complete" if prop == "Status" else str(target)
+    )
+    with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+         patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_props):
+        result = backend._wait_transfer_recv_raw(_TRANSFER_PATH, fallback_path=str(target))
+
+    assert result == body
+
+
+def test_wait_transfer_returns_none_when_vanished_and_no_file(tmp_path):
+    """Transfer vanished AND no targetfile content → None (don't fabricate)."""
+    backend = MapBackend()
+    missing = tmp_path / "never_written.bmsg"  # never created
+    mock_props = MagicMock(name="TransferProps")
+    mock_props.Get.side_effect = _dbus_unknown_object()
+    with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+         patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_props):
+        result = backend._wait_transfer_recv_raw(_TRANSFER_PATH, fallback_path=str(missing))
+
+    assert result is None
