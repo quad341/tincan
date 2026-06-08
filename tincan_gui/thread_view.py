@@ -10,7 +10,16 @@ from enum import Enum, auto
 from typing import Optional
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt, Signal
-from PySide6.QtGui import QAccessible, QColor, QFont, QFontInfo, QFontMetrics, QImage, QPainter, QPixmap
+from PySide6.QtGui import (
+    QAccessible,
+    QColor,
+    QFont,
+    QFontInfo,
+    QFontMetrics,
+    QImage,
+    QPainter,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QAccessibleWidget,
     QApplication,

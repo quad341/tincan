@@ -4,7 +4,7 @@ Bead: tincan-1nt7  (commit e8291ea)
 Coverage:
   §1 _sent_bodies population
      - successful send: body added to _sent_bodies[phone]
-     - failed send (empty message_id): body NOT added to _sent_bodies
+     - failed send (empty message_id): body still added to _sent_bodies (tincan-sq05d: always track)
 
   §2 _on_message_received suppression
      - outbound message with body in _sent_bodies[conv_id] -> NOT appended to thread
