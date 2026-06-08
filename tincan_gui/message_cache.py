@@ -65,6 +65,16 @@ class MessageCache:
             if any(m.get("direction") == "outbound" and m.get("body") == body for m in messages):
                 _trace.emit("cache_dedup", key=conv_id, direction=direction)
                 return
+            # Don't overwrite a longer outbound body at the same timestamp with a shorter one
+            # (e.g. MAP sent-folder echo uses Subject preview — truncated vs the body we typed).
+            if sort_key and any(
+                m.get("direction") == "outbound"
+                and m.get("sort_key") == sort_key
+                and len(m.get("body") or "") > len(body)
+                for m in messages
+            ):
+                _trace.emit("cache_dedup", key=conv_id, direction=direction)
+                return
         else:
             dedup_key = (direction, sort_key or timestamp, body)
             existing_keys = {
