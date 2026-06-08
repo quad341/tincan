@@ -4,7 +4,8 @@ Bead: tincan-1nt7  (commit e8291ea)
 Coverage:
   §1 _sent_bodies population
      - successful send: body added to _sent_bodies[phone]
-     - failed send (empty message_id): body still added to _sent_bodies (tincan-sq05d: always track)
+     - accepted send with empty message_id: body still added (tincan-sq05d: always-track)
+     - send never accepted (no MessageSent reply): body NOT in _sent_bodies
 
   §2 _on_message_received suppression
      - outbound message with body in _sent_bodies[conv_id] -> NOT appended to thread
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import QSystemTrayIcon
 
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
-from tincan_gui.thread_view import BubbleType, MessageBubble, ThreadView
+from tincan_gui.thread_view import MessageBubble, ThreadView
 
 
 @pytest.fixture(autouse=True)
@@ -55,7 +56,7 @@ def _bubble_count(view: ThreadView) -> int:
 # ---------------------------------------------------------------------------
 
 class TestSentBodiesPopulation:
-    """_on_send_accepted populates _sent_bodies; _on_send_failed does not."""
+    """_on_send_accepted populates _sent_bodies; _on_send alone (pre-acceptance) does not."""
 
     def test_successful_send_adds_body_to_sent_bodies(self, qtbot):
         phone = "+15550001111"
@@ -82,7 +83,7 @@ class TestSentBodiesPopulation:
 
         assert window._sent_bodies[phone] == {"First", "Second"}
 
-    def test_failed_send_does_not_add_body(self, qtbot, monkeypatch):
+    def test_send_before_acceptance_does_not_add_body(self, qtbot, monkeypatch):
         monkeypatch.setattr(TincandClient, "send_message", lambda self, to, body: "")
         window = _make_window_with_phone(qtbot)
 
