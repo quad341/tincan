@@ -397,10 +397,11 @@ class MapBackend(BackendInterface):
 
         parsed: list[dict] = []
 
-        inbox_raw = self._retry(
-            self._msg_access.ListMessages, "inbox",
-            {"SubjectLength": dbus.UInt16(1000)},
-        )
+        # No ListMessages filter: this obexd/iOS rejects the SubjectLength
+        # application parameter with InvalidArguments, which breaks the whole
+        # inbox listing (tincan-5pjzq). The full body comes from
+        # Message1.Get(tmpfile), not the Subject, so no filter is needed.
+        inbox_raw = self._retry(self._msg_access.ListMessages, "inbox", {})
         _first_inbox = True
         for msg_path, props in inbox_raw.items():
             if _first_inbox:
@@ -453,9 +454,9 @@ class MapBackend(BackendInterface):
         _sent_folder_used = None
         for _sent_folder in ("sent", "outbox"):
             try:
+                # empty filter — see inbox note (SubjectLength → InvalidArguments)
                 sent_raw = self._retry(
-                    self._msg_access.ListMessages, _sent_folder,
-                    {"SubjectLength": dbus.UInt16(1000)},
+                    self._msg_access.ListMessages, _sent_folder, {}
                 )
                 _sent_folder_used = _sent_folder
                 break
