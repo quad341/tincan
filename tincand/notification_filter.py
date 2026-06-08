@@ -7,7 +7,7 @@ QSettings keys:
 """
 from __future__ import annotations
 
-from tincan_gui._settings import app_settings
+from tincand.config import app_settings
 
 
 class NotificationFilter:
