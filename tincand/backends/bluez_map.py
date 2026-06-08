@@ -789,7 +789,9 @@ class MapBackend(BackendInterface):
                 if result is None:
                     return None
                 transfer_path, _ = result
-                return self._wait_transfer_recv_raw(str(transfer_path))
+                return self._wait_transfer_recv_raw(
+                    str(transfer_path), fallback_path=tmp_path
+                )
             except dbus.exceptions.DBusException as exc:
                 _log.warning("Get failed for %s: %s", msg_path, exc)
                 self._failed_handles.add(msg_path)
@@ -806,8 +808,32 @@ class MapBackend(BackendInterface):
         raw = self._fetch_raw_bmsg(msg_path)
         return _parse_bmsg_body(raw) if raw is not None else None
 
-    def _wait_transfer_recv_raw(self, transfer_path: str) -> str | None:
-        """Poll Transfer1.Status until complete; read and return raw bMessage string."""
+    def _wait_transfer_recv_raw(
+        self, transfer_path: str, fallback_path: str | None = None
+    ) -> str | None:
+        """Wait for a Message1.Get transfer and return the raw bMessage string.
+
+        obexd writes the body to our targetfile and then removes the Transfer
+        object almost immediately on completion (often <100ms), so polling
+        races the removal — we see the object already gone (UnknownObject)
+        before ever observing Status == 'complete'. The body is already in our
+        targetfile, so treat a vanished transfer as success and read
+        fallback_path (tincan-opd3k).
+        """
+        _OBJECT_GONE = {
+            "org.freedesktop.DBus.Error.UnknownObject",
+            "org.freedesktop.DBus.Error.ServiceUnknown",
+        }
+
+        def _read(path: str | None) -> str | None:
+            if not path or not os.path.exists(path):
+                return None
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    return fh.read() or None
+            except OSError:
+                return None
+
         bus = dbus.SessionBus()
         props = dbus.Interface(
             bus.get_object(_OBEX_CLIENT, transfer_path),
@@ -815,23 +841,23 @@ class MapBackend(BackendInterface):
         )
         deadline = time.monotonic() + _TRANSFER_TIMEOUT
         while time.monotonic() < deadline:
-            status = str(props.Get(_TRANSFER_IFACE, "Status"))
+            try:
+                status = str(props.Get(_TRANSFER_IFACE, "Status"))
+            except dbus.exceptions.DBusException as exc:
+                if exc.get_dbus_name() in _OBJECT_GONE:
+                    # Transfer completed and was removed before we caught it —
+                    # the body is already written to our targetfile.
+                    return _read(fallback_path)
+                raise
             if status == "complete":
-                filename = str(props.Get(_TRANSFER_IFACE, "Filename"))
-                try:
-                    with open(filename, encoding="utf-8") as f:
-                        return f.read()
-                finally:
-                    try:
-                        os.unlink(filename)
-                    except OSError:
-                        pass
+                filename = str(props.Get(_TRANSFER_IFACE, "Filename")) or fallback_path
+                return _read(filename)
             if status == "error":
                 _log.warning("Transfer recv failed: %s", transfer_path)
                 return None
-            time.sleep(0.05)
+            time.sleep(0.02)
         _log.warning("Transfer recv timed out: %s", transfer_path)
-        return None
+        return _read(fallback_path)
 
     def _wait_transfer_send(self, transfer_path: str) -> None:
         """Poll Transfer1.Status for a PushMessage transfer; raise SendFailed on error.
