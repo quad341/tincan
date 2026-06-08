@@ -338,3 +338,10 @@ class TestPBAPRetryCountdown:
         sync._pbap_iface = MagicMock()
         sync.session_path = None
         assert sync._retry_pullall() is False
+
+    def test_retry_window_clears_stale_contacts_empty(self):
+        sync, svc = _make_sync()
+        tmp_path = self._write_vcards([])
+        with patch("tincand.backends.pbap.GLib"):
+            sync._on_pullall_complete(tmp_path)
+        svc.set_capability.assert_any_call("contacts_empty", False)

@@ -232,6 +232,9 @@ class PBAPContactSync:
                 )
                 GLib.timeout_add_seconds(_RETRY_DELAY_S, self._retry_pullall)
                 self._service.set_capability("contacts", True)
+                # Clear any stale empty-flag from a prior exhausted cycle so the
+                # "Sync Contacts off" banner doesn't linger during this retry window.
+                self._service.set_capability("contacts_empty", False)
                 return
 
             level = _log.info if count > 0 else _log.warning
