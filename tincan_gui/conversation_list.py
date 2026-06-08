@@ -108,7 +108,7 @@ class ConversationItem(QWidget):
         # Pass mouse events through so ConversationItem.mousePressEvent fires on card clicks.
         self._frame.setAttribute(Qt.WA_TransparentForMouseEvents)
         frame_layout = QHBoxLayout(self._frame)
-        frame_layout.setContentsMargins(8, 8, 8, 8)
+        frame_layout.setContentsMargins(8, 10, 8, 8)
         frame_layout.setSpacing(8)
 
         # Avatar: group uses two stacked circles; 1:1 uses single circle
@@ -206,7 +206,7 @@ class ConversationItem(QWidget):
         self._badge_label.setFont(badge_font)
         self._badge_label.setStyleSheet(
             f"color: #ffffff; background-color: {self._UNREAD_DOT_COLOR};"
-            " border-radius: 8px; padding: 0 5px;"
+            " border-radius: 8px; padding: 2px 5px;"
         )
         outer.addWidget(self._badge_label, alignment=Qt.AlignVCenter)
 

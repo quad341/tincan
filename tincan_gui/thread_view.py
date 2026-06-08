@@ -10,7 +10,7 @@ from enum import Enum, auto
 from typing import Optional
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt, Signal
-from PySide6.QtGui import QAccessible, QColor, QFont, QFontMetrics, QImage, QPainter, QPixmap
+from PySide6.QtGui import QAccessible, QColor, QFont, QFontInfo, QFontMetrics, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAccessibleWidget,
     QApplication,
@@ -171,9 +171,17 @@ def _emoji_font_families() -> list[str]:
     Emoji, changing the look of all message text (tincan-h9nu).  Instead, we
     read the actual application default family at runtime and prepend it so
     only genuine emoji glyphs use the colour-emoji fallback fonts.
+
+    QFontInfo.family() is used rather than QFont.family() because on some
+    systems (e.g. Qt6 on GNOME/KDE with a system-configured sans-serif),
+    QFont.family() returns "" while QFontInfo returns the resolved name.
+    Without the resolved name, the emoji font becomes the primary family and
+    plain-text characters (including digits) may not render (tincan-15xl9).
     """
     app = QApplication.instance()
-    primary = app.font().family() if app is not None else ""
+    primary = ""
+    if app is not None:
+        primary = QFontInfo(app.font()).family()
     families = []
     if primary:
         families.append(primary)

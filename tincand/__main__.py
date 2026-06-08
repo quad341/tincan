@@ -40,6 +40,14 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--adapter",
+        default=None,
+        help=(
+            "BlueZ adapter path for the ANCS backend, e.g. /org/bluez/hci1 "
+            "(default: TINCAN_ADAPTER env var, then auto-detect)."
+        ),
+    )
+    parser.add_argument(
         "--with-ancs",
         action="store_true",
         dest="with_ancs",
@@ -54,6 +62,36 @@ def _parse_args() -> argparse.Namespace:
             parser.error("--mock cannot be combined with --backend ancs")
         args.backend = "mock"
     return args
+
+
+def _resolve_adapter_path(args: argparse.Namespace) -> str:
+    """Return the BlueZ adapter path to use for ANCS.
+
+    Priority: --adapter flag → TINCAN_ADAPTER env var → auto-detect first
+    powered adapter → fallback to /org/bluez/hci1 (the USB dongle slot).
+    """
+    explicit = getattr(args, "adapter", None) or os.environ.get("TINCAN_ADAPTER")
+    if explicit:
+        return explicit
+    try:
+        import dbus  # noqa: PLC0415
+
+        bus = dbus.SystemBus()
+        obj_mgr = dbus.Interface(
+            bus.get_object("org.bluez", "/"),
+            "org.freedesktop.DBus.ObjectManager",
+        )
+        objects = obj_mgr.GetManagedObjects()
+        for path, ifaces in objects.items():
+            if "org.bluez.Adapter1" not in ifaces:
+                continue
+            props = ifaces["org.bluez.Adapter1"]
+            if props.get("Powered", False):
+                _log.info("tincand: auto-detected adapter %s", path)
+                return str(path)
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("tincand: adapter auto-detect failed (%s) — using /org/bluez/hci1", exc)
+    return "/org/bluez/hci1"
 
 
 def _select_backend(args: argparse.Namespace) -> object:
@@ -73,7 +111,8 @@ def _select_backend(args: argparse.Namespace) -> object:
         from tincand.backends.ancs import ANCSBackend
 
         device_addr = args.device or os.environ.get("TINCAN_DEVICE")
-        return ANCSBackend(device_addr=device_addr)
+        adapter_path = _resolve_adapter_path(args)
+        return ANCSBackend(device_addr=device_addr, adapter_path=adapter_path)
     if name == "map":
         from tincand.backends.bluez_map import MapBackend
         from tincand.message_store import MessageStore
@@ -108,7 +147,8 @@ def main() -> None:
         from tincand.backends.ancs import ANCSBackend
 
         device_addr = args.device or os.environ.get("TINCAN_DEVICE", "")
-        ancs = ANCSBackend(device_addr=device_addr)
+        adapter_path = _resolve_adapter_path(args)
+        ancs = ANCSBackend(device_addr=device_addr, adapter_path=adapter_path)
         backend = BackendManager(primary=backend, secondaries=[ancs])
         _log.info("tincand: multi-backend mode — MAP (primary) + ANCS (secondary)")
     elif args.with_ancs:

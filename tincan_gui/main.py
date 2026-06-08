@@ -167,8 +167,8 @@ class TitleBar(QWidget):
         self._gear_btn.setAccessibleName("Settings")
         self._gear_btn.setStyleSheet(
             "QToolButton { color: #ccfbf1; font-size: 22px; border: none;"
-            " background: transparent; }"
-            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+            " background-color: #0f4c3a; }"
+            " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
         layout.addWidget(self._gear_btn)
 
@@ -181,8 +181,8 @@ class TitleBar(QWidget):
         self._bug_btn.setAccessibleName("File a bug report")
         self._bug_btn.setStyleSheet(
             "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
-            " background: transparent; }"
-            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+            " background-color: #0f4c3a; }"
+            " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
         layout.addWidget(self._bug_btn)
 
@@ -195,8 +195,8 @@ class TitleBar(QWidget):
         self._bell_btn.setAccessibleName("Notification center")
         self._bell_btn.setStyleSheet(
             "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
-            " background: transparent; }"
-            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+            " background-color: #0f4c3a; }"
+            " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
         layout.addWidget(self._bell_btn)
 
