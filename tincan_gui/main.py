@@ -1019,6 +1019,13 @@ class MainWindow(QMainWindow):
         """Mark conversation as read when user activates the mark-read notification action."""
         if conversation_id:
             self._dbus_client.mark_conversation_read(conversation_id)
+            # Update the conversation list immediately without waiting for a
+            # ConversationUpdated signal from the daemon (tincan-sl54r).
+            if conversation_id in self._conversations_by_id:
+                data = self._conversations_by_id[conversation_id]
+                updated = dc_replace(data, unread=False, unread_count=0)
+                self._conversations_by_id[conversation_id] = updated
+                self._conv_list.update_item(conversation_id, updated)
 
     def _on_file_bug(self) -> None:
         """Show the File-a-Bug dialog and write a local structured report."""
@@ -1538,6 +1545,17 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    # Install GLib as the dbus-python mainloop BEFORE any dbus.SessionBus() is
+    # created.  _dbus_call() in TincandClient creates a SessionBus() on first
+    # use (startup); if DBusGMainLoop isn't already the default at that point,
+    # the bus uses the native-thread mainloop and add_signal_receiver() in
+    # DesktopNotifier._ensure_bus() will never dispatch ActionInvoked signals
+    # even though the subscription succeeds (tincan-yxajc, tincan-sl54r).
+    try:
+        import dbus.mainloop.glib as _dbus_glib  # noqa: PLC0415
+        _dbus_glib.DBusGMainLoop(set_as_default=True)
+    except ImportError:
+        pass
     if os.environ.get("TINCAN_TRACE"):
         _trace.emit("session_init")  # triggers lazy file open
     if os.environ.get("TINCAN_DEBUG"):

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui.theme import is_dark_theme
+from tincan_gui.thread_view import _emoji_font_families
 
 if TYPE_CHECKING:
     from tincan_gui.notifications import DesktopNotifier, NotificationEntry
@@ -57,8 +58,13 @@ class _NotifRow(QWidget):
         outer.setContentsMargins(12, 8, 12, 8)
         outer.setSpacing(8)
 
-        # Kind badge
+        # Kind badge — use _emoji_font_families so the glyph renders on systems
+        # where the system font doesn't cover emoji (tincan-36af0).
         badge = QLabel("💬" if entry.kind == "sms" else "🔔")
+        badge_font = QFont()
+        badge_font.setFamilies(_emoji_font_families())
+        badge_font.setPointSize(14)
+        badge.setFont(badge_font)
         badge.setFixedWidth(20)
         badge.setAttribute(Qt.WA_TransparentForMouseEvents)
         outer.addWidget(badge, alignment=Qt.AlignTop)
