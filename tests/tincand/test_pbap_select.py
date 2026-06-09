@@ -1,5 +1,5 @@
-"""Tests: PBAP Select telecom/pb fallback + skip diagnostics.
-Bead: tincan-2ddq  (commit bf12159)
+"""Tests: PBAP Select telecom/pb fallback + skip diagnostics + retry countdown.
+Bead: tincan-2ddq  (commit bf12159); §7 added for tincan-uhwfo retry logic
 
 Coverage:
   §1 connect() Select fallback
@@ -15,6 +15,14 @@ Coverage:
 
   §3 Fields filter removal
      - PullAll called without 'Fields' key (only 'Format' in filter dict)
+
+  §7 Retry countdown (iOS approval race)
+     - 0-contact result schedules _retry_pullall via GLib.timeout_add_seconds
+     - _retry_count incremented on each 0-contact completion
+     - no timer scheduled when _retry_count == _MAX_RETRIES (cap enforced)
+     - contacts_empty=True set only after retries exhausted
+     - _retry_pullall() returns False immediately when _pbap_iface is None
+     - _retry_pullall() returns False immediately when session_path is None
 """
 from __future__ import annotations
 
@@ -24,10 +32,8 @@ from unittest.mock import MagicMock, call, patch
 
 import dbus
 import dbus.exceptions
-import pytest
 
 from tincand.backends.pbap import PBAPContactSync
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -196,6 +202,7 @@ class TestOnPullAllCompleteLogging:
 
     def test_skipped_no_fn_counter_increments(self, caplog):
         sync, svc = _make_sync()
+        sync._retry_count = 3  # exhaust retries so count==0 reaches the summary log
         tmp_path = self._write_vcards([self._no_fn_vcard(), self._no_fn_vcard()])
         with caplog.at_level(logging.DEBUG, logger="tincand.backends.pbap"):
             sync._on_pullall_complete(tmp_path)
@@ -206,6 +213,7 @@ class TestOnPullAllCompleteLogging:
 
     def test_skipped_no_tel_counter_increments(self, caplog):
         sync, svc = _make_sync()
+        sync._retry_count = 3  # exhaust retries so count==0 reaches the summary log
         tmp_path = self._write_vcards([self._no_tel_vcard("Carol"), self._no_tel_vcard("Dave")])
         with caplog.at_level(logging.DEBUG, logger="tincand.backends.pbap"):
             sync._on_pullall_complete(tmp_path)
@@ -273,3 +281,67 @@ class TestPBAPFieldsFilter:
 
         assert len(captured_filters) == 1
         assert "Format" in captured_filters[0]
+
+
+# ---------------------------------------------------------------------------
+# §7 Retry countdown (iOS approval race)
+# ---------------------------------------------------------------------------
+
+class TestPBAPRetryCountdown:
+    """_on_pullall_complete schedules retry on 0-contact; _retry_pullall guards on None iface."""
+
+    def _write_vcards(self, vcards):
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".vcf", delete=False, encoding="utf-8")
+        for vc in vcards:
+            tmp.write(vc)
+        tmp.close()
+        return tmp.name
+
+    def test_zero_contacts_schedules_retry_when_retries_remain(self):
+        sync, svc = _make_sync()
+        tmp_path = self._write_vcards([])
+        with patch("tincand.backends.pbap.GLib") as mock_glib:
+            sync._on_pullall_complete(tmp_path)
+        mock_glib.timeout_add_seconds.assert_called_once_with(5, sync._retry_pullall)
+
+    def test_zero_contacts_increments_retry_count(self):
+        sync, svc = _make_sync()
+        tmp_path = self._write_vcards([])
+        assert sync._retry_count == 0
+        with patch("tincand.backends.pbap.GLib"):
+            sync._on_pullall_complete(tmp_path)
+        assert sync._retry_count == 1
+
+    def test_retry_cap_no_timer_when_retries_exhausted(self):
+        sync, svc = _make_sync()
+        sync._retry_count = 3  # == _MAX_RETRIES
+        tmp_path = self._write_vcards([])
+        with patch("tincand.backends.pbap.GLib") as mock_glib:
+            sync._on_pullall_complete(tmp_path)
+        mock_glib.timeout_add_seconds.assert_not_called()
+
+    def test_retry_cap_sets_contacts_empty_when_exhausted(self):
+        sync, svc = _make_sync()
+        sync._retry_count = 3  # == _MAX_RETRIES
+        tmp_path = self._write_vcards([])
+        with patch("tincand.backends.pbap.GLib"):
+            sync._on_pullall_complete(tmp_path)
+        svc.set_capability.assert_any_call("contacts_empty", True)
+
+    def test_retry_pullall_returns_false_when_pbap_iface_none(self):
+        sync, _ = _make_sync()
+        assert sync._pbap_iface is None
+        assert sync._retry_pullall() is False
+
+    def test_retry_pullall_returns_false_when_session_path_none(self):
+        sync, _ = _make_sync()
+        sync._pbap_iface = MagicMock()
+        sync.session_path = None
+        assert sync._retry_pullall() is False
+
+    def test_retry_window_clears_stale_contacts_empty(self):
+        sync, svc = _make_sync()
+        tmp_path = self._write_vcards([])
+        with patch("tincand.backends.pbap.GLib"):
+            sync._on_pullall_complete(tmp_path)
+        svc.set_capability.assert_any_call("contacts_empty", False)
