@@ -1,14 +1,12 @@
 # Release Gate: PBAP retry for iOS approval race
 
-**Bead:** tincan-b4kig (deploy) ← tincan-tujif (review) ← tincan-uhwfo (feature)  
+**Bead:** tincan-mwbov (deploy) ← tincan-zifqi (review) — supersedes tincan-b4kig/tincan-zyj32 gates  
 **Branch:** fix/pbap-0-contacts-retry-uhwfo  
-**Tip commit:** 8df50c3  
+**Tip commit:** 03320cd  
 **Date:** 2026-06-09  
 **Evaluator:** tincan/deployer
 
-*Supersedes prior gate (tip e020376, 2026-06-08). Branch gained two commits since:*
-*`410b321` — chore: release gate PASS (previous gate commit)*
-*`8df50c3` — fix(pbap): clear stale contacts_empty flag during retry window*
+*Third and final gate pass for this branch. Tip 03320cd includes all prior gate commits.*
 
 ---
 
@@ -31,6 +29,7 @@
 ## Commits on branch (vs main)
 
 ```
+03320cd  chore: release gate PASS for pbap-0-contacts-retry-uhwfo (b4kig, tip 8df50c3)
 8df50c3  fix(pbap): clear stale contacts_empty flag during retry window
 410b321  chore: release gate PASS for pbap-0-contacts-retry-uhwfo
 e020376  test(pbap): add §7 retry countdown tests for iOS approval-race recovery
@@ -40,8 +39,8 @@ e020376  test(pbap): add §7 retry countdown tests for iOS approval-race recover
 ## Files changed vs main
 
 ```
-release-gates/pbap-0-contacts-retry-uhwfo-gate.md |  40 +++++++++++++
-tests/tincand/test_pbap_select.py                 |  80 +++++++++++++++++++++++-
-tincand/backends/pbap.py                          |  56 +++++++++++++++++
-3 files changed, 172 insertions(+), 4 deletions(-)
+release-gates/pbap-0-contacts-retry-uhwfo-gate.md |  47 +++++++++++++
+tests/tincand/test_pbap_select.py                  |  80 +++++++++++++++++++++--
+tincand/backends/pbap.py                           |  56 ++++++++++++++++
+3 files changed, 179 insertions(+), 4 deletions(-)
 ```
