@@ -805,6 +805,14 @@ class MainWindow(QMainWindow):
         def _dk(m: MessageData) -> tuple:
             return (m.bubble_type, m.sort_key) if m.sort_key else (m.bubble_type, m.body)
 
+        # Index outbound daemon messages by dk so the cache pass can upgrade truncated bodies.
+        # MAP sent-folder echoes use Subject (preview) as fallback — the cache has the full body.
+        _outbound_by_dk: dict[tuple, int] = {
+            _dk(m): i
+            for i, m in enumerate(messages)
+            if m.bubble_type == BubbleType.OUTBOUND and m.sort_key
+        }
+
         seen: set[tuple] = {_dk(m) for m in messages}
         extras: list[MessageData] = []
 
@@ -814,6 +822,11 @@ class MainWindow(QMainWindow):
             if k not in seen:
                 extras.append(m)
                 seen.add(k)
+            elif k in _outbound_by_dk:
+                # Cache has the full body the user typed; daemon has a truncated MAP echo.
+                idx = _outbound_by_dk[k]
+                if len(m.body or "") > len(messages[idx].body or ""):
+                    messages[idx] = m
 
         # In-session sent cache — fast path; covers sends from this session not yet
         # visible in MAP results (iOS sent folder is always empty).
@@ -822,6 +835,10 @@ class MainWindow(QMainWindow):
             if k not in seen:
                 extras.append(m)
                 seen.add(k)
+            elif k in _outbound_by_dk:
+                idx = _outbound_by_dk[k]
+                if len(m.body or "") > len(messages[idx].body or ""):
+                    messages[idx] = m
 
         if extras:
             messages = sorted(messages + extras, key=lambda m: m.sort_key or m.timestamp)
