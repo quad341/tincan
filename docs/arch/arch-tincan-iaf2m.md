@@ -1,5 +1,9 @@
 # Architecture: Phone Calls — HFP + PipeWire Audio (tincan-iaf2m)
 
+_Architect: tincan/architect · 2026-06-07 · Updated 2026-06-09 (R2 downgraded: ASUS USB-BT500 dongle is reference HW; oFono now in Fedora repos; WP config format fixed; OQ-1/OQ-2 resolved)_
+
+_Superseded by: [arch-tincan-xohrx.md](arch-tincan-xohrx.md) (full finalized spec post-spike). This document is the framework draft with open questions; xohrx is the authoritative post-OQ design._
+
 ## Problem Statement
 
 Tincan's roadmap includes placing and receiving calls via the iPhone over
@@ -26,8 +30,7 @@ Sourced from `docs/PROTOCOLS.md`:
 | Bluetooth transport | BlueZ 5.x (pairing + RFCOMM/SCO) | Underlying transport |
 | iPhone interface | iOS as HFP Audio Gateway (AG) | Exposes calls, caller ID, hold, DTMF |
 
-**oFono packaging caveat:** oFono is NOT packaged on Fedora. The packaging bead
-(`tincan-j9wvv`) must account for this dependency.
+**oFono packaging update (2026-06-09):** oFono IS in Fedora 44 default repos (`ofono-2.19-2.fc44`). `sudo dnf install ofono` — no COPR or source build required. The packaging bead (`tincan-j9wvv`) should use `Requires: ofono`.
 
 ---
 
@@ -204,13 +207,14 @@ PipeWire audio graph
 System speakers / microphone
 ```
 
-**PipeWire configuration required:**
-```lua
--- ~/.config/wireplumber/bluetooth.lua.d/50-hfp-ofono.lua
-bluez_monitor.properties = {
-  ["bluez5.hfphsp-backend"] = "ofono",
+**WirePlumber configuration required (WP 0.5.x SPA-JSON format):**
+```
+# ~/.config/wireplumber/wireplumber.conf.d/50-bluez-ofono.conf
+monitor.bluez.properties = {
+  bluez5.hfphsp-backend = "ofono"
 }
 ```
+Note: the old `~/.config/wireplumber/bluetooth.lua.d/50-hfp-ofono.lua` Lua format is pre-0.5. Use `wireplumber.conf.d/` with SPA-JSON syntax on WP 0.5+.
 
 tincand owns call control; PipeWire owns audio. tincand does NOT directly
 manage SCO sockets or audio routing — that's PipeWire's job once oFono
@@ -225,8 +229,8 @@ modem/call object. tincand exposes this via `im.tincan.Calls.SetVolume`.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|-----------|
-| **SCO audio instability (R2 — highest risk)** | High (MediaTek adapters) | High | Prototype audio on real hardware BEFORE committing to call UI; document USB adapter requirement |
-| oFono not packaged on Fedora | High | High | Must resolve in packaging (tincan-j9wvv); COPR or bundled build |
+| **SCO audio instability (R2 — downgraded)** | Low (reference HW is ASUS USB-BT500 RTL8761B dongle, not MediaTek; operator confirmed this is the stable adapter) | High | Spike protocol (tincan-xy2sb) validates on the dongle before any implementation; MediaTek built-in is fallback-only |
+| oFono packaging | Low (resolved: `sudo dnf install ofono-2.19-2.fc44` via Fedora 44 default repos) | Medium | Add `Requires: ofono` to tincan.spec (tincan-j9wvv) |
 | iPhone may not surface HFP when A2DP is active | Medium | Medium | Force `hands-free` profile via WirePlumber / `bluez5.profile = headset-head-unit` |
 | DTMF flaky on iOS | Medium | Low | Known iOS behavior; warn users; defer DTMF UX polish |
 | LC3-SWB codec negotiation unverified | Medium | Low | Expect mSBC/CVSD in practice; don't advertise LC3 until verified |
@@ -238,11 +242,11 @@ modem/call object. tincand exposes this via `im.tincan.Calls.SetVolume`.
 
 These questions require operator input before the design can be finalized:
 
-**OQ-1: oFono installation strategy for Fedora?**
-oFono is not in Fedora repos. Options: (a) COPR package, (b) bundle oFono binary in tincan's COPR package, (c) document manual build from source, (d) pursue upstream Fedora packaging. Which is acceptable for the target user?
+**OQ-1: oFono installation strategy for Fedora? — RESOLVED 2026-06-09**
+`sudo dnf install ofono` — available as `ofono-2.19-2.fc44` in Fedora 44 default repos. No COPR or source build required. Add `Requires: ofono` to tincan.spec.
 
-**OQ-2: Audio prototype first?**
-Given SCO audio instability on MediaTek adapters (the known-good adapter on dev is MediaTek-class), should audio be prototyped on the real device with a known-good USB BT dongle BEFORE committing design and builder time to the full call UI? Recommended: spike before implementing.
+**OQ-2: Audio prototype first? — RESOLVED 2026-06-09**
+Yes. Spike bead tincan-xy2sb created and routed to tincan/investigator. Reference HW = ASUS USB-BT500 (RTL8761B) dongle; iPhone Malala re-paired to it. All implementation gated on spike OVERALL PASS.
 
 **OQ-3: Target call scope for MVP?**
 Full call features: dial, answer, hangup, hold, DTMF, call swap, multiparty.
@@ -271,9 +275,8 @@ Which matches the intended UX?
 ## Recommendation
 
 **Do not begin builder implementation until:**
-1. OQ-1 (oFono packaging) is resolved.
-2. OQ-2 (audio prototype) is complete and SCO audio is confirmed working.
+1. ~~OQ-1 (oFono packaging) is resolved.~~ — **DONE** (`sudo dnf install ofono`)
+2. OQ-2 (audio prototype): spike tincan-xy2sb must reach OVERALL PASS before implementation starts.
 3. OQ-3 (MVP scope) is decided.
 
-Create a spike bead (`needs-spike` label) for SCO audio validation before
-spawning implementation beads. This is the highest-risk item in the whole roadmap.
+See arch-tincan-xohrx.md for the full finalized architecture (post-spike, post-OQ). This document is the framework draft; xohrx is authoritative for implementation.

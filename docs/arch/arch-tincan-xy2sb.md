@@ -1,6 +1,6 @@
 # Spike Execution Protocol: SCO Audio Validation on RTL8761B (tincan-xy2sb)
 
-_Architect: tincan/architect · 2026-06-07_
+_Architect: tincan/architect · 2026-06-07 · Updated 2026-06-09 (reference HW confirmed: ASUS USB-BT500 dongle; WP config path/format fixed; gdbus bus flag fixed; oFono in Fedora repos)_
 
 ---
 
@@ -21,55 +21,52 @@ criteria (S1–S5, from PRD §Spike Prerequisite) and three open questions
 
 | # | Check | Command |
 |---|-------|---------|
-| P1 | RTL8761B (ASUS USB-BT500) or CSR8510 is plugged in | `lsusb \| grep -iE 'realtek\|cambridge'` |
-| P2 | RTL8761B is the active HCI adapter, NOT MediaTek | `hciconfig \| head -4` — note hci0 vs hci1 |
-| P3 | iPhone paired to RTL8761B adapter | `bluetoothctl devices` shows the iPhone MAC |
+| P1 | ASUS USB-BT500 (RTL8761B) dongle is plugged in | `lsusb \| grep -i 'realtek'` — expect 0b05:1bf6 on ASUS USB-BT500 |
+| P2 | Dongle (hci1) is the active default HCI adapter | `bluetoothctl show` — expect controller A0:AD:9F:7A:15:8E; hci0 = built-in MT7925 (leave enabled but not active) |
+| P3 | iPhone Malala (D0:6B:78:33:46:20) paired to dongle | `bluetoothctl info D0:6B:78:33:46:20` shows Paired:yes Trusted:yes on dongle controller |
 | P4 | oFono installed | `ofonod --version` or `which ofonod` |
 | P5 | PipeWire running | `pw-cli --version` |
 | P6 | WirePlumber running | `wpctl status` |
 
 If P4 (oFono) is not installed on Fedora:
 ```bash
-# Option A: COPR (if available)
-sudo dnf copr enable <copr-repo>
-sudo dnf install ofono
-
-# Option B: Build from source
-git clone git://git.kernel.org/pub/scm/network/ofono/ofono.git
-cd ofono && ./bootstrap && ./configure --prefix=/usr --disable-dundee
-make -j$(nproc) && sudo make install
+sudo dnf install ofono          # ofono-2.19-2.fc44 available in Fedora 44 default repos
+sudo systemctl enable --now ofono
 ```
-**Record which installation method was used — this answers OQ-1.**
+**OQ-1 answered:** Fedora default repo (dnf), no COPR or source build required.
 
-WirePlumber HFP config (create if absent):
+WirePlumber HFP config (create if absent — WP 0.5.x SPA-JSON format, NOT the old Lua form):
 ```bash
-mkdir -p ~/.config/wireplumber/bluetooth.lua.d/
-cat > ~/.config/wireplumber/bluetooth.lua.d/50-hfp-ofono.lua <<'EOF'
-bluez_monitor.properties = {
-  ["bluez5.hfphsp-backend"] = "ofono",
+mkdir -p ~/.config/wireplumber/wireplumber.conf.d/
+cat > ~/.config/wireplumber/wireplumber.conf.d/50-bluez-ofono.conf <<'EOF'
+monitor.bluez.properties = {
+  bluez5.hfphsp-backend = "ofono"
 }
 EOF
 systemctl --user restart wireplumber
 ```
+Verified working path: `/home/jaword/.config/wireplumber/wireplumber.conf.d/50-bluez-ofono.conf`
 
 ---
 
 ## S5 First: Confirm Adapter Identity
 
-Before any other test — verify RTL8761B is in use and MediaTek is excluded.
+Before any other test — verify ASUS USB-BT500 dongle is the active default controller.
 
 ```bash
-lsusb | grep -iE 'realtek|cambridge|cambridge silicon'
-hciconfig
-# Expected: one or two hci entries; note which is RTL8761B
-# If two adapters: disable the MediaTek one for the duration
-sudo hciconfig hci0 down   # disable MediaTek (adjust hci index as needed)
+lsusb | grep -i realtek
+# Expected: Bus xxx Device yyy: ID 0b05:1bf6 ASUSTek Computer, Inc. Bluetooth Adapter
+bluetoothctl show
+# Expected: Controller A0:AD:9F:7A:15:8E  roglet #2  [default]
+# (hci0 = built-in MT7925; hci1 = ASUS dongle — leave both enabled; dongle must be default)
 ```
+
+Do NOT disable the built-in MT7925 (hci0). The dongle (hci1) must be the default; confirm via `[default]` in `bluetoothctl show`.
 
 Record:
 ```
-S5 adapter: [RTL8761B/CSR8510/other]
-hciconfig output:
+S5 adapter: ASUS USB-BT500 RTL8761B (0b05:1bf6) confirmed as default? [PASS/FAIL]
+bluetoothctl show controller MAC:
 ```
 
 ---
@@ -85,7 +82,7 @@ bluetoothctl connect <IPHONE_MAC>
 sleep 2
 
 # Check modems
-gdbus call -e -d org.ofono -o / -m org.ofono.Manager.GetModems
+gdbus call -y -d org.ofono -o / -m org.ofono.Manager.GetModems
 ```
 
 **Pass condition:** output contains a modem object with `Type: hfp` (not `hci` which
@@ -96,7 +93,7 @@ is a local modem). Example:
 
 If no HFP modem appears after 5 s of BT connect, also check:
 ```bash
-gdbus call -e -d org.ofono -o / -m org.ofono.Manager.GetModems
+gdbus call -y -d org.ofono -o / -m org.ofono.Manager.GetModems
 dbus-monitor --system "type=signal,sender=org.ofono"
 ```
 
@@ -122,8 +119,8 @@ pw-mon
 
 ### Terminal 2 — oFono call watch
 ```bash
-dbus-monitor --session "type=signal,interface=org.ofono.VoiceCallManager"
-dbus-monitor --session "type=signal,interface=org.ofono.VoiceCall"
+dbus-monitor --system "type=signal,interface=org.ofono.VoiceCallManager"
+dbus-monitor --system "type=signal,interface=org.ofono.VoiceCall"
 ```
 
 ### Terminal 3 — PipeWire log (for codec)
@@ -136,9 +133,9 @@ journalctl -f -u pipewire --since now | grep -iE 'codec|msbc|cvsd|lc3|sco|hfp'
 ```bash
 # Option A: Call the phone from somewhere (incoming on iPhone → desktop)
 # Option B: Dial out from oFono
-MODEM_PATH=$(gdbus call -e -d org.ofono -o / -m org.ofono.Manager.GetModems \
+MODEM_PATH=$(gdbus call -y -d org.ofono -o / -m org.ofono.Manager.GetModems \
   | grep -oP "'/[^']+'(?=.*Type.*hfp)" | head -1)
-gdbus call -e -d org.ofono -o "$MODEM_PATH" -m org.ofono.VoiceCallManager.Dial \
+gdbus call -y -d org.ofono -o "$MODEM_PATH" -m org.ofono.VoiceCallManager.Dial \
   "+15555551234" ""
 ```
 
@@ -208,7 +205,7 @@ During the call, watch the PipeWire log (Terminal 3 from above) for `lc3` or
 
 ## OQ-4c: WirePlumber Config Sufficient?
 
-After the spike (pass or fail), note whether the `50-hfp-ofono.lua` config in the
+After the spike (pass or fail), note whether the `50-bluez-ofono.conf` config in the
 prerequisite section was sufficient, or if additional WirePlumber config was
 required.
 
@@ -228,7 +225,7 @@ At the end of the spike, post a structured result block:
 SPIKE RESULT — 2026-06-07
 
 Adapter: [RTL8761B / CSR8510 / other]
-oFono install method: [COPR / source build / package]
+oFono install method: [Fedora dnf / other]
 PipeWire version: X.Y.Z
 
 S1 oFono HFP modem: [PASS / FAIL — reason]
@@ -239,7 +236,7 @@ S5 RTL8761B confirmed: [PASS / FAIL]
 
 OQ-4a PipeWire min version: X.Y.Z [sufficient / needs newer]
 OQ-4b LC3-SWB: [observed / not observed — fell back to mSBC/CVSD]
-OQ-4c WirePlumber config: [50-hfp-ofono.lua sufficient / additional config: ...]
+OQ-4c WirePlumber config: [50-bluez-ofono.conf sufficient / additional config: ...]
 
 OVERALL: [PASS — all 5 criteria met / FAIL — failing criteria: S1, S2, ...]
 ```
@@ -254,7 +251,7 @@ If OVERALL FAIL → add `needs-investigation` label, document failure details, m
 | Symptom | Likely cause | Action |
 |---------|-------------|--------|
 | `GetModems` returns only `hci0` type modem | oFono `hfp_hf_bluez5` plugin not loaded OR iPhone not in BT range | Check `ofonod -d` output for plugin load; reconnect BT |
-| SCO node never appears | WirePlumber not configured for oFono HFP backend | Verify `50-hfp-ofono.lua` config; restart WirePlumber |
+| SCO node never appears | WirePlumber not configured for oFono HFP backend | Verify `50-bluez-ofono.conf` in `wireplumber.conf.d/`; restart WirePlumber |
 | Audio one-way only | Microphone sink not selected | `wpctl set-default-sink / set-default-source` for the BT device |
 | Only CVSD, not mSBC | iPhone or BlueZ mSBC capability mismatch | Check `hciconfig hci1 features` for eSCO/mSBC bit |
 | `org.ofono not found` | oFono not started | `sudo systemctl start ofono` or `sudo ofonod &` |
@@ -263,9 +260,7 @@ If OVERALL FAIL → add `needs-investigation` label, document failure details, m
 
 ## Guardrails
 
-- **MediaTek NOT acceptable.** Results on the built-in MediaTek-class adapter do
-  not count. If RTL8761B is not available, block the spike and mail
-  tincan/architect.
+- **ASUS USB-BT500 (RTL8761B) dongle is the reference HW.** Run the spike on the dongle only. If the dongle is unavailable, block the spike and mail tincan/architect. The built-in MediaTek MT7925 (hci0) may remain enabled but is not the spike target — do not report results from it as passing.
 - **oFono packaging method must be recorded.** This answers OQ-1 in the PRD
   and is a blocker for the packaging bead (tincan-j9wvv).
 - **Results are for the architect, not for a builder PR.** The investigator's output
