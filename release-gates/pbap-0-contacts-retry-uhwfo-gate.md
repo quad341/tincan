@@ -1,8 +1,8 @@
 # Release Gate: PBAP retry for iOS approval race
 
-**Bead:** tincan-wyqoc (deploy) ← tincan-ehwhi (review) — supersedes prior gates (tincan-tn0rq, tincan-31q7r, tincan-mwbov, tincan-b4kig)
+**Bead:** tincan-8qd3b (deploy) ← tincan-fdfev (review) — supersedes prior gates (tincan-wyqoc, tincan-tn0rq, tincan-31q7r, tincan-mwbov, tincan-b4kig)
 **Branch:** fix/pbap-0-contacts-retry-uhwfo
-**Tip commit:** f5e3095
+**Tip commit:** 91d020f
 **Date:** 2026-06-09
 **Evaluator:** tincan/deployer
 
@@ -12,21 +12,22 @@
 
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
-| 1 | Review PASS present | **PASS** | tincan-ehwhi: "Reviewed + PASSED by tincan/reviewer (Claude Sonnet 4.6)" on branch tip f5e3095; independent confirmation of tincan-ambzl PASS |
+| 1 | Review PASS present | **PASS** | tincan-fdfev: "Verdict: PASS" from tincan/reviewer (Claude Sonnet 4.6) on branch tip 91d020f; lint clean, no OWASP findings, retry logic correct, 7 unit tests cover all branches |
 | 2 | Acceptance criteria met | **PASS** | Bug: 0 contacts on PBAP connect after iOS Sync Contacts re-approval. Fix: `_retry_pullall()` — 5 s countdown, max 3 retries, `contacts_empty=True` on exhaustion, `contacts_empty=False` cleared when retry window opens. 7 new §7 tests cover all retry paths |
-| 3 | Tests pass | **PASS** | `pytest tests/ --ignore=tests/tincand/test_mcp_server.py`: **1673 passed, 6 skipped, 6 xfailed** (re-run on f5e3095; MCP import error is pre-existing, unrelated). CI: SUCCESS on GitHub Actions |
-| 4 | No high-severity review findings open | **PASS** | Reviewer: no HIGH/CRITICAL/OWASP findings. F1 tmp-file leak is pre-existing non-blocking pattern; F2 stale-timer edge case advisory; F3 hardware smoke advisory |
+| 3 | Tests pass | **PASS** | `pytest tests/ --ignore=tests/tincand/test_mcp_server.py`: **1673 passed, 6 skipped, 6 xfailed** (run on 91d020f; MCP import error is pre-existing, unrelated) |
+| 4 | No high-severity review findings open | **PASS** | Reviewer: no HIGH/CRITICAL/OWASP findings. F1 tmp-file leak pre-existing non-blocking; F2 stale-timer edge case advisory; F3 hardware smoke advisory; F4 reconnect-during-retry advisory — all LOW |
 | 5 | Final branch is clean | **PASS** | `git status`: only untracked gc worktree artifacts (.claude/ .gc/ .codex/ .gitkeep); no uncommitted changes |
-| 6 | Branch diverges cleanly from main | **PASS** | 7 commits on top of origin/main; no merge conflicts |
+| 6 | Branch diverges cleanly from main | **PASS** | 9 commits on top of origin/main; no merge conflicts; 3 files changed (pbap.py, test_pbap_select.py, gate.md) |
 | 7 | Single feature theme | **PASS** | All commits touch one subsystem (PBAP backend + its tests): `tincand/backends/pbap.py`, `tests/tincand/test_pbap_select.py` |
 
-**Overall: PASS — PR 103 open; route merge-request to mayor**
+**Overall: PASS — PR #103 open; route merge-request to mayor**
 
 ---
 
 ## Commits on branch (vs main)
 
 ```
+91d020f  chore: release gate PASS for pbap-0-contacts-retry-uhwfo (tincan-wyqoc, tip f5e3095)
 f5e3095  chore: release gate PASS for pbap-0-contacts-retry-uhwfo (tincan-tn0rq, tip 76ff7fc)
 76ff7fc  chore: release gate PASS for pbap-0-contacts-retry-uhwfo (tincan-31q7r, tip a5c7554)
 a5c7554  chore: release gate PASS for pbap-0-contacts-retry-uhwfo (mwbov, tip 03320cd)
