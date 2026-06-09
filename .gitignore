@@ -2,3 +2,8 @@ tincan_gui/__pycache__/
 __pycache__/
 *.pyc
 *.pyo
+
+# Beads issue tracker working dir (local Dolt DB + metadata pointer).
+# Untracked but MUST be ignored so `git clean -fdx`/stash -u can't sweep it
+# (that's what nuked .beads/metadata.json during a migration, 2026-06-07).
+.beads/
