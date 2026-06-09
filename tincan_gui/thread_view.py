@@ -584,7 +584,8 @@ class MessageBubble(QWidget):
                 "QMenu { background: #27272a; color: #f4f4f5;"
                 " border: 1px solid #3f3f46; padding: 2px; }"
                 "QMenu::item { padding: 5px 24px 5px 12px; border-radius: 3px; }"
-                "QMenu::item:selected { background: #3f3f46; color: #f4f4f5; }"
+                "QMenu::item:selected, QMenu::item:hover"
+                " { background: #3f3f46; color: #f4f4f5; }"
                 "QMenu::item:disabled { color: #52525b; }"
             )
         else:
@@ -592,7 +593,8 @@ class MessageBubble(QWidget):
                 "QMenu { background: #ffffff; color: #111827;"
                 " border: 1px solid #e5e7eb; padding: 2px; }"
                 "QMenu::item { padding: 5px 24px 5px 12px; border-radius: 3px; }"
-                "QMenu::item:selected { background: #f3f4f6; color: #111827; }"
+                "QMenu::item:selected, QMenu::item:hover"
+                " { background: #f3f4f6; color: #111827; }"
                 "QMenu::item:disabled { color: #9ca3af; }"
             )
 
