@@ -240,3 +240,42 @@ class TestMarkConversationRead:
         client = TincandClient()
         client.mark_conversation_read("conv-1")
         # No exception → test passes
+
+
+# ---------------------------------------------------------------------------
+# §5 refresh_contacts — fire-and-forget, analogous to RequestReconnect (tincan-mox38)
+# ---------------------------------------------------------------------------
+
+class TestRefreshContacts:
+    """TincandClient.refresh_contacts() calls RefreshContacts on daemon or no-ops."""
+
+    def test_does_not_raise_when_bus_disconnected(self, _hermetic_dbus):
+        client = TincandClient()
+        client.refresh_contacts()
+        # No exception → test passes
+
+    def test_calls_refresh_contacts_on_daemon_when_connected_and_iface_valid(
+        self, _hermetic_dbus
+    ):
+        from unittest.mock import MagicMock, patch
+        _hermetic_dbus.isConnected.return_value = True
+        mock_iface = MagicMock()
+        mock_iface.isValid.return_value = True
+        client = TincandClient()
+
+        with patch("tincan_gui.dbus_client.QDBusInterface", return_value=mock_iface):
+            client.refresh_contacts()
+
+        mock_iface.call.assert_called_once_with("RefreshContacts")
+
+    def test_does_not_call_dbus_when_iface_invalid(self, _hermetic_dbus):
+        from unittest.mock import MagicMock, patch
+        _hermetic_dbus.isConnected.return_value = True
+        mock_iface = MagicMock()
+        mock_iface.isValid.return_value = False
+        client = TincandClient()
+
+        with patch("tincan_gui.dbus_client.QDBusInterface", return_value=mock_iface):
+            client.refresh_contacts()
+
+        mock_iface.call.assert_not_called()
