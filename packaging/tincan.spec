@@ -9,6 +9,8 @@ Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 BuildRequires:  python3-devel
 BuildRequires:  python3-setuptools
+BuildRequires:  checkpolicy
+BuildRequires:  policycoreutils
 
 # python3-pyside6 is available in the official Fedora 42+ repositories
 # (package python3-pyside6 ≥ 6.5 provides PySide6 6.x).
@@ -41,6 +43,8 @@ See README.md for step-by-step setup instructions.
 
 %build
 %py3_build
+checkmodule -M -m -o packaging/selinux/tincan_hfp_sco.mod packaging/selinux/tincan_hfp_sco.te
+semodule_package -o packaging/selinux/tincan_hfp_sco.pp -m packaging/selinux/tincan_hfp_sco.mod
 
 %install
 %py3_install
