@@ -454,18 +454,35 @@ class ANCSBackend(BackendInterface):
         # Initiate LE bond (triggers iOS notification access prompt if not bonded)
         try:
             bonded = bool(props_iface.Get(_DEVICE_IFACE, "Bonded"))
-            if not bonded:
-                _log.info("ANCSBackend: requesting LE bond with %s", device_path)
-                device_iface.Pair()
         except dbus.exceptions.DBusException as exc:
-            _log.warning(
-                "ANCSBackend: LE bond failed for %s: %s — "
-                "ANCS unavailable (MAP polling continues)",
-                device_path, exc,
-            )
-            if self._service is not None:
-                self._service.set_capability("ancs", False)
+            _log.warning("ANCSBackend: cannot read Bonded property for %s: %s", device_path, exc)
             return
+
+        if not bonded:
+            _log.info("ANCSBackend: requesting LE bond with %s", device_path)
+            try:
+                device_iface.Pair()
+            except dbus.exceptions.DBusException as exc:
+                err = getattr(exc, "get_dbus_name", lambda: str(exc))()
+                if err == "org.bluez.Error.AlreadyExists":
+                    # Device has a Classic bond but no LE bond yet — proceed to GATT discovery.
+                    # If no LE ACL is live, StartNotify will return OK but Notifying stays False;
+                    # _check_notifying_after_subscribe then enters HEALING, ready to recover when
+                    # iOS opens an LE link on its next natural BT reconnect (tincan-ygh87).
+                    _log.info(
+                        "ANCSBackend: %s already classic-paired — "
+                        "proceeding to GATT discovery without LE re-pair",
+                        device_path,
+                    )
+                else:
+                    _log.warning(
+                        "ANCSBackend: LE bond failed for %s: %s — "
+                        "ANCS unavailable (MAP polling continues)",
+                        device_path, exc,
+                    )
+                    if self._service is not None:
+                        self._service.set_capability("ancs", False)
+                    return
 
         # Enumerate BlueZ's view of the iPhone's GATT services
         try:
