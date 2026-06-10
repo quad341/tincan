@@ -54,7 +54,7 @@ from tincan_gui.degradation_banners import (
 from tincan_gui.message_cache import MessageCache
 from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.theme import is_dark_theme
-from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
+from tincan_gui.thread_view import BubbleType, MessageData, ThreadView, _emoji_font_families
 from tincan_gui.tray import TrayIcon
 
 _ASSETS = Path(__file__).parent / "assets"
@@ -163,10 +163,14 @@ class TitleBar(QWidget):
         self._gear_btn = QToolButton()
         self._gear_btn.setText("⚙")
         self._gear_btn.setFixedSize(32, 32)
+        _gear_font = QFont()
+        _gear_font.setFamilies(_emoji_font_families())
+        _gear_font.setPointSize(16)
+        self._gear_btn.setFont(_gear_font)
         self._gear_btn.setToolTip("Settings")
         self._gear_btn.setAccessibleName("Settings")
         self._gear_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 22px; border: none;"
+            "QToolButton { color: #ccfbf1; border: none;"
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
@@ -177,10 +181,14 @@ class TitleBar(QWidget):
         self._bug_btn = QToolButton()
         self._bug_btn.setText("🐞")
         self._bug_btn.setFixedSize(32, 32)
+        _emoji_btn_font = QFont()
+        _emoji_btn_font.setFamilies(_emoji_font_families())
+        _emoji_btn_font.setPointSize(13)
+        self._bug_btn.setFont(_emoji_btn_font)
         self._bug_btn.setToolTip("File a bug report")
         self._bug_btn.setAccessibleName("File a bug report")
         self._bug_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
+            "QToolButton { color: #ccfbf1; border: none;"
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
@@ -191,10 +199,11 @@ class TitleBar(QWidget):
         self._bell_btn = QToolButton()
         self._bell_btn.setText("🔔")
         self._bell_btn.setFixedSize(32, 32)
+        self._bell_btn.setFont(_emoji_btn_font)
         self._bell_btn.setToolTip("Notification center")
         self._bell_btn.setAccessibleName("Notification center")
         self._bell_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
+            "QToolButton { color: #ccfbf1; border: none;"
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
@@ -1171,7 +1180,12 @@ class MainWindow(QMainWindow):
 
     def _on_open_notif_center(self) -> None:
         from tincan_gui.notification_center import NotificationCenterDialog
-        NotificationCenterDialog(self._notifier, parent=self).exec()
+        dlg = NotificationCenterDialog(
+            self._notifier,
+            on_select=self._conv_list.select_conversation,
+            parent=self,
+        )
+        dlg.exec()
 
     def _open_settings(self) -> None:
         from tincan_gui.settings_dialog import SettingsDialog

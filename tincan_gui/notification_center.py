@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -39,33 +39,46 @@ def _format_ts(ts: float) -> str:
 class _NotifRow(QWidget):
     """Single notification row: sender, summary/body, timestamp."""
 
+    clicked = Signal(str)
+
     def __init__(
-        self, entry: NotificationEntry, dark: bool, parent: QWidget | None = None
+        self,
+        entry: NotificationEntry,
+        dark: bool,
+        conv_id: str = "",
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._conv_id = conv_id
         dark_bg = "#1c1c1e"
         dark_border = "#3f3f46"
+        dark_hover = "#2a2a2d"
         light_bg = "#f9fafb"
         light_border = "#e5e7eb"
+        light_hover = "#eff0f1"
 
+        self._dark = dark
         bg = dark_bg if dark else light_bg
+        self._hover_bg = dark_hover if dark else light_hover
         border = dark_border if dark else light_border
-        self.setStyleSheet(
-            f"background: {bg}; border: 1px solid {border}; border-radius: 6px;"
-        )
+        self._base_style = f"background: {bg}; border: 1px solid {border}; border-radius: 6px;"
+        self.setStyleSheet(self._base_style)
+
+        if conv_id:
+            self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(12, 8, 12, 8)
         outer.setSpacing(8)
 
         # Kind badge — use _emoji_font_families so the glyph renders on systems
-        # where the system font doesn't cover emoji (tincan-36af0).
+        # where the system font doesn't cover emoji (tincan-3so6e).
         badge = QLabel("💬" if entry.kind == "sms" else "🔔")
         badge_font = QFont()
         badge_font.setFamilies(_emoji_font_families())
         badge_font.setPointSize(14)
         badge.setFont(badge_font)
-        badge.setFixedWidth(20)
+        badge.setFixedWidth(28)
         badge.setAttribute(Qt.WA_TransparentForMouseEvents)
         outer.addWidget(badge, alignment=Qt.AlignTop)
 
@@ -103,11 +116,33 @@ class _NotifRow(QWidget):
         ts_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
         outer.addWidget(ts_lbl, alignment=Qt.AlignTop)
 
+    def enterEvent(self, event: object) -> None:
+        if self._conv_id:
+            border = "#3f3f46" if self._dark else "#e5e7eb"
+            self.setStyleSheet(
+                f"background: {self._hover_bg}; border: 1px solid {border}; border-radius: 6px;"
+            )
+        super().enterEvent(event)  # type: ignore[misc]
+
+    def leaveEvent(self, event: object) -> None:
+        self.setStyleSheet(self._base_style)
+        super().leaveEvent(event)  # type: ignore[misc]
+
+    def mousePressEvent(self, event: object) -> None:
+        if self._conv_id:
+            self.clicked.emit(self._conv_id)
+        super().mousePressEvent(event)  # type: ignore[misc]
+
 
 class NotificationCenterDialog(QDialog):
     """Modal dialog showing the in-session notification history (newest first)."""
 
-    def __init__(self, notifier: DesktopNotifier, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        notifier: DesktopNotifier,
+        on_select: Callable[[str], None] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Notification Center")
         self.resize(480, 500)
@@ -150,7 +185,11 @@ class NotificationCenterDialog(QDialog):
         entries = list(reversed(notifier.history()))  # newest first
         if entries:
             for entry in entries:
-                row = _NotifRow(entry, dark)
+                row = _NotifRow(entry, dark, conv_id=entry.conv_id)
+                if on_select is not None and entry.conv_id:
+                    row.clicked.connect(
+                        lambda cid, _cb=on_select: (self.accept(), _cb(cid))
+                    )
                 content_layout.addWidget(row)
         else:
             empty = QLabel("No notifications yet this session")
