@@ -150,6 +150,9 @@ def main() -> None:
         _log.error("tincand: another instance already owns %s — exiting", BUS_NAME)
         sys.exit(0)
 
+    from tincand.hfp_capability import is_call_setup_ready
+    service.set_capability("call_setup_ready", is_call_setup_ready())
+
     if args.with_ancs and args.backend == "map":
         from tincand.backend_manager import BackendManager
         from tincand.backends.ancs import ANCSBackend

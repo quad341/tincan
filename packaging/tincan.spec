@@ -14,6 +14,8 @@ BuildRequires:  python3-setuptools
 # (package python3-pyside6 ≥ 6.5 provides PySide6 6.x).
 # If building for older distros, enable RPM Fusion or the upstream COPR.
 Requires:       python3 >= 3.10
+Requires(post): policycoreutils
+Requires(postun): policycoreutils
 Requires:       python3-pyside6 >= 6.5
 Requires:       python3-dbus
 Requires:       python3-gobject
@@ -53,13 +55,25 @@ install -Dm644 packaging/tincan-256.png \
 install -Dm644 packaging/tincan-48.png \
     %{buildroot}%{_datadir}/icons/hicolor/48x48/apps/tincan.png
 
+# SELinux policy module for HFP/SCO call audio (tincan-r41sx)
+install -Dm644 packaging/selinux/tincan_hfp_sco.pp \
+    %{buildroot}%{_datadir}/selinux/packages/tincan_hfp_sco.pp
+
 %post
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 update-desktop-database &>/dev/null || :
+# Load SELinux policy module for HFP/SCO call audio (tincan-r41sx).
+# Required: allows dbus-broker to receive oFono's SCO fd via SCM_RIGHTS.
+if /usr/sbin/selinuxenabled 2>/dev/null; then
+    /usr/sbin/semodule -i %{_datadir}/selinux/packages/tincan_hfp_sco.pp &>/dev/null || :
+fi
 
 %postun
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 update-desktop-database &>/dev/null || :
+if /usr/sbin/selinuxenabled 2>/dev/null; then
+    /usr/sbin/semodule -r tincan_hfp_sco &>/dev/null || :
+fi
 
 %files
 %license LICENSE
@@ -73,6 +87,7 @@ update-desktop-database &>/dev/null || :
 %{_datadir}/icons/hicolor/scalable/apps/tincan.svg
 %{_datadir}/icons/hicolor/256x256/apps/tincan.png
 %{_datadir}/icons/hicolor/48x48/apps/tincan.png
+%{_datadir}/selinux/packages/tincan_hfp_sco.pp
 
 %changelog
 * Sun Jun 07 2026 Jim Wordelman <james@wordelman.name> - 0.1.0-1
