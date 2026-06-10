@@ -18,6 +18,14 @@ if is_dark_theme():
 else:
     app.setStyleSheet(FOCUS_STYLESHEET)
 
+
+def _reapply_theme(_palette=None) -> None:
+    """Re-evaluate dark/light after platform theme plugin updates the palette."""
+    app.setStyleSheet(DARK_STYLESHEET if is_dark_theme() else FOCUS_STYLESHEET)
+
+
+app.paletteChanged.connect(_reapply_theme)
+
 # ---------------------------------------------------------------------------
 # i18n: load translation for TINCAN_LOCALE (or system locale); silent fallback
 # ---------------------------------------------------------------------------

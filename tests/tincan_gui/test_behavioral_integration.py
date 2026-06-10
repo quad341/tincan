@@ -19,6 +19,7 @@ Coverage (acceptance criteria from tincan-iplg1, tincan-tqsre):
   §9  long-unbroken-wrap     — 200-char unbroken body wraps instead of clipping
   §10 cache-immediate-select — cache shown instantly on conversation select (tincan-tqsre)
   §11 cache-key-mismatch     — conv_id-written messages found via current_phone read (tincan-tqsre)
+  §12 outbound-body-upgrade  — full cached body shown when daemon MAP echo is truncated (tincan-ubsu5)
 """
 from __future__ import annotations
 
@@ -580,4 +581,108 @@ class TestCacheKeyMismatch:
         assert "Inbound msg" in bodies, (
             f"write key must be current_phone ({phone_full}), not conv_id ({phone_short}) — "
             f"cache files: {[f.name for f in tmp_path.iterdir()]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# §12 outbound-body-upgrade — full cached body shown when daemon MAP echo is
+# truncated (tincan-ubsu5)
+# ---------------------------------------------------------------------------
+
+class TestOutboundBodyUpgrade:
+    """_load_thread_messages must replace a daemon truncated MAP echo with the
+    full body from the persistent cache when they share the same sort_key.
+
+    MAP sent-folder echoes use the Subject header (preview) as body — truncated
+    relative to the full message the user typed.  _outbound_by_dk indexes daemon
+    outbound messages; cache messages at the same (OUTBOUND, sort_key) upgrade
+    the daemon entry when their body is longer.
+    """
+
+    def test_full_body_shown_when_cache_longer_than_daemon(self, qtbot, tmp_path):
+        """Thread view shows the full cached body when daemon MAP echo is truncated."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        phone = "+15550001"
+        sort_key = "20260608T100000"
+        full_body = "This is the complete message body that the user typed"
+        short_body = "This is the complete"  # truncated MAP echo
+
+        win._msg_cache.add_message(phone, "outbound", full_body, "", sort_key, sort_key)
+
+        daemon_messages = [{
+            "direction": "outbound",
+            "body": short_body,
+            "timestamp": sort_key,
+            "conversation_id": phone,
+            "sender": "",
+        }]
+
+        win._thread_view.load_thread(phone, phone, [], "SMS")
+        with patch.object(win._dbus_client, "get_messages", return_value=daemon_messages):
+            win._load_thread_messages(phone, phone)
+
+        bubbles = _bubble_widgets(win)
+        assert len(bubbles) == 1, f"Expected 1 bubble, got {len(bubbles)}"
+        assert bubbles[0]._data.body == full_body, (
+            f"Expected full cached body '{full_body}' but got '{bubbles[0]._data.body}'"
+        )
+
+    def test_no_downgrade_when_cache_shorter_than_daemon(self, qtbot, tmp_path):
+        """Daemon body is preserved when it is longer than the cached entry."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        phone = "+15550001"
+        sort_key = "20260608T100000"
+        daemon_body = "Full daemon body that was returned"
+        short_cache = "Full daemon"  # stale short cache entry
+
+        win._msg_cache.add_message(phone, "outbound", short_cache, "", sort_key, sort_key)
+
+        daemon_messages = [{
+            "direction": "outbound",
+            "body": daemon_body,
+            "timestamp": sort_key,
+            "conversation_id": phone,
+            "sender": "",
+        }]
+
+        win._thread_view.load_thread(phone, phone, [], "SMS")
+        with patch.object(win._dbus_client, "get_messages", return_value=daemon_messages):
+            win._load_thread_messages(phone, phone)
+
+        bubbles = _bubble_widgets(win)
+        assert len(bubbles) == 1
+        assert bubbles[0]._data.body == daemon_body, (
+            f"Daemon body must not be downgraded by a shorter cache entry — "
+            f"got '{bubbles[0]._data.body}'"
+        )
+
+    def test_upgrade_via_sent_cache_full_body(self, qtbot, tmp_path):
+        """In-session sent cache also upgrades a truncated daemon echo."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        phone = "+15550001"
+        full_body = "Sent message with full content"
+        short_body = "Sent message with"  # truncated MAP echo
+        sort_key = "20260608T100000"
+
+        from tincan_gui.thread_view import BubbleType, MessageData
+        sent_entry = MessageData(BubbleType.OUTBOUND, full_body, "", "", sort_key=sort_key)
+        win._sent_cache[phone] = [sent_entry]
+
+        daemon_messages = [{
+            "direction": "outbound",
+            "body": short_body,
+            "timestamp": sort_key,
+            "conversation_id": phone,
+            "sender": "",
+        }]
+
+        win._thread_view.load_thread(phone, phone, [], "SMS")
+        with patch.object(win._dbus_client, "get_messages", return_value=daemon_messages):
+            win._load_thread_messages(phone, phone)
+
+        bubbles = _bubble_widgets(win)
+        assert len(bubbles) == 1, f"Expected 1 bubble, got {len(bubbles)}"
+        assert bubbles[0]._data.body == full_body, (
+            f"In-session sent cache must upgrade truncated daemon echo — "
+            f"got '{bubbles[0]._data.body}'"
         )

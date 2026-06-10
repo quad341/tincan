@@ -10,7 +10,16 @@ from enum import Enum, auto
 from typing import Optional
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt, Signal
-from PySide6.QtGui import QAccessible, QColor, QFont, QFontMetrics, QImage, QPainter, QPixmap
+from PySide6.QtGui import (
+    QAccessible,
+    QColor,
+    QFont,
+    QFontInfo,
+    QFontMetrics,
+    QImage,
+    QPainter,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QAccessibleWidget,
     QApplication,
@@ -31,6 +40,13 @@ from tincan_gui.avatar import AvatarWidget, _color_for_name
 from tincan_gui.theme import is_dark_theme
 
 _URL_RE = _re.compile(r"(https?://[^\s<>\"']+)")
+# Bare-domain URLs: www.* (with optional path) or any domain/path with a known TLD.
+# Path component required for non-www to avoid false positives on e.g. "version 1.0".
+_BARE_URL_RE = _re.compile(
+    r"\b(www\.[a-zA-Z0-9][a-zA-Z0-9\-.]*[a-zA-Z0-9](?:/[^\s<>\"']*)?)"
+    r"|\b((?:[a-zA-Z0-9][a-zA-Z0-9\-]*\.)+(?:com|net|org|io|co|app|dev|gov|edu|info|me|tv)"
+    r"/[^\s<>\"']*)"
+)
 
 # Matches emoji codepoints and combining characters as a greedy sequence.
 # Including ZWJ (U+200D), VS-16 (U+FE0F), skin tones, and regional indicators
@@ -164,9 +180,17 @@ def _emoji_font_families() -> list[str]:
     Emoji, changing the look of all message text (tincan-h9nu).  Instead, we
     read the actual application default family at runtime and prepend it so
     only genuine emoji glyphs use the colour-emoji fallback fonts.
+
+    QFontInfo.family() is used rather than QFont.family() because on some
+    systems (e.g. Qt6 on GNOME/KDE with a system-configured sans-serif),
+    QFont.family() returns "" while QFontInfo returns the resolved name.
+    Without the resolved name, the emoji font becomes the primary family and
+    plain-text characters (including digits) may not render (tincan-15xl9).
     """
     app = QApplication.instance()
-    primary = app.font().family() if app is not None else ""
+    primary = ""
+    if app is not None:
+        primary = QFontInfo(app.font()).family()
     families = []
     if primary:
         families.append(primary)
@@ -206,6 +230,28 @@ def _break_long_words(html: str) -> str:
     return "".join(out)
 
 
+def _linkify_segment(raw: str) -> str:
+    """HTML-escape *raw* text and wrap all URLs (protocol or bare domain) in <a> tags."""
+    matches: list[tuple[int, int, str, str]] = []  # (start, end, href, display)
+    for m in _URL_RE.finditer(raw):
+        matches.append((m.start(), m.end(), m.group(1), m.group(1)))
+    for m in _BARE_URL_RE.finditer(raw):
+        display = m.group(1) or m.group(2)
+        matches.append((m.start(), m.end(), "https://" + display, display))
+    matches.sort(key=lambda t: t[0])
+
+    parts: list[str] = []
+    last = 0
+    for start, end, href, display in matches:
+        if start < last:  # overlapping — skip (already covered by a prior match)
+            continue
+        parts.append(_html.escape(raw[last:start]))
+        parts.append(f'<a href="{_html.escape(href)}">{_html.escape(display)}</a>')
+        last = end
+    parts.append(_html.escape(raw[last:]))
+    return "".join(parts)
+
+
 def _linkify(text: str, emoji_size: int = 13) -> str:
     """HTML-escape text, wrap URLs in <a> tags, render emoji, and break long words."""
     parts: list[str] = []
@@ -213,16 +259,28 @@ def _linkify(text: str, emoji_size: int = 13) -> str:
     for m in _EMOJI_RE.finditer(text):
         before = text[last:m.start()]
         if before:
-            parts.append(
-                _break_long_words(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(before)))
-            )
+            parts.append(_break_long_words(_linkify_segment(before)))
         parts.append(_emoji_to_img_tag(m.group(), emoji_size))
         last = m.end()
     after = text[last:]
     if after:
-        parts.append(
-            _break_long_words(_URL_RE.sub(r'<a href="\1">\1</a>', _html.escape(after)))
-        )
+        parts.append(_break_long_words(_linkify_segment(after)))
+    return "".join(parts)
+
+
+def _linkify_preview(text: str, emoji_size: int = 11) -> str:
+    """HTML-escape text and render emoji as inline images; no URL tags, no word-break insertion."""
+    parts: list[str] = []
+    last = 0
+    for m in _EMOJI_RE.finditer(text):
+        before = text[last:m.start()]
+        if before:
+            parts.append(_html.escape(before))
+        parts.append(_emoji_to_img_tag(m.group(), emoji_size))
+        last = m.end()
+    after = text[last:]
+    if after:
+        parts.append(_html.escape(after))
     return "".join(parts)
 
 
@@ -437,6 +495,7 @@ class MessageBubble(QWidget):
         body_font.setPointSize(13)
         body_label.setFont(body_font)
         body_label.setWordWrap(True)
+        body_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         body_label.setMinimumWidth(0)  # override natural-text minimumSizeHint so layout can shrink/wrap
         body_label.setStyleSheet(f"color: {fg};")
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
@@ -598,13 +657,20 @@ class MessageBubble(QWidget):
                 "QMenu::item:disabled { color: #9ca3af; }"
             )
 
+        # Snapshot before exec() — menu.exec() clears any text selection.
+        selected_text = self._body_label.selectedText()
+
         copy_act = menu.addAction("Copy")
-        copy_act.setEnabled(self._body_label.hasSelectedText())
+        copy_act.setEnabled(bool(selected_text))
 
         copy_msg_act = menu.addAction("Copy Message")
         copy_msg_act.setEnabled(bool(self._data.body))
 
-        urls = _URL_RE.findall(self._data.body or "")
+        body = self._data.body or ""
+        urls = _URL_RE.findall(body)
+        for m in _BARE_URL_RE.finditer(body):
+            bare = m.group(1) or m.group(2)
+            urls.append("https://" + bare)
         copy_link_act = menu.addAction("Copy Link")
         copy_link_act.setEnabled(bool(urls))
 
@@ -615,9 +681,8 @@ class MessageBubble(QWidget):
         if chosen is None:
             return
         if chosen is copy_act:
-            selected = self._body_label.selectedText()
-            if selected:
-                QApplication.clipboard().setText(selected)
+            if selected_text:
+                QApplication.clipboard().setText(selected_text)
         elif chosen is copy_msg_act:
             QApplication.clipboard().setText(self._data.body or "")
         elif chosen is copy_link_act and urls:

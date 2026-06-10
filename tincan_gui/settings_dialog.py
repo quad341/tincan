@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tincan_gui._settings import app_settings
+from tincan_gui._settings import app_settings, bool_value
 from tincan_gui.theme import is_dark_theme
 
 if TYPE_CHECKING:
@@ -208,7 +208,7 @@ class SettingsDialog(QDialog):
         )
 
         settings = app_settings()
-        enabled = settings.value("notifications/desktop_enabled", True, type=bool)
+        enabled = bool_value(settings, "notifications/desktop_enabled", True)
         self._desktop_cb.setChecked(enabled)
         layout.addWidget(self._desktop_cb)
 
@@ -301,9 +301,7 @@ class SettingsDialog(QDialog):
         self._close_to_tray_cb.setStyleSheet(
             "color: #f4f4f5;" if self._dark else "color: #111827;"
         )
-        close_to_tray_enabled = settings.value(
-            "behavior/close_to_tray", True, type=bool
-        )
+        close_to_tray_enabled = bool_value(settings, "behavior/close_to_tray", True)
         self._close_to_tray_cb.setChecked(close_to_tray_enabled)
         layout.addWidget(self._close_to_tray_cb)
 

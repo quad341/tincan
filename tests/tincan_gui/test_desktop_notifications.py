@@ -992,6 +992,52 @@ class TestActionableNotifications:
 
         assert marked == ["conv-alice"]
 
+    def test_main_window_mark_read_updates_conversations_by_id(self, qtbot):
+        """Optimistic UI update: _conversations_by_id entry cleared on mark_read (tincan-80wbb)."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+        conv_id = "conv-alice"
+        data = ConversationData(
+            id=conv_id, name="Alice", phone="+15550001", preview="hi",
+            timestamp="10:00", unread=True, unread_count=2,
+        )
+        window._conversations_by_id[conv_id] = data
+
+        window._on_notification_mark_read(conv_id)
+
+        updated = window._conversations_by_id[conv_id]
+        assert updated.unread is False
+        assert updated.unread_count == 0
+
+    def test_main_window_mark_read_calls_update_item(self, qtbot):
+        """Optimistic UI update: _conv_list.update_item called with cleared data (tincan-80wbb)."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+        conv_id = "conv-alice"
+        data = ConversationData(
+            id=conv_id, name="Alice", phone="+15550001", preview="hi",
+            timestamp="10:00", unread=True, unread_count=2,
+        )
+        window._conversations_by_id[conv_id] = data
+        update_calls: list[tuple] = []
+        window._conv_list.update_item = lambda cid, d: update_calls.append((cid, d))
+
+        window._on_notification_mark_read(conv_id)
+
+        assert len(update_calls) == 1
+        cid, updated = update_calls[0]
+        assert cid == conv_id
+        assert updated.unread is False
+        assert updated.unread_count == 0
+
+    def test_main_window_mark_read_unknown_conv_no_crash(self, qtbot):
+        """_on_notification_mark_read is a no-op for unknown conversation IDs."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window._dbus_client.mark_conversation_read = lambda cid: None
+
+        window._on_notification_mark_read("unknown-conv")
+
     def test_main_window_notifier_has_mark_read_wired(self, qtbot):
         """DesktopNotifier constructed with on_mark_read pointing to MainWindow method."""
         window = MainWindow()

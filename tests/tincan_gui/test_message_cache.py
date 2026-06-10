@@ -76,6 +76,50 @@ class TestMessageCache:
         assert cache.get_messages("conv1") == []
 
 
+class TestOutboundSortKeyGuard:
+    """add_message() guard: shorter outbound body at same sort_key is skipped.
+
+    MAP sent-folder echoes use Subject (preview) as body — a truncated form
+    of the full message the user typed.  When the full body is already in the
+    cache at the same sort_key, the shorter echo must not overwrite or
+    duplicate it.
+    """
+
+    @pytest.fixture
+    def cache(self, tmp_path):
+        return MessageCache(cache_dir=tmp_path)
+
+    def test_shorter_body_skipped_when_longer_cached_at_sort_key(self, cache):
+        """MAP echo with shorter body at matching sort_key must be silently dropped."""
+        cache.add_message("+1", "outbound", "Full message body", "", "T1", "T1")
+        cache.add_message("+1", "outbound", "Full message", "", "T1", "T1")
+        msgs = cache.get_messages("+1")
+        assert len(msgs) == 1
+        assert msgs[0]["body"] == "Full message body"
+
+    def test_longer_body_not_blocked_by_guard(self, cache):
+        """A longer body arriving at the same sort_key is not blocked."""
+        cache.add_message("+1", "outbound", "Short", "", "T1", "T1")
+        cache.add_message("+1", "outbound", "Short but extended here", "", "T1", "T1")
+        # Guard only fires when existing > incoming; incoming longer → both stored.
+        msgs = cache.get_messages("+1")
+        assert len(msgs) == 2
+
+    def test_guard_bypassed_when_sort_key_empty(self, cache):
+        """Empty sort_key disables the guard — different bodies are both stored."""
+        cache.add_message("+1", "outbound", "Full message body", "", "T1", "")
+        cache.add_message("+1", "outbound", "Full message", "", "T2", "")
+        # sort_key is falsy → guard inactive; different bodies → not exact-deduped.
+        msgs = cache.get_messages("+1")
+        assert len(msgs) == 2
+
+    def test_guard_is_scoped_to_conversation(self, cache):
+        """A longer body in conversation A does not block a shorter body in B."""
+        cache.add_message("alice", "outbound", "Full message body", "", "T1", "T1")
+        cache.add_message("bob", "outbound", "Full message", "", "T1", "T1")
+        assert cache.get_messages("bob")[0]["body"] == "Full message"
+
+
 class TestMergeInto:
     """merge_into: copy messages from old (miskeyed) cache into canonical cache."""
 

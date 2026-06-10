@@ -24,6 +24,7 @@ from tincan_gui import trace as _trace
 from tincan_gui.archived_conversations import ArchivedConversations
 from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
 from tincan_gui.theme import is_dark_theme
+from tincan_gui.thread_view import _linkify_preview as _linkify_text
 
 
 class _SearchLineEdit(QLineEdit):
@@ -107,7 +108,7 @@ class ConversationItem(QWidget):
         # Pass mouse events through so ConversationItem.mousePressEvent fires on card clicks.
         self._frame.setAttribute(Qt.WA_TransparentForMouseEvents)
         frame_layout = QHBoxLayout(self._frame)
-        frame_layout.setContentsMargins(8, 8, 8, 8)
+        frame_layout.setContentsMargins(8, 10, 8, 8)
         frame_layout.setSpacing(8)
 
         # Avatar: group uses two stacked circles; 1:1 uses single circle
@@ -179,6 +180,7 @@ class ConversationItem(QWidget):
 
         # Preview row (tincan-33k)
         self._preview_label = QLabel()
+        self._preview_label.setTextFormat(Qt.TextFormat.RichText)
         prev_font = QFont()
         prev_font.setPointSize(12)
         self._preview_label.setFont(prev_font)
@@ -204,7 +206,7 @@ class ConversationItem(QWidget):
         self._badge_label.setFont(badge_font)
         self._badge_label.setStyleSheet(
             f"color: #ffffff; background-color: {self._UNREAD_DOT_COLOR};"
-            " border-radius: 8px; padding: 0 5px;"
+            " border-radius: 8px; padding: 2px 5px;"
         )
         outer.addWidget(self._badge_label, alignment=Qt.AlignVCenter)
 
@@ -244,7 +246,7 @@ class ConversationItem(QWidget):
                 display = f"You: {body}"
             else:
                 display = raw[:36] + "…" if len(raw) > 36 else raw
-            self._preview_label.setText(display)
+            self._preview_label.setText(_linkify_text(display, emoji_size=11))
             self._preview_label.setStyleSheet(
                 f"background: transparent; border: none; outline: none; color: {preview_color};"
             )

@@ -167,8 +167,8 @@ class TitleBar(QWidget):
         self._gear_btn.setAccessibleName("Settings")
         self._gear_btn.setStyleSheet(
             "QToolButton { color: #ccfbf1; font-size: 22px; border: none;"
-            " background: transparent; }"
-            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+            " background-color: #0f4c3a; }"
+            " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
         layout.addWidget(self._gear_btn)
 
@@ -181,8 +181,8 @@ class TitleBar(QWidget):
         self._bug_btn.setAccessibleName("File a bug report")
         self._bug_btn.setStyleSheet(
             "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
-            " background: transparent; }"
-            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+            " background-color: #0f4c3a; }"
+            " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
         layout.addWidget(self._bug_btn)
 
@@ -195,8 +195,8 @@ class TitleBar(QWidget):
         self._bell_btn.setAccessibleName("Notification center")
         self._bell_btn.setStyleSheet(
             "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
-            " background: transparent; }"
-            " QToolButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }"
+            " background-color: #0f4c3a; }"
+            " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
         layout.addWidget(self._bell_btn)
 
@@ -1041,6 +1041,13 @@ class MainWindow(QMainWindow):
         """Mark conversation as read when user activates the mark-read notification action."""
         if conversation_id:
             self._dbus_client.mark_conversation_read(conversation_id)
+            # Update the conversation list immediately without waiting for a
+            # ConversationUpdated signal from the daemon (tincan-sl54r).
+            if conversation_id in self._conversations_by_id:
+                data = self._conversations_by_id[conversation_id]
+                updated = dc_replace(data, unread=False, unread_count=0)
+                self._conversations_by_id[conversation_id] = updated
+                self._conv_list.update_item(conversation_id, updated)
 
     def _on_file_bug(self) -> None:
         """Show the File-a-Bug dialog and write a local structured report."""
@@ -1238,10 +1245,9 @@ class MainWindow(QMainWindow):
         # Defer cleanup so daemon's MessageReceived echo arrives first and is suppressed.
         QTimer.singleShot(0, lambda: self._pending_sends.discard((to, body)))
         self._failed_sends.get(to, set()).discard(body)
-        if message_id:
-            # Track sent body so MAP-poll echoes (which arrive after _pending_sends
-            # is cleared) are suppressed without showing a duplicate bubble.
-            self._sent_bodies.setdefault(to, set()).add(body)
+        # Always track sent body regardless of whether obexd returns a message_id.
+        # MAP-poll echoes arrive after _pending_sends is cleared and must be suppressed.
+        self._sent_bodies.setdefault(to, set()).add(body)
 
     def _on_send_failed(self, to: str, body: str) -> None:
         _trace.emit("send_failed", to=to, body_hash=_trace.body_hash(body))
@@ -1465,11 +1471,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Hide to tray or quit on window close, per behavior/close_to_tray setting."""
-        from tincan_gui._settings import app_settings  # noqa: PLC0415
+        from tincan_gui._settings import app_settings, bool_value  # noqa: PLC0415
         s = app_settings()
         s.sync()  # flush before exit so prefs survive crashes/kills
         if hasattr(self, "_tray") and self._tray.isSystemTrayAvailable():
-            close_to_tray = s.value("behavior/close_to_tray", True, type=bool)
+            close_to_tray = bool_value(s, "behavior/close_to_tray", True)
             if close_to_tray:
                 event.ignore()
                 self.hide()
@@ -1561,6 +1567,17 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    # Install GLib as the dbus-python mainloop BEFORE any dbus.SessionBus() is
+    # created.  _dbus_call() in TincandClient creates a SessionBus() on first
+    # use (startup); if DBusGMainLoop isn't already the default at that point,
+    # the bus uses the native-thread mainloop and add_signal_receiver() in
+    # DesktopNotifier._ensure_bus() will never dispatch ActionInvoked signals
+    # even though the subscription succeeds (tincan-yxajc, tincan-sl54r).
+    try:
+        import dbus.mainloop.glib as _dbus_glib  # noqa: PLC0415
+        _dbus_glib.DBusGMainLoop(set_as_default=True)
+    except ImportError:
+        pass
     if os.environ.get("TINCAN_TRACE"):
         _trace.emit("session_init")  # triggers lazy file open
     if os.environ.get("TINCAN_DEBUG"):

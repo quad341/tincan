@@ -147,8 +147,8 @@ class DesktopNotifier:
 
     def dispatch_app_notification(self, notif: dict) -> None:
         """Send a desktop notification for a non-SMS iOS app notification."""
-        from tincan_gui._settings import app_settings
-        if not app_settings().value("notifications/desktop_enabled", True, type=bool):
+        from tincan_gui._settings import app_settings, bool_value
+        if not bool_value(app_settings(), "notifications/desktop_enabled", True):
             return
 
         app_id = str(notif.get("app_id", ""))
@@ -237,9 +237,9 @@ class DesktopNotifier:
             _log.warning("ANCS repair notification failed: %s", exc)
 
     def _should_notify(self, message: dict) -> bool:
-        from tincan_gui._settings import app_settings
+        from tincan_gui._settings import app_settings, bool_value
 
-        if not app_settings().value("notifications/desktop_enabled", True, type=bool):
+        if not bool_value(app_settings(), "notifications/desktop_enabled", True):
             _log.debug("_should_notify: skip — desktop notifications disabled in settings")
             return False
         direction = str(message.get("direction", ""))
