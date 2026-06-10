@@ -56,6 +56,8 @@ PYTHONPATH=. python -m tincan_gui
 
 On first connect, iOS shows a **"Show Notifications"** consent prompt for the paired device — accept it on the phone, then reconnect (the MAP link requires it).
 
+> **ANCS notifications require a fixed BlueZ.** `bluez ≤ 5.86` has a bug — the MGMT *Add Extended Advertising Data* command is built with the wrong struct size, so it's 8 bytes too long — that breaks **all** LE advertising on kernels which validate that command's length (Linux ≈ 7.0+, a security hardening). The symptom is `RegisterAdvertisement failed … Invalid Parameters (0x0d)` and ANCS never starts (messaging/MAP/PBAP are unaffected). Fixed in BlueZ by [`2a6968b4`](https://github.com/bluez/bluez/commit/2a6968b40378dca5650e18e03ad0407738c47be5) (*advertising: Fix sending extra bytes with MGMT_OP_ADD_EXT_ADV_DATA*, 2026-06-02) — in master, **after 5.86** — so until your distro ships a release that includes it, apply the one-line patch. Full analysis + patch: [docs/ancs-bluez-ext-adv-rootcause.md](docs/ancs-bluez-ext-adv-rootcause.md).
+
 ## Development
 
 ```bash
