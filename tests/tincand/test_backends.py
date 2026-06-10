@@ -991,3 +991,190 @@ class TestMapBackendReconnectAttemptReset:
             backend.schedule_reconnect()
 
         assert backend._reconnect_attempt == 0
+
+
+# ---------------------------------------------------------------------------
+# §15 MapBackend.poll_inbox — UpdateInbox unsupported flag (tincan-bleim)
+#
+# New logic in poll_inbox():
+#   - If UpdateInbox raises UnknownObject/UnknownMethod/UnknownInterface,
+#     set _update_inbox_unsupported=True; do NOT re-raise; poll continues.
+#   - If _update_inbox_unsupported is True, skip UpdateInbox entirely.
+# New logic in connect():
+#   - Reset _update_inbox_unsupported=False on each fresh session.
+#
+# Dead-session recovery (_poll_tick / _handle_session_dead) must be unaffected:
+#   - SetFolder raising UnknownObject propagates out of poll_inbox as before.
+# ---------------------------------------------------------------------------
+
+
+def _unsupported_exc(name="org.freedesktop.DBus.Error.UnknownObject"):
+    return dbus.exceptions.DBusException(name=name)
+
+
+class TestMapBackendUpdateInboxUnsupportedFlag:
+    """poll_inbox: UpdateInbox unsupported flag — set on error, skip after set, reset on connect."""
+
+    def _backend_with_empty_inbox(self):
+        backend, mock_access = _make_map_backend_with_mock_access()
+        mock_access.ListMessages.return_value = {}
+        return backend, mock_access
+
+    # -- Branch 1: UnknownObject → flag set, poll continues without re-raise -
+
+    def test_unknown_object_sets_unsupported_flag(self):
+        backend, mock_access = self._backend_with_empty_inbox()
+        mock_access.UpdateInbox.side_effect = _unsupported_exc(
+            "org.freedesktop.DBus.Error.UnknownObject"
+        )
+        backend.poll_inbox()
+        assert backend._update_inbox_unsupported is True
+
+    def test_unknown_object_does_not_raise(self):
+        backend, mock_access = self._backend_with_empty_inbox()
+        mock_access.UpdateInbox.side_effect = _unsupported_exc(
+            "org.freedesktop.DBus.Error.UnknownObject"
+        )
+        backend.poll_inbox()  # must not raise
+
+    def test_unknown_object_poll_continues_returns_messages(self):
+        """UpdateInbox raises UnknownObject; poll proceeds and returns inbox messages."""
+        backend, mock_access = _make_map_backend_with_mock_access()
+        mock_access.UpdateInbox.side_effect = _unsupported_exc(
+            "org.freedesktop.DBus.Error.UnknownObject"
+        )
+        mock_access.ListMessages.side_effect = lambda f, _: (
+            {"/inbox/1": {"Sender": "+15550001", "Datetime": "", "Read": False, "Subject": "Hi"}}
+            if f == "inbox" else {}
+        )
+        mock_msg1 = MagicMock(name="Message1")
+        mock_msg1.Get.return_value = None
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface",
+                   side_effect=_make_message1_iface_factory(mock_msg1)):
+            result = backend.poll_inbox()
+        assert len(result) == 1
+
+    # -- Branch 2: UnknownMethod → same behavior -----------------------------
+
+    def test_unknown_method_sets_unsupported_flag(self):
+        backend, mock_access = self._backend_with_empty_inbox()
+        mock_access.UpdateInbox.side_effect = _unsupported_exc(
+            "org.freedesktop.DBus.Error.UnknownMethod"
+        )
+        backend.poll_inbox()
+        assert backend._update_inbox_unsupported is True
+
+    def test_unknown_method_does_not_raise(self):
+        backend, mock_access = self._backend_with_empty_inbox()
+        mock_access.UpdateInbox.side_effect = _unsupported_exc(
+            "org.freedesktop.DBus.Error.UnknownMethod"
+        )
+        backend.poll_inbox()  # must not raise
+
+    # -- Branch 2b: UnknownInterface → same behavior -------------------------
+
+    def test_unknown_interface_sets_unsupported_flag(self):
+        backend, mock_access = self._backend_with_empty_inbox()
+        mock_access.UpdateInbox.side_effect = _unsupported_exc(
+            "org.freedesktop.DBus.Error.UnknownInterface"
+        )
+        backend.poll_inbox()
+        assert backend._update_inbox_unsupported is True
+
+    # -- Branch 3: Subsequent polls skip UpdateInbox when flag is set --------
+
+    def test_update_inbox_not_called_on_second_poll_when_flag_set(self):
+        backend, mock_access = self._backend_with_empty_inbox()
+        mock_access.UpdateInbox.side_effect = _unsupported_exc()
+        backend.poll_inbox()  # first poll: raises, flag set
+        mock_access.UpdateInbox.reset_mock()
+        mock_access.UpdateInbox.side_effect = None
+        backend.poll_inbox()  # second poll: must skip UpdateInbox
+        mock_access.UpdateInbox.assert_not_called()
+
+    def test_update_inbox_skipped_across_multiple_polls_when_flag_set(self):
+        backend, mock_access = self._backend_with_empty_inbox()
+        mock_access.UpdateInbox.side_effect = _unsupported_exc()
+        backend.poll_inbox()  # first poll sets flag
+        mock_access.UpdateInbox.reset_mock()
+        mock_access.UpdateInbox.side_effect = None
+        for _ in range(4):
+            backend.poll_inbox()
+        mock_access.UpdateInbox.assert_not_called()
+
+    # -- Branch 4: connect() resets the flag ---------------------------------
+
+    def test_connect_resets_update_inbox_unsupported_flag(self):
+        backend = MapBackend()
+        backend._update_inbox_unsupported = True
+        mock_client = MagicMock(name="Client1")
+        mock_client.CreateSession.return_value = "/org/obex/session1"
+        with patch("tincand.backends.bluez_map.dbus.SessionBus"), \
+             patch("tincand.backends.bluez_map.dbus.Interface", return_value=mock_client):
+            backend.connect("AA:BB:CC:DD:EE:FF")
+        assert backend._update_inbox_unsupported is False
+
+    # -- Branch 6: UpdateInbox success → flag stays False --------------------
+
+    def test_update_inbox_success_flag_remains_false(self):
+        backend, mock_access = self._backend_with_empty_inbox()
+        # UpdateInbox succeeds (default MagicMock — no side_effect)
+        backend.poll_inbox()
+        assert backend._update_inbox_unsupported is False
+
+    # -- Guard: unrecognised DBus errors from UpdateInbox still propagate ----
+
+    def test_other_dbus_exception_from_update_inbox_propagates(self):
+        """Non-unsupported DBus errors from UpdateInbox must NOT be swallowed."""
+        backend, mock_access = self._backend_with_empty_inbox()
+        mock_access.UpdateInbox.side_effect = dbus.exceptions.DBusException(
+            name="org.bluez.obex.Error.NotFound"  # not in the unsupported set
+        )
+        with pytest.raises(dbus.exceptions.DBusException):
+            backend.poll_inbox()
+
+
+# ---------------------------------------------------------------------------
+# §15b MapBackend._poll_tick — dead-session recovery unaffected by bleim fix
+#
+# Branch 5: if the session is genuinely dead (SetFolder also raises
+# UnknownObject), poll_inbox propagates the exception and _poll_tick still
+# calls _handle_session_dead.  The UpdateInbox flag logic must not suppress
+# this signal.
+# ---------------------------------------------------------------------------
+
+class TestMapBackendDeadSessionUnaffectedByUpdateInboxFix:
+    """SetFolder UnknownObject propagates out of poll_inbox; _poll_tick triggers recovery."""
+
+    def test_setfolder_unknown_object_propagates_out_of_poll_inbox(self):
+        """UnknownObject from SetFolder (not UpdateInbox) re-raises from poll_inbox."""
+        backend, mock_access = _make_map_backend_with_mock_access()
+        backend._update_inbox_unsupported = True  # flag already set from prior poll
+        dead_exc = dbus.exceptions.DBusException(
+            name="org.freedesktop.DBus.Error.UnknownObject"
+        )
+        mock_access.SetFolder.side_effect = dead_exc
+        with pytest.raises(dbus.exceptions.DBusException) as exc_info:
+            backend.poll_inbox()
+        assert exc_info.value.get_dbus_name() == "org.freedesktop.DBus.Error.UnknownObject"
+
+    def test_poll_tick_calls_handle_session_dead_when_setfolder_raises_unknown_object(self):
+        """_poll_tick calls _handle_session_dead when poll_inbox raises UnknownObject."""
+        backend, mock_glib, _ = _make_reconnect_backend()
+        backend._msg_access = MagicMock()
+        backend._update_inbox_unsupported = True  # flag set from prior poll
+
+        dead_exc = dbus.exceptions.DBusException(
+            name="org.freedesktop.DBus.Error.UnknownObject"
+        )
+        backend._msg_access.SetFolder.side_effect = dead_exc
+
+        handle_dead_calls = []
+        backend._handle_session_dead = lambda: handle_dead_calls.append(True)
+
+        with patch("tincand.backends.bluez_map.GLib", mock_glib):
+            result = backend._poll_tick()
+
+        assert len(handle_dead_calls) == 1
+        assert result == mock_glib.SOURCE_REMOVE
