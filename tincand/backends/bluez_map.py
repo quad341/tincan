@@ -294,7 +294,7 @@ class MapBackend(BackendInterface):
         self._failed_handles: set[str] = set()  # handles where GetMessage raised; skip on retry
         # display_name.lower() → phone; populated from phone-keyed messages, persists across polls
         self._name_to_phone: dict[str, str] = {}
-        self._update_inbox_unsupported: bool = False  # set when obexd lacks UpdateInbox (tincan-bleim)
+        self._update_inbox_unsupported: bool = False
 
     # ------------------------------------------------------------------
     # BackendInterface
