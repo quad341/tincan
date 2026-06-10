@@ -79,7 +79,11 @@ class TincanService(dbus.service.Object):
     """tincand D-Bus service object at /im/tincan."""
 
     def __init__(self, bus: dbus.SessionBus) -> None:
-        bus_name = dbus.service.BusName(BUS_NAME, bus=bus)
+        # do_not_queue=True makes a second instance fail fast (NameExistsException)
+        # instead of silently queueing for the name while running forever — that
+        # queuing was how stale daemons accumulated and exhausted the session-bus
+        # FD limit. The entry point (__main__) catches this and exits cleanly.
+        bus_name = dbus.service.BusName(BUS_NAME, bus=bus, do_not_queue=True)
         super().__init__(bus_name, OBJECT_PATH)
         self._connected = False
         self._device_address = ""
