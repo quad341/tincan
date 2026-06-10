@@ -805,6 +805,15 @@ class TestLeBond:
         backend._on_device_connected(_DEV_PATH)
         assert backend._control_point_proxy is None
 
+    def test_already_exists_proceeds_to_discovery(self, bond_ctx):
+        backend, mock_device, mock_service = bond_ctx
+        mock_device.Get.return_value = False  # Bonded=False → Pair() attempted
+        mock_device.Pair.side_effect = Exception("org.bluez.Error.AlreadyExists")
+        backend._on_device_connected(_DEV_PATH)
+        mock_device.Pair.assert_called_once()
+        # AlreadyExists → proceed to GATT discovery + StartNotify, NOT disable ANCS
+        mock_service.set_capability.assert_any_call("ancs", True)
+
 
 # ---------------------------------------------------------------------------
 # §13 ANCS Service Not Found
