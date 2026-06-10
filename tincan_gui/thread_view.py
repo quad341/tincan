@@ -33,10 +33,8 @@ from tincan_gui.avatar import AvatarWidget, _color_for_name
 from tincan_gui.text_render import (
     _BARE_URL_RE,
     _URL_RE,
-    _break_long_words,
     _emoji_font_families,
     _linkify,
-    _linkify_preview,
     _linkify_with_highlight,
 )
 from tincan_gui.theme import is_dark_theme
