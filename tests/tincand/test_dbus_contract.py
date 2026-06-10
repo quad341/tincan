@@ -26,8 +26,13 @@ import re
 
 import pytest
 
-from tincand.dbus_service import TincanService, IFACE_DAEMON, IFACE_MESSAGES
 from tincan_gui.dbus_client import TincandClient
+from tincand.dbus_service import IFACE_DAEMON, IFACE_MESSAGES, TincanService
+
+try:
+    from tincand.dbus_service import IFACE_CALLS
+except ImportError:
+    IFACE_CALLS = "im.tincan.Calls"  # not yet exported — tests fail until tincan-0e6na lands
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +78,12 @@ _GUI_SUBSCRIPTIONS: list[tuple[str, str, str, str]] = [
     (IFACE_MESSAGES, "MessageSent",             "_on_message_sent",            "QString"),
     (IFACE_MESSAGES, "ConversationUpdated",     "_on_conversation_updated",    "QVariantMap"),
     (IFACE_MESSAGES, "ContactPhotoReceived",    "_on_contact_photo_received",  "QString,QByteArray"),
+    # im.tincan.Calls — HFP call signals (tincan-0e6na)
+    (IFACE_CALLS, "IncomingCall",   "_on_call_incoming",  "QString,QString"),
+    (IFACE_CALLS, "CallConnected",  "_on_call_connected", ""),
+    (IFACE_CALLS, "CallEnded",      "_on_call_ended",     ""),
+    (IFACE_CALLS, "AudioError",     "_on_audio_error",    "QString"),
+    (IFACE_CALLS, "AudioRestored",  "_on_audio_restored", ""),
 ]
 
 # (interface, method_name) — every iface.call()/asyncCall()/_dbus_call() in TincandClient
@@ -91,6 +102,10 @@ _GUI_METHOD_CALLS: list[tuple[str, str]] = [
     (IFACE_MESSAGES, "MarkConversationRead"),
     (IFACE_MESSAGES, "FetchContactPhoto"),
     (IFACE_MESSAGES, "GetContacts"),
+    (IFACE_CALLS, "Dial"),
+    (IFACE_CALLS, "Answer"),
+    (IFACE_CALLS, "Hangup"),
+    (IFACE_CALLS, "SendDtmf"),
 ]
 
 # D-Bus signature → expected @Slot argument count (used in compatibility checks)
@@ -99,6 +114,7 @@ _DBUS_SIG_ARG_COUNT = {
     "s": 1,      # string
     "b": 1,      # bool
     "sb": 2,     # string + bool
+    "ss": 2,     # two strings (e.g. IncomingCall: caller_name, caller_number)
     "a{sv}": 1,  # variant map
     "say": 2,    # string + byte array
 }
@@ -278,8 +294,8 @@ class TestNoDaemonSignalsOrphaned:
 
         unsubscribed = set(app_signals.keys()) - subscribed
         assert not unsubscribed, (
-            f"Daemon signals not subscribed by TincandClient — GUI will miss "
-            f"these updates:\n"
+            "Daemon signals not subscribed by TincandClient — GUI will miss "
+            "these updates:\n"
             + "\n".join(f"  {iface}.{name}({sig})"
                         for (iface, name), sig in sorted(
                             (k, app_signals[k]) for k in unsubscribed
@@ -325,12 +341,12 @@ class TestSubscriptionCountSanity:
         extra_in_inventory = expected - actual
 
         assert not missing_from_inventory, (
-            f"These subscriptions are registered in _subscribe() but missing from "
-            f"_GUI_SUBSCRIPTIONS (add them to ensure §1-§4 cover them):\n"
+            "These subscriptions are registered in _subscribe() but missing from "
+            "_GUI_SUBSCRIPTIONS (add them to ensure §1-§4 cover them):\n"
             + "\n".join(f"  {iface}.{sig}" for iface, sig in sorted(missing_from_inventory))
         )
         assert not extra_in_inventory, (
-            f"These entries are in _GUI_SUBSCRIPTIONS but not in _subscribe() "
-            f"(remove the stale entries):\n"
+            "These entries are in _GUI_SUBSCRIPTIONS but not in _subscribe() "
+            "(remove the stale entries):\n"
             + "\n".join(f"  {iface}.{sig}" for iface, sig in sorted(extra_in_inventory))
         )
