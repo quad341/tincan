@@ -483,6 +483,14 @@ class TincandClient(QObject):
         if iface.isValid():
             iface.call("RequestReconnect")
 
+    def refresh_contacts(self) -> None:
+        """Call RefreshContacts on the daemon (fire-and-forget, tincan-mox38)."""
+        if not self._bus.isConnected():
+            return
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+        if iface.isValid():
+            iface.call("RefreshContacts")
+
     def mark_conversation_read(self, conv_id: str) -> None:
         """Call MarkConversationRead on the daemon (fire-and-forget)."""
         if not self._bus.isConnected():
@@ -650,6 +658,29 @@ class TincandClient(QObject):
     def _on_audio_restored(self) -> None:
         _log.debug("tincand: AudioRestored")
         self.audio_restored.emit()
+
+    def answer(self, call_id: str = "") -> None:
+        """Answer the current incoming HFP call."""
+        try:
+            self._dbus_call(_IFACE_CALLS, "Answer", str(call_id))
+        except Exception as exc:
+            _log.debug("answer(%r) failed: %s", call_id, exc)
+
+    def hangup(self, call_id: str = "") -> None:
+        """Hang up or decline the current HFP call."""
+        try:
+            self._dbus_call(_IFACE_CALLS, "Hangup", str(call_id))
+        except Exception as exc:
+            _log.debug("hangup(%r) failed: %s", call_id, exc)
+
+    def dial(self, number: str) -> str:
+        """Initiate an outbound HFP call; returns daemon-assigned call_id."""
+        try:
+            result = self._dbus_call(_IFACE_CALLS, "Dial", str(number))
+            return str(result) if result else ""
+        except Exception as exc:
+            _log.debug("dial(%r) failed: %s", number, exc)
+            return ""
 
     def send_dtmf(self, key: str) -> None:
         """Send a DTMF tone during an active HFP call.

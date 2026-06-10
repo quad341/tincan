@@ -46,6 +46,7 @@ from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
     ANCSRepairBanner,
+    CallSetupRequiredBanner,
     ContactsEmptyBanner,
     StateABanner,
     StateBBanner,
@@ -54,7 +55,7 @@ from tincan_gui.degradation_banners import (
 from tincan_gui.message_cache import MessageCache
 from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.theme import is_dark_theme
-from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
+from tincan_gui.thread_view import BubbleType, MessageData, ThreadView, _emoji_font_families
 from tincan_gui.tray import TrayIcon
 
 _ASSETS = Path(__file__).parent / "assets"
@@ -163,10 +164,14 @@ class TitleBar(QWidget):
         self._gear_btn = QToolButton()
         self._gear_btn.setText("⚙")
         self._gear_btn.setFixedSize(32, 32)
+        _gear_font = QFont()
+        _gear_font.setFamilies(_emoji_font_families())
+        _gear_font.setPointSize(16)
+        self._gear_btn.setFont(_gear_font)
         self._gear_btn.setToolTip("Settings")
         self._gear_btn.setAccessibleName("Settings")
         self._gear_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 22px; border: none;"
+            "QToolButton { color: #ccfbf1; border: none;"
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
@@ -177,10 +182,14 @@ class TitleBar(QWidget):
         self._bug_btn = QToolButton()
         self._bug_btn.setText("🐞")
         self._bug_btn.setFixedSize(32, 32)
+        _emoji_btn_font = QFont()
+        _emoji_btn_font.setFamilies(_emoji_font_families())
+        _emoji_btn_font.setPointSize(13)
+        self._bug_btn.setFont(_emoji_btn_font)
         self._bug_btn.setToolTip("File a bug report")
         self._bug_btn.setAccessibleName("File a bug report")
         self._bug_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
+            "QToolButton { color: #ccfbf1; border: none;"
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
@@ -191,10 +200,11 @@ class TitleBar(QWidget):
         self._bell_btn = QToolButton()
         self._bell_btn.setText("🔔")
         self._bell_btn.setFixedSize(32, 32)
+        self._bell_btn.setFont(_emoji_btn_font)
         self._bell_btn.setToolTip("Notification center")
         self._bell_btn.setAccessibleName("Notification center")
         self._bell_btn.setStyleSheet(
-            "QToolButton { color: #ccfbf1; font-size: 18px; border: none;"
+            "QToolButton { color: #ccfbf1; border: none;"
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
@@ -506,6 +516,7 @@ class MainWindow(QMainWindow):
         )
         # HFP call state (tincan-fx79v.2)
         self._call_caller_name: str = ""
+        self._call_setup_ready: bool = True
         self._incall_dialog: IncomingCallDialog | None = None
         self._incall_panel: InCallPanel | None = None
         self._audio_err_panel: AudioErrorPanel | None = None
@@ -555,6 +566,11 @@ class MainWindow(QMainWindow):
         self._banner_contacts_empty = ContactsEmptyBanner()
         self._banner_contacts_empty.hide()
         root_layout.addWidget(self._banner_contacts_empty)
+
+        # Call setup required hint (call_setup_ready=False — SELinux module absent)
+        self._banner_call_setup = CallSetupRequiredBanner()
+        self._banner_call_setup.hide()
+        root_layout.addWidget(self._banner_call_setup)
 
         # Splitter: left sidebar + right content
         splitter = QSplitter(Qt.Horizontal)
@@ -625,6 +641,7 @@ class MainWindow(QMainWindow):
         c.message_send_accepted.connect(self._on_send_accepted)
         c.message_send_failed.connect(self._on_send_failed)
         self.refresh_requested.connect(self._load_conversations)
+        self.refresh_requested.connect(self._dbus_client.refresh_contacts)
         # HFP call signals (tincan-fx79v.2)
         c.call_incoming.connect(self._on_call_incoming)
         c.call_connected.connect(self._on_call_connected)
@@ -704,6 +721,11 @@ class MainWindow(QMainWindow):
         # Contacts-empty hint (tincan-d3xw)
         contacts_empty = bool(caps.get("contacts_empty", False))
         self._banner_contacts_empty.setVisible(contacts_empty)
+        # call_setup_ready: SELinux module presence; default True (conservative — don't
+        # block calls if key is absent, only block when daemon explicitly reports False).
+        call_setup_ready = bool(caps.get("call_setup_ready", True))
+        self._call_setup_ready = call_setup_ready
+        self._banner_call_setup.setVisible(not call_setup_ready)
 
     def _update_ancs_repair_banner(self, needs_repair: bool) -> None:
         """Show/hide ANCSRepairBanner; fire FALLBACK notification on first entry."""
@@ -1171,7 +1193,12 @@ class MainWindow(QMainWindow):
 
     def _on_open_notif_center(self) -> None:
         from tincan_gui.notification_center import NotificationCenterDialog
-        NotificationCenterDialog(self._notifier, parent=self).exec()
+        dlg = NotificationCenterDialog(
+            self._notifier,
+            on_select=self._conv_list.select_conversation,
+            parent=self,
+        )
+        dlg.exec()
 
     def _open_settings(self) -> None:
         from tincan_gui.settings_dialog import SettingsDialog
@@ -1331,16 +1358,23 @@ class MainWindow(QMainWindow):
             avatar_pixmap=None,
             parent=self,
         )
+        if not self._call_setup_ready:
+            dlg.disable_answer(
+                "Phone calls: setup required. Run: cd packaging/selinux && sudo ./install.sh"
+            )
         self._incall_dialog = dlg
-        dlg.answered.connect(
-            lambda: self._enter_call(self._call_caller_name)
-        )
+        dlg.answered.connect(self._on_answer_accepted)
         dlg.declined.connect(self._on_call_decline)
         dlg.raise_()
         dlg.activateWindow()
         dlg.show()
 
+    def _on_answer_accepted(self) -> None:
+        self._dbus_client.answer()
+        self._enter_call(self._call_caller_name)
+
     def _on_call_decline(self) -> None:
+        self._dbus_client.hangup()
         self._incall_dialog = None
 
     def _enter_call(self, caller_name: str) -> None:
@@ -1421,12 +1455,7 @@ class MainWindow(QMainWindow):
             self._compose_stack.setCurrentIndex(self._PAGE_INCALL)
 
     def _on_hang_up(self) -> None:
-        try:
-            self._dbus_client._dbus_call(
-                "im.tincan.Calls", "HangUp"
-            )
-        except Exception:
-            pass
+        self._dbus_client.hangup()
         self._exit_call()
 
     def _on_hold_toggled(self, held: bool) -> None:
