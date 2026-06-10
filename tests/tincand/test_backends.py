@@ -1013,7 +1013,7 @@ def _unsupported_exc(name="org.freedesktop.DBus.Error.UnknownObject"):
 
 
 class TestMapBackendUpdateInboxUnsupportedFlag:
-    """poll_inbox: UpdateInbox unsupported flag — set on error, skip after set, reset on connect."""
+    """poll_inbox: UpdateInbox unsupported flag — set on error, skip once set, reset on connect."""
 
     def _backend_with_empty_inbox(self):
         backend, mock_access = _make_map_backend_with_mock_access()
