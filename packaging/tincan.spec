@@ -26,6 +26,10 @@ Requires:       bluez >= 5
 # bluez-obexd ships obexd on Fedora; on other distros the package may be
 # called 'obexd' — adjust below if needed.
 Requires:       bluez-obexd
+# oFono is required for HFP phone call audio. On Fedora 42+ it ships in the
+# standard repos; the HFP-HF BlueZ5 plugin is compiled into ofonod (no
+# separate plugin package needed).
+Requires:       ofono
 
 %description
 tincan mirrors iPhone messages and ANCS notifications to a Linux desktop
@@ -35,6 +39,8 @@ Requirements:
   - BlueZ with Experimental=true in /etc/bluetooth/main.conf
   - obexd running (systemctl start bluetooth-obexd)
   - iPhone paired via bluetoothctl
+  - oFono running for HFP phone call audio (systemctl start ofono);
+    WirePlumber must be configured with bluez5.hfphsp-backend=ofono
 
 See README.md for step-by-step setup instructions.
 
