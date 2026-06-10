@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui.theme import is_dark_theme
-from tincan_gui.thread_view import _emoji_font_families
+from tincan_gui.text_render import _emoji_font_families
 
 _SMS_SINGLE_LIMIT = 160
 _SMS_MULTI_LIMIT = 153

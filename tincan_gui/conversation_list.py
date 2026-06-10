@@ -24,7 +24,7 @@ from tincan_gui import trace as _trace
 from tincan_gui.archived_conversations import ArchivedConversations
 from tincan_gui.avatar import AvatarWidget, GroupAvatarWidget
 from tincan_gui.theme import is_dark_theme
-from tincan_gui.thread_view import _linkify_preview as _linkify_text
+from tincan_gui.text_render import _linkify_preview as _linkify_text
 
 
 class _SearchLineEdit(QLineEdit):

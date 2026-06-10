@@ -34,7 +34,7 @@ from unittest.mock import patch
 import pytest
 from PySide6.QtGui import QImage
 
-from tincan_gui.thread_view import _EMOJI_CACHE, _emoji_to_img_tag
+from tincan_gui.text_render import _EMOJI_CACHE, _emoji_to_img_tag
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +80,7 @@ class TestReturnFormat:
 
     def test_fallback_when_all_render_paths_fail(self, qapp):
         with patch.object(QImage, "save", return_value=False):
-            with patch("tincan_gui.thread_view._render_emoji_cairo", return_value=b""):
+            with patch("tincan_gui.text_render._render_emoji_cairo", return_value=b""):
                 result = _emoji_to_img_tag("🎉", 16)
         assert "<img" not in result
         assert "🎉" in result
@@ -198,7 +198,7 @@ class TestPixelVisibility:
 
     def test_transparent_qt_render_triggers_cairo_fallback(self, qapp):
         """When Qt produces a transparent image, _render_emoji_cairo must be called."""
-        from tincan_gui.thread_view import _render_emoji_cairo as real_cairo
+        from tincan_gui.text_render import _render_emoji_cairo as real_cairo
 
         calls = []
 
@@ -207,8 +207,8 @@ class TestPixelVisibility:
             return real_cairo(emoji, ps)
 
         _EMOJI_CACHE.clear()
-        with patch("tincan_gui.thread_view._has_visible_pixels", return_value=False):
-            with patch("tincan_gui.thread_view._render_emoji_cairo", side_effect=tracking_cairo):
+        with patch("tincan_gui.text_render._has_visible_pixels", return_value=False):
+            with patch("tincan_gui.text_render._render_emoji_cairo", side_effect=tracking_cairo):
                 _emoji_to_img_tag("😀", 16)
 
         assert len(calls) == 1, (

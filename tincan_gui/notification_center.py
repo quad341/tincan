@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui.theme import is_dark_theme
-from tincan_gui.thread_view import _emoji_font_families
+from tincan_gui.text_render import _emoji_font_families
 
 if TYPE_CHECKING:
     from tincan_gui.notifications import DesktopNotifier, NotificationEntry
