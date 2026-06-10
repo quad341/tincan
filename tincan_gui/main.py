@@ -41,7 +41,7 @@ from tincan_gui.bug_report import write_report as _write_bug_report
 from tincan_gui.call_panel import AudioErrorPanel, DTMFKeypad, InCallPanel, IncomingCallDialog
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
-from tincan_gui.daemon_config import load_daemon_config
+from tincan_gui.daemon_config import DaemonConfig, load_daemon_config, save_daemon_config
 from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
@@ -865,6 +865,13 @@ class MainWindow(QMainWindow):
             # assume all capabilities OK rather than showing degradation banners.
             caps = {"messages": True, "contacts": True, "ancs": True}
             name = str(device_address)
+
+        # Persist device address so next startup reads config instead of needing --device (tincan-oxthc).
+        if device_address:
+            cfg = load_daemon_config()
+            if cfg.device != device_address:
+                save_daemon_config(DaemonConfig(backend=cfg.backend, device=device_address))
+
         self._connected_device = name
         self._title_bar.set_connected(name)
         self._banner_a.hide()
