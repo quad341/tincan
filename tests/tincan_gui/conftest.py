@@ -7,6 +7,7 @@ with a paired device active).
 Every test gets:
   - tincan_gui.dbus_client.QDBusConnection patched to return a disconnected mock
   - TincandClient._dbus_call patched to return None (blocks dbus-python path)
+  - tincan_gui.main.spawn_daemon patched to a no-op (blocks real daemon spawning)
 """
 from __future__ import annotations
 
@@ -15,6 +16,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tincan_gui.dbus_client import TincandClient
+
+
+@pytest.fixture(autouse=True)
+def _no_daemon_spawn():
+    """Prevent GUI tests from spawning real tincand processes."""
+    with patch("tincan_gui.main.spawn_daemon"):
+        yield
 
 
 @pytest.fixture(autouse=True)
