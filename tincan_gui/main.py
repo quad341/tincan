@@ -46,6 +46,7 @@ from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
     ANCSRepairBanner,
+    CallSetupRequiredBanner,
     ContactsEmptyBanner,
     StateABanner,
     StateBBanner,
@@ -515,6 +516,7 @@ class MainWindow(QMainWindow):
         )
         # HFP call state (tincan-fx79v.2)
         self._call_caller_name: str = ""
+        self._call_setup_ready: bool = True
         self._incall_dialog: IncomingCallDialog | None = None
         self._incall_panel: InCallPanel | None = None
         self._audio_err_panel: AudioErrorPanel | None = None
@@ -564,6 +566,11 @@ class MainWindow(QMainWindow):
         self._banner_contacts_empty = ContactsEmptyBanner()
         self._banner_contacts_empty.hide()
         root_layout.addWidget(self._banner_contacts_empty)
+
+        # Call setup required hint (call_setup_ready=False — SELinux module absent)
+        self._banner_call_setup = CallSetupRequiredBanner()
+        self._banner_call_setup.hide()
+        root_layout.addWidget(self._banner_call_setup)
 
         # Splitter: left sidebar + right content
         splitter = QSplitter(Qt.Horizontal)
@@ -714,6 +721,11 @@ class MainWindow(QMainWindow):
         # Contacts-empty hint (tincan-d3xw)
         contacts_empty = bool(caps.get("contacts_empty", False))
         self._banner_contacts_empty.setVisible(contacts_empty)
+        # call_setup_ready: SELinux module presence; default True (conservative — don't
+        # block calls if key is absent, only block when daemon explicitly reports False).
+        call_setup_ready = bool(caps.get("call_setup_ready", True))
+        self._call_setup_ready = call_setup_ready
+        self._banner_call_setup.setVisible(not call_setup_ready)
 
     def _update_ancs_repair_banner(self, needs_repair: bool) -> None:
         """Show/hide ANCSRepairBanner; fire FALLBACK notification on first entry."""
@@ -1353,16 +1365,23 @@ class MainWindow(QMainWindow):
             avatar_pixmap=None,
             parent=self,
         )
+        if not self._call_setup_ready:
+            dlg.disable_answer(
+                "Phone calls: setup required. Run: cd packaging/selinux && sudo ./install.sh"
+            )
         self._incall_dialog = dlg
-        dlg.answered.connect(
-            lambda: self._enter_call(self._call_caller_name)
-        )
+        dlg.answered.connect(self._on_answer_accepted)
         dlg.declined.connect(self._on_call_decline)
         dlg.raise_()
         dlg.activateWindow()
         dlg.show()
 
+    def _on_answer_accepted(self) -> None:
+        self._dbus_client.answer()
+        self._enter_call(self._call_caller_name)
+
     def _on_call_decline(self) -> None:
+        self._dbus_client.hangup()
         self._incall_dialog = None
 
     def _enter_call(self, caller_name: str) -> None:
@@ -1443,12 +1462,7 @@ class MainWindow(QMainWindow):
             self._compose_stack.setCurrentIndex(self._PAGE_INCALL)
 
     def _on_hang_up(self) -> None:
-        try:
-            self._dbus_client._dbus_call(
-                "im.tincan.Calls", "Hangup"
-            )
-        except Exception:
-            pass
+        self._dbus_client.hangup()
         self._exit_call()
 
     def _on_hold_toggled(self, held: bool) -> None:  # noqa: ARG002
