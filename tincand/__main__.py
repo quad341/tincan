@@ -140,7 +140,15 @@ def main() -> None:
     from tincand.dbus_service import TincanService
 
     bus = dbus.SessionBus()
-    service = TincanService(bus)
+    try:
+        service = TincanService(bus)
+    except dbus.exceptions.NameExistsException:
+        # Another tincand already owns the well-known name. Exit cleanly rather
+        # than lingering on the session bus (each lingering instance holds a bus
+        # connection; enough of them exhaust dbus-broker's FD limit).
+        from tincand.dbus_service import BUS_NAME
+        _log.error("tincand: another instance already owns %s — exiting", BUS_NAME)
+        sys.exit(0)
 
     if args.with_ancs and args.backend == "map":
         from tincand.backend_manager import BackendManager
@@ -159,11 +167,14 @@ def main() -> None:
 
     loop = GLib.MainLoop()
 
-    def _on_sigint(signum: int, frame: object) -> None:  # noqa: ARG001
-        _log.info("SIGINT received — shutting down")
+    def _on_signal(signum: int, frame: object) -> None:  # noqa: ARG001
+        _log.info("%s received — shutting down", signal.Signals(signum).name)
         loop.quit()
 
-    signal.signal(signal.SIGINT, _on_sigint)
+    signal.signal(signal.SIGINT, _on_signal)
+    # SIGTERM (terminate()/systemctl stop/kill) gets the same clean shutdown as
+    # SIGINT, so the daemon runs backend.disconnect() instead of dying abruptly.
+    signal.signal(signal.SIGTERM, _on_signal)
 
     device = args.device or os.environ.get("TINCAN_DEVICE", "")
     backend_name = args.backend or os.environ.get("TINCAN_BACKEND", "")
