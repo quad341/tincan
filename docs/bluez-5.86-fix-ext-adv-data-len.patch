@@ -1,0 +1,11 @@
+--- a/src/advertising.c	2026-02-08 13:26:40.000000000 -0800
++++ b/src/advertising.c	2026-06-10 08:40:32.130247233 -0700
+@@ -1487,7 +1487,7 @@
+ 		}
+ 	}
+ 
+-	param_len = sizeof(struct mgmt_cp_add_advertising) + adv_data_len +
++	param_len = sizeof(struct mgmt_cp_add_ext_adv_data) + adv_data_len +
+ 							scan_rsp_len;
+ 
+ 	cp = malloc0(param_len);
