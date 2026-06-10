@@ -153,6 +153,10 @@ def main() -> None:
     from tincand.hfp_capability import is_call_setup_ready
     service.set_capability("call_setup_ready", is_call_setup_ready())
 
+    from tincand.call_controller import CallController
+    call_controller = CallController(service, service._contact_store)
+    service.set_call_controller(call_controller)
+
     if args.with_ancs and args.backend == "map":
         from tincand.backend_manager import BackendManager
         from tincand.backends.ancs import ANCSBackend
