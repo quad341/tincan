@@ -126,6 +126,18 @@ class PBAPContactSync:
             _log.warning("PBAP retry PullAll failed: %s", exc)
         return False
 
+    def refresh(self) -> None:
+        """Re-pull contacts without a daemon restart (tincan-mox38).
+
+        Reuses the existing PBAP session if still alive; otherwise opens a new one.
+        Fire-and-forget — results arrive via update_contact() calls as vCards are parsed.
+        """
+        self._retry_count = 0
+        if self._pbap_iface is not None and self.session_path is not None:
+            self._retry_pullall()
+        elif self._device_addr is not None:
+            self._do_connect()
+
     def disconnect(self) -> None:
         """Remove the PBAP session if one is active."""
         if self.session_path is None:

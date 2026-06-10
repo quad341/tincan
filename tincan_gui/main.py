@@ -634,6 +634,7 @@ class MainWindow(QMainWindow):
         c.message_send_accepted.connect(self._on_send_accepted)
         c.message_send_failed.connect(self._on_send_failed)
         self.refresh_requested.connect(self._load_conversations)
+        self.refresh_requested.connect(self._dbus_client.refresh_contacts)
         # HFP call signals (tincan-fx79v.2)
         c.call_incoming.connect(self._on_call_incoming)
         c.call_connected.connect(self._on_call_connected)

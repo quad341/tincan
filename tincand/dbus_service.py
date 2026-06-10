@@ -480,6 +480,16 @@ class TincanService(dbus.service.Object):
         if self._pbap is not None:
             self._pbap.fetch_photo(str(conversation_id))
 
+    @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="")
+    def RefreshContacts(self) -> None:  # noqa: N802
+        """Re-pull PBAP contacts without a daemon restart (tincan-mox38).
+
+        Fire-and-forget — results arrive via ConversationUpdated signals as
+        vCards are parsed and names resolved.
+        """
+        if self._pbap is not None:
+            self._pbap.refresh()
+
     # ------------------------------------------------------------------
     # im.tincan.Daemon — notification filter API (tincan-9kav)
     # ------------------------------------------------------------------
