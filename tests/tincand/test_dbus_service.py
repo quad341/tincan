@@ -510,3 +510,98 @@ class TestGetContacts:
         ))
         assert "grp-xyz" in service._group_participants
         assert set(service._group_participants["grp-xyz"]) == {"4155550001", "4155550002"}
+
+
+# ---------------------------------------------------------------------------
+# §update_contact — name-keyed conversation merge (tincan-gfiuv, tincan-6zfcq)
+# ---------------------------------------------------------------------------
+
+class TestUpdateContactMerge:
+    """update_contact() merges name-keyed conversations into phone-keyed ones.
+
+    Re-verifies tincan-gfiuv (self-conversation no sendable number) and
+    tincan-6zfcq (country-code normalization splits thread) on main.
+    """
+
+    def test_phone_keyed_conv_gets_display_name(self, service):
+        """Phone-keyed conversation: update_contact sets display_name and emits."""
+        service.upsert_conversation(Conversation(id="8157916347", display_name="8157916347"))
+        service.update_contact("8157916347", "Jim Wordelman")
+        conv = service._conversations["8157916347"]
+        assert conv.display_name == "Jim Wordelman"
+        service.ConversationUpdated.assert_called()
+
+    def test_name_keyed_conv_merges_into_phone_slot(self, service):
+        """Name-keyed conversation merges into phone-keyed slot on contact load (tincan-gfiuv)."""
+        service.upsert_conversation(Conversation(
+            id="Jim Wordelman",
+            display_name="Jim Wordelman",
+            last_message_preview="hey",
+            last_message_at="2026-06-10T12:00:00",
+            unread_count=1,
+        ))
+        service.update_contact("8157916347", "Jim Wordelman")
+
+        # Old name-keyed slot removed
+        assert "Jim Wordelman" not in service._conversations
+        # New phone-keyed slot present
+        assert "8157916347" in service._conversations
+        conv = service._conversations["8157916347"]
+        assert conv.display_name == "Jim Wordelman"
+        assert conv.unread_count == 1
+        assert conv.last_message_preview == "hey"
+
+    def test_merged_conv_id_is_phone_so_gui_can_reply(self, service):
+        """After merge, conv.id is the phone number so the GUI send_target fallback works."""
+        service.upsert_conversation(Conversation(id="Jim Wordelman", display_name="Jim Wordelman"))
+        service.update_contact("8157916347", "Jim Wordelman")
+        conv = service._conversations["8157916347"]
+        # GUI uses send_target or id as phone; id must be dialable
+        phone = conv.send_target or conv.id
+        assert len(phone) >= 7
+        assert phone == "8157916347"
+
+    def test_messages_migrate_on_name_merge(self, service):
+        """Messages stored under name-keyed conv_id move to phone key on merge."""
+        service.upsert_conversation(Conversation(id="Jim Wordelman", display_name="Jim Wordelman"))
+        service._messages["Jim Wordelman"] = [
+            {"conversation_id": "Jim Wordelman", "body": "hi", "timestamp": "t1"}
+        ]
+        service._message_keys.add(("Jim Wordelman", "t1", "hi"))
+        service.update_contact("8157916347", "Jim Wordelman")
+        assert "Jim Wordelman" not in service._messages
+        assert len(service._messages.get("8157916347", [])) == 1
+        assert ("8157916347", "t1", "hi") in service._message_keys
+
+    def test_country_code_prefix_normalizes_to_same_conv(self, service):
+        """18157916347 and 8157916347 resolve to the same conversation (tincan-6zfcq)."""
+        from tincand.contact_store import normalize_phone
+        assert normalize_phone("18157916347") == normalize_phone("8157916347") == "8157916347"
+
+        service.upsert_conversation(Conversation(id="8157916347", display_name="8157916347"))
+        service.update_contact("18157916347", "Jim Wordelman")
+        # update_contact normalizes "18157916347" → "8157916347"
+        conv = service._conversations.get("8157916347")
+        assert conv is not None
+        assert conv.display_name == "Jim Wordelman"
+        # No extra conversation created under the 11-digit key
+        assert "18157916347" not in service._conversations
+
+    def test_two_convs_same_number_different_prefix_merge(self, service):
+        """Conversations keyed by 8157916347 and by name both collapse (tincan-6zfcq)."""
+        service.upsert_conversation(Conversation(
+            id="8157916347", display_name="8157916347",
+            last_message_preview="first", last_message_at="2026-01-01T00:00:00",
+        ))
+        service.upsert_conversation(Conversation(
+            id="Jim Wordelman", display_name="Jim Wordelman",
+            last_message_preview="second", last_message_at="2026-06-10T00:00:00",
+            unread_count=2,
+        ))
+        service.update_contact("8157916347", "Jim Wordelman")
+        # Only one conversation remains
+        assert "Jim Wordelman" not in service._conversations
+        conv = service._conversations["8157916347"]
+        # Newest message wins
+        assert conv.last_message_preview == "second"
+        assert conv.unread_count == 2
