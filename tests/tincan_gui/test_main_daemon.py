@@ -551,3 +551,74 @@ class TestSyncDaemonState:
         window = MainWindow()
         qtbot.addWidget(window)
         assert window._tray._connected is False
+
+
+# ---------------------------------------------------------------------------
+# §config-persist  auto-save device on connect (tincan-oxthc)
+# ---------------------------------------------------------------------------
+
+class TestDeviceConfigPersist:
+    """_on_daemon_connected persists device address to config on first successful connection."""
+
+    @pytest.fixture(autouse=True)
+    def _no_live_daemon(self, monkeypatch):
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {})
+
+    def test_save_called_when_device_differs_from_config(self, qtbot, monkeypatch):
+        import tincan_gui.main as _main_mod
+        from tincan_gui.daemon_config import DaemonConfig
+
+        loaded_cfg = DaemonConfig(backend="map", device="")
+        saved = []
+        monkeypatch.setattr(_main_mod, "load_daemon_config", lambda: loaded_cfg)
+        monkeypatch.setattr(_main_mod, "save_daemon_config", lambda c: saved.append(c))
+
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window._on_daemon_connected("AA:BB:CC:DD:EE:FF")
+
+        assert len(saved) == 1
+        assert saved[0].device == "AA:BB:CC:DD:EE:FF"
+        assert saved[0].backend == "map"
+
+    def test_save_not_called_when_device_already_matches_config(self, qtbot, monkeypatch):
+        import tincan_gui.main as _main_mod
+        from tincan_gui.daemon_config import DaemonConfig
+
+        loaded_cfg = DaemonConfig(backend="map", device="AA:BB:CC:DD:EE:FF")
+        saved = []
+        monkeypatch.setattr(_main_mod, "load_daemon_config", lambda: loaded_cfg)
+        monkeypatch.setattr(_main_mod, "save_daemon_config", lambda c: saved.append(c))
+
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window._on_daemon_connected("AA:BB:CC:DD:EE:FF")
+
+        assert saved == []
+
+    def test_save_not_called_when_device_address_empty(self, qtbot, monkeypatch):
+        import tincan_gui.main as _main_mod
+        saved = []
+        monkeypatch.setattr(_main_mod, "save_daemon_config", lambda c: saved.append(c))
+
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window._on_daemon_connected("")
+
+        assert saved == []
+
+    def test_saved_config_preserves_existing_backend(self, qtbot, monkeypatch):
+        import tincan_gui.main as _main_mod
+        from tincan_gui.daemon_config import DaemonConfig
+
+        loaded_cfg = DaemonConfig(backend="fake_map", device="")
+        saved = []
+        monkeypatch.setattr(_main_mod, "load_daemon_config", lambda: loaded_cfg)
+        monkeypatch.setattr(_main_mod, "save_daemon_config", lambda c: saved.append(c))
+
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window._on_daemon_connected("11:22:33:44:55:66")
+
+        assert saved[0].backend == "fake_map"
+        assert saved[0].device == "11:22:33:44:55:66"
