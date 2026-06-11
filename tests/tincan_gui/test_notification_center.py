@@ -18,6 +18,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSystemTrayIcon
 
 from tincan_gui.notifications import _HISTORY_SIZE, DesktopNotifier, NotificationEntry
@@ -166,3 +167,145 @@ class TestNotificationCenterDialog:
         qtbot.addWidget(tb)
         assert isinstance(tb.bell_button, QToolButton)
         assert tb.bell_button.toolTip() == "Notification center"
+
+
+# ---------------------------------------------------------------------------
+# §3 _NotifRow clickability (tincan-s0ira)
+# ---------------------------------------------------------------------------
+
+class TestNotifRowClickability:
+    """_NotifRow click behavior: clicked signal, cursor, hover/base style restore."""
+
+    def _make_entry(self, conv_id: str = "c1") -> NotificationEntry:
+        return NotificationEntry(
+            ts=0.0, kind="sms", sender="Alice", summary="Hi",
+            body="Hello", conv_id=conv_id,
+        )
+
+    def test_mouse_press_with_conv_id_emits_clicked(self, qtbot):
+        from tincan_gui.notification_center import _NotifRow
+        entry = self._make_entry("c1")
+        row = _NotifRow(entry, dark=False, conv_id="c1")
+        qtbot.addWidget(row)
+        row.show()
+
+        received = []
+        row.clicked.connect(received.append)
+        qtbot.mouseClick(row, Qt.MouseButton.LeftButton)
+
+        assert received == ["c1"]
+
+    def test_mouse_press_without_conv_id_does_not_emit_clicked(self, qtbot):
+        from tincan_gui.notification_center import _NotifRow
+        entry = self._make_entry(conv_id="")
+        row = _NotifRow(entry, dark=False, conv_id="")
+        qtbot.addWidget(row)
+        row.show()
+
+        received = []
+        row.clicked.connect(received.append)
+        qtbot.mouseClick(row, Qt.MouseButton.LeftButton)
+
+        assert received == []
+
+    def test_pointing_hand_cursor_when_conv_id_set(self, qtbot):
+        from tincan_gui.notification_center import _NotifRow
+        entry = self._make_entry("c1")
+        row = _NotifRow(entry, dark=False, conv_id="c1")
+        qtbot.addWidget(row)
+
+        assert row.cursor().shape() == Qt.CursorShape.PointingHandCursor
+
+    def test_no_pointing_hand_cursor_when_no_conv_id(self, qtbot):
+        from tincan_gui.notification_center import _NotifRow
+        entry = self._make_entry(conv_id="")
+        row = _NotifRow(entry, dark=False, conv_id="")
+        qtbot.addWidget(row)
+
+        assert row.cursor().shape() != Qt.CursorShape.PointingHandCursor
+
+    def test_enter_event_changes_style_when_conv_id_set(self, qtbot):
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QEnterEvent
+        from PySide6.QtWidgets import QApplication
+
+        from tincan_gui.notification_center import _NotifRow
+        entry = self._make_entry("c1")
+        row = _NotifRow(entry, dark=False, conv_id="c1")
+        qtbot.addWidget(row)
+        base_style = row.styleSheet()
+
+        QApplication.sendEvent(row, QEnterEvent(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1)))
+
+        assert row.styleSheet() != base_style
+
+    def test_enter_event_does_not_change_style_when_no_conv_id(self, qtbot):
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QEnterEvent
+        from PySide6.QtWidgets import QApplication
+
+        from tincan_gui.notification_center import _NotifRow
+        entry = self._make_entry(conv_id="")
+        row = _NotifRow(entry, dark=False, conv_id="")
+        qtbot.addWidget(row)
+        base_style = row.styleSheet()
+
+        QApplication.sendEvent(row, QEnterEvent(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1)))
+
+        assert row.styleSheet() == base_style
+
+    def test_leave_event_restores_base_style_after_hover(self, qtbot):
+        from PySide6.QtCore import QEvent, QPointF
+        from PySide6.QtGui import QEnterEvent
+        from PySide6.QtWidgets import QApplication
+
+        from tincan_gui.notification_center import _NotifRow
+        entry = self._make_entry("c1")
+        row = _NotifRow(entry, dark=False, conv_id="c1")
+        qtbot.addWidget(row)
+        base_style = row.styleSheet()
+
+        QApplication.sendEvent(row, QEnterEvent(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1)))
+        assert row.styleSheet() != base_style, "hover style should differ from base"
+
+        QApplication.sendEvent(row, QEvent(QEvent.Type.Leave))
+
+        assert row.styleSheet() == base_style
+
+    def test_on_select_callback_called_with_conv_id_on_click(self, qtbot):
+        from tincan_gui.notification_center import NotificationCenterDialog, _NotifRow
+        entries = [
+            NotificationEntry(ts=0.0, kind="sms", sender="Alice", summary="Hi",
+                              body="Hello", conv_id="c1"),
+        ]
+        notifier = MagicMock(spec=DesktopNotifier)
+        notifier.history.return_value = entries
+
+        selected = []
+        dlg = NotificationCenterDialog(notifier, on_select=selected.append)
+        qtbot.addWidget(dlg)
+        dlg.show()
+
+        rows = dlg.findChildren(_NotifRow)
+        assert rows, "expected at least one _NotifRow"
+        qtbot.mouseClick(rows[0], Qt.MouseButton.LeftButton)
+
+        assert selected == ["c1"]
+
+    def test_on_select_dialog_closed_on_row_click(self, qtbot):
+        from tincan_gui.notification_center import NotificationCenterDialog, _NotifRow
+        entries = [
+            NotificationEntry(ts=0.0, kind="sms", sender="Alice", summary="Hi",
+                              body="Hello", conv_id="c1"),
+        ]
+        notifier = MagicMock(spec=DesktopNotifier)
+        notifier.history.return_value = entries
+
+        dlg = NotificationCenterDialog(notifier, on_select=lambda _: None)
+        qtbot.addWidget(dlg)
+        dlg.show()
+
+        rows = dlg.findChildren(_NotifRow)
+        qtbot.mouseClick(rows[0], Qt.MouseButton.LeftButton)
+
+        assert not dlg.isVisible()
