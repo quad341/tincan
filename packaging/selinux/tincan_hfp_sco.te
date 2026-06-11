@@ -1,0 +1,19 @@
+module tincan_hfp_sco 1.0;
+
+require {
+    type system_dbusd_t;
+    type unconfined_service_t;
+    class fd use;
+    class bluetooth_socket { read write getattr };
+}
+
+#============= system_dbusd_t ==============
+# Allow dbus-broker to receive oFono's SCO socket fd via SCM_RIGHTS.
+# oFono (unconfined_service_t) passes the SCO fd in the D-Bus
+# HandsfreeAudioManager.NewConnection message.  Without this rule,
+# SELinux Enforcing drops the fd (MSG_CTRUNC) and dbus-broker
+# disconnects oFono ("System bus has disconnected!"), killing all call audio.
+# Root cause confirmed 2026-06-09 via setenforce 0/1 toggle.
+# Reference: tincan-jekiq.
+allow system_dbusd_t unconfined_service_t:fd use;
+allow system_dbusd_t unconfined_service_t:bluetooth_socket { read write getattr };

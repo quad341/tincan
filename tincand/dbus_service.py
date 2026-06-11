@@ -90,12 +90,15 @@ class TincanService(dbus.service.Object):
         self._device_name = ""
         # tincan-40c: all capability keys always present, default False.
         # tincan-5mze: ancs_needs_repair added for FALLBACK state.
+        # tincan-r41sx: call_setup_ready is system-level (SELinux module present),
+        # not per-connection; it is NOT reset on Disconnect.
         self._capabilities: dict[str, bool] = {
             "messages": False,
             "contacts": False,
             "contacts_empty": False,   # True when PBAP loaded but found 0 contacts (tincan-d3xw)
             "ancs": False,
             "ancs_needs_repair": False,
+            "call_setup_ready": False,
         }
         self._conversations: dict[str, Conversation] = {}
         self._messages: dict[str, list[dict]] = {}
@@ -138,11 +141,15 @@ class TincanService(dbus.service.Object):
         self._connected = False
         self._device_address = ""
         self._device_name = ""
+        # Preserve call_setup_ready — it reflects SELinux module presence, not BT state.
+        call_setup_ready = self._capabilities.get("call_setup_ready", False)
         self._capabilities = {
             "messages": False,
             "contacts": False,
+            "contacts_empty": False,
             "ancs": False,
             "ancs_needs_repair": False,
+            "call_setup_ready": call_setup_ready,
         }
         self._contact_store.clear()
         _log.info("Disconnected")
@@ -193,6 +200,7 @@ class TincanService(dbus.service.Object):
 
     _KNOWN_CAPABILITIES = frozenset({
         "messages", "contacts", "contacts_empty", "ancs", "ancs_needs_repair",
+        "call_setup_ready",
     })
 
     def set_capability(self, feature: str, available: bool) -> None:
