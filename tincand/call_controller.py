@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 
 from gi.repository import GLib
 
+from tincand.hfp_capability import is_call_setup_ready
+
 _log = logging.getLogger(__name__)
 
 _OFONO_BUS = "org.ofono"
@@ -45,8 +47,6 @@ class CallController:
     """
 
     def __init__(self, service: object, contact_store: object) -> None:
-        from tincand.hfp_capability import is_call_setup_ready
-
         if not is_call_setup_ready():
             _log.warning(
                 "CallController: call_setup_ready is False — "
@@ -87,7 +87,7 @@ class CallController:
 
     def _is_hfp_iphone_modem(self, path: str, props: dict) -> bool:
         return (
-            str(props.get("Type", "")).lower() == "hfp"
+            str(props.get("Type", "")) == "hfp"
             and _IPHONE_MAC_FRAGMENT in str(path).lower()
         )
 
