@@ -1445,24 +1445,17 @@ class MainWindow(QMainWindow):
     def _on_hang_up(self) -> None:
         try:
             self._dbus_client._dbus_call(
-                "im.tincan.Calls", "HangUp"
+                "im.tincan.Calls", "Hangup"
             )
         except Exception:
             pass
         self._exit_call()
 
-    def _on_hold_toggled(self, held: bool) -> None:
-        try:
-            method = "Hold" if held else "Unhold"
-            self._dbus_client._dbus_call("im.tincan.Calls", method)
-        except Exception:
-            pass
+    def _on_hold_toggled(self, held: bool) -> None:  # noqa: ARG002
+        pass  # Hold/Unhold are Phase 2+; daemon does not export these yet
 
     def _on_retry_audio(self) -> None:
-        try:
-            self._dbus_client._dbus_call("im.tincan.Calls", "RetrySco")
-        except Exception:
-            pass
+        pass  # RetrySco is Phase 2+; daemon does not export this yet
 
     def _on_dtmf_tone(self, key: str) -> None:
         self._dbus_client.send_dtmf(key)

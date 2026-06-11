@@ -32,6 +32,7 @@ BUS_NAME = "im.tincan.Daemon"
 OBJECT_PATH = "/im/tincan"
 IFACE_DAEMON = "im.tincan.Daemon"
 IFACE_MESSAGES = "im.tincan.Messages"
+IFACE_CALLS = "im.tincan.Calls"
 
 
 @dataclass
@@ -107,6 +108,7 @@ class TincanService(dbus.service.Object):
         self._backend: object | None = None
         self._contact_store = ContactStore()
         self._pbap: object | None = None  # set by __main__ after construction
+        self._call_controller: object | None = None  # set by __main__ after construction
         self._notification_filter = NotificationFilter()
         self._seen_apps = SeenAppsRegistry()
 
@@ -554,6 +556,129 @@ class TincanService(dbus.service.Object):
             for r in self._seen_apps.list()
         ]
 
+    # ------------------------------------------------------------------
+    # im.tincan.Calls — HFP call control (tincan-0e6na / tincan-xohrx)
+    # ------------------------------------------------------------------
+
+    def _require_call_setup_ready(self) -> None:
+        """Raise NotAvailable if the SELinux HFP module is not in place."""
+        if not self._capabilities.get("call_setup_ready", False):
+            raise dbus.exceptions.DBusException(
+                "HFP call setup not ready — install the tincan SELinux policy module",
+                name="org.ofono.Error.NotAvailable",
+            )
+
+    @dbus.service.method(IFACE_CALLS, in_signature="s", out_signature="s")
+    def Dial(self, number: str) -> str:  # noqa: N802
+        self._require_call_setup_ready()
+        if self._call_controller is None:
+            raise dbus.exceptions.DBusException(
+                "oFono not available — install oFono to use call features",
+                name="org.freedesktop.DBus.Error.ServiceUnknown",
+            )
+        try:
+            return str(self._call_controller.dial(str(number)))
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc), name="org.ofono.Error.Failed"
+            ) from exc
+
+    @dbus.service.method(IFACE_CALLS, in_signature="s", out_signature="")
+    def Answer(self, call_id: str) -> None:  # noqa: N802
+        self._require_call_setup_ready()
+        if self._call_controller is None:
+            raise dbus.exceptions.DBusException(
+                "oFono not available — install oFono to use call features",
+                name="org.freedesktop.DBus.Error.ServiceUnknown",
+            )
+        try:
+            self._call_controller.answer_call(str(call_id))
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc), name="org.ofono.Error.Failed"
+            ) from exc
+
+    @dbus.service.method(IFACE_CALLS, in_signature="s", out_signature="")
+    def Hangup(self, call_id: str) -> None:  # noqa: N802
+        self._require_call_setup_ready()
+        if self._call_controller is None:
+            raise dbus.exceptions.DBusException(
+                "oFono not available — install oFono to use call features",
+                name="org.freedesktop.DBus.Error.ServiceUnknown",
+            )
+        try:
+            self._call_controller.hangup_call(str(call_id))
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc), name="org.ofono.Error.Failed"
+            ) from exc
+
+    @dbus.service.method(IFACE_CALLS, in_signature="s", out_signature="")
+    def SendDtmf(self, key: str) -> None:  # noqa: N802
+        self._require_call_setup_ready()
+        if self._call_controller is None:
+            raise dbus.exceptions.DBusException(
+                "oFono not available — install oFono to use call features",
+                name="org.freedesktop.DBus.Error.ServiceUnknown",
+            )
+        key_str = str(key)
+        if len(key_str) != 1 or key_str not in "0123456789*#":
+            raise dbus.exceptions.DBusException(
+                f"Invalid DTMF key {key_str!r}; must be a single char in [0-9*#]",
+                name="im.tincan.Error.InvalidArgument",
+            )
+        try:
+            self._call_controller.send_dtmf(key_str)
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc), name="org.ofono.Error.Failed"
+            ) from exc
+
+    @dbus.service.signal(IFACE_CALLS, signature="ss")
+    def IncomingCall(self, caller_name: str, caller_number: str) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_CALLS, signature="")
+    def CallConnected(self) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_CALLS, signature="")
+    def CallEnded(self) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_CALLS, signature="s")
+    def AudioError(self, reason: str) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_CALLS, signature="")
+    def AudioRestored(self) -> None:  # noqa: N802
+        pass
+
+    def on_call_incoming(self, caller_name: str, caller_number: str) -> None:
+        """Called by CallController when an incoming call arrives."""
+        _log.info("IncomingCall: %s <%s>", caller_name, caller_number)
+        self.IncomingCall(str(caller_name), str(caller_number))
+
+    def on_call_connected(self) -> None:
+        """Called by CallController when a call transitions to active."""
+        _log.info("CallConnected")
+        self.CallConnected()
+
+    def on_call_ended(self) -> None:
+        """Called by CallController when a call is terminated."""
+        _log.info("CallEnded")
+        self.CallEnded()
+
+    def on_audio_error(self, reason: str) -> None:
+        """Called by CallController when SCO audio fails to establish."""
+        _log.warning("AudioError: %s", reason)
+        self.AudioError(str(reason))
+
+    def on_audio_restored(self) -> None:
+        """Called by CallController when SCO audio recovers after an error."""
+        _log.info("AudioRestored")
+        self.AudioRestored()
+
     def on_app_notification_received(self, notif: dict) -> None:
         """Handle a non-SMS iOS app notification from the ANCS backend.
 
@@ -598,6 +723,10 @@ class TincanService(dbus.service.Object):
     def register_backend(self, backend: object) -> None:
         """Wire a backend so SendMessage/SendMessageToRecipients can call send_group_message."""
         self._backend = backend
+
+    def set_call_controller(self, controller: object) -> None:
+        """Wire the CallController so im.tincan.Calls methods can dispatch to oFono."""
+        self._call_controller = controller
 
     def upsert_conversation(self, conv: Conversation) -> None:
         """Add or replace a conversation in the in-memory store."""
