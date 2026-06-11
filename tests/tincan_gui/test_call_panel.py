@@ -15,7 +15,7 @@ patch can be removed and the §5 test will start passing.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from PySide6.QtCore import Qt
@@ -28,7 +28,6 @@ from tincan_gui.call_panel import (
     InCallPanel,
     IncomingCallDialog,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared infrastructure
@@ -129,7 +128,7 @@ class TestIncomingCallDialog:
 # ---------------------------------------------------------------------------
 
 class TestInCallPanel:
-    """InCallPanel timer, Hold, Hang Up, and Keypad controls (tincan-fx79v)."""
+    """InCallPanel timer, Hang Up, and Keypad controls — Phase 1 (tincan-fx79v)."""
 
     @pytest.fixture()
     def panel(self, qtbot, parent_widget):
@@ -147,16 +146,6 @@ class TestInCallPanel:
         assert panel._timer_lbl.text() == "0:00:00"
         qtbot.wait(1200)
         assert panel._timer_lbl.text() == "0:00:01"
-
-    def test_hold_toggle_changes_text_and_emits_signal(self, qtbot, panel):
-        """Toggling Hold changes button label to 'Resume' and emits hold_toggled(True)."""
-        received = []
-        panel.hold_toggled.connect(received.append)
-
-        panel._hold_btn.click()
-
-        assert received == [True]
-        assert "Resume" in panel._hold_btn.text()
 
     def test_hang_up_emits_signal(self, qtbot, panel):
         """Clicking Hang Up emits hang_up_requested."""
@@ -208,7 +197,7 @@ class TestDTMFKeypad:
 # ---------------------------------------------------------------------------
 
 class TestAudioErrorPanel:
-    """AudioErrorPanel Retry and Hang Up buttons emit the correct signals (tincan-fx79v)."""
+    """AudioErrorPanel Hang Up button emits the correct signal (tincan-fx79v)."""
 
     @pytest.fixture()
     def panel(self, qtbot, parent_widget):
@@ -216,14 +205,6 @@ class TestAudioErrorPanel:
         qtbot.addWidget(p)
         p.show()
         return p
-
-    def test_retry_button_emits_retry_requested(self, qtbot, panel):
-        """Clicking Retry emits retry_requested."""
-        from PySide6.QtWidgets import QPushButton
-        retry_btn = next(b for b in panel.findChildren(QPushButton) if "Retry" in b.text())
-
-        with qtbot.waitSignal(panel.retry_requested, timeout=1000):
-            retry_btn.click()
 
     def test_hang_up_button_emits_hang_up_requested(self, qtbot, panel):
         """Clicking Hang Up emits hang_up_requested."""

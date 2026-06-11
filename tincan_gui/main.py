@@ -1396,14 +1396,12 @@ class MainWindow(QMainWindow):
         # Page 1: InCallPanel
         self._incall_panel = InCallPanel(caller_name, None, self._compose_stack)
         self._incall_panel.hang_up_requested.connect(self._on_hang_up)
-        self._incall_panel.hold_toggled.connect(self._on_hold_toggled)
         self._incall_panel.keypad_toggled.connect(self._on_keypad_toggled)
         self._compose_stack.insertWidget(self._PAGE_INCALL, self._incall_panel)
 
         # Page 2: AudioErrorPanel
         self._audio_err_panel = AudioErrorPanel(self._compose_stack)
         self._audio_err_panel.hang_up_requested.connect(self._on_hang_up)
-        self._audio_err_panel.retry_requested.connect(self._on_retry_audio)
         self._compose_stack.insertWidget(self._PAGE_AUDIO_ERR, self._audio_err_panel)
 
         # Page 3 is created in _on_keypad_toggled(True) with synced elapsed time
@@ -1427,7 +1425,6 @@ class MainWindow(QMainWindow):
             self._call_caller_name, None, self._dtmf_page, elapsed_offset=elapsed,
         )
         dtmf_incall.hang_up_requested.connect(self._on_hang_up)
-        dtmf_incall.hold_toggled.connect(self._on_hold_toggled)
         dtmf_incall.keypad_toggled.connect(
             lambda on: self._on_keypad_toggled(on) if not on else None
         )
@@ -1464,12 +1461,6 @@ class MainWindow(QMainWindow):
     def _on_hang_up(self) -> None:
         self._dbus_client.hangup()
         self._exit_call()
-
-    def _on_hold_toggled(self, held: bool) -> None:  # noqa: ARG002
-        pass  # Hold/Unhold are Phase 2+; daemon does not export these yet
-
-    def _on_retry_audio(self) -> None:
-        pass  # RetrySco is Phase 2+; daemon does not export this yet
 
     def _on_dtmf_tone(self, key: str) -> None:
         self._dbus_client.send_dtmf(key)
