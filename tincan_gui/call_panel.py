@@ -108,6 +108,12 @@ class IncomingCallDialog(QDialog):
         self.answered.emit()
         self.accept()
 
+    def disable_answer(self, reason: str) -> None:
+        """Disable the Answer button (e.g. call_setup_ready=False) with tooltip."""
+        self._answer_btn.setEnabled(False)
+        self._answer_btn.setToolTip(reason)
+        self._answer_btn.setAccessibleDescription(reason)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self._on_decline()

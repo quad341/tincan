@@ -13,6 +13,7 @@ Coverage:
   - ThreadView.append_message: clears empty-state placeholder, adds bubble, preserves prior
     bubbles on subsequent calls.
   - Integration (_wire_dbus): TincandClient signals trigger correct MainWindow handlers.
+  - Regression (tincan-itk9m): MainWindow construction must not spawn real tincand processes.
 """
 from __future__ import annotations
 
@@ -622,3 +623,35 @@ class TestDeviceConfigPersist:
 
         assert saved[0].backend == "fake_map"
         assert saved[0].device == "11:22:33:44:55:66"
+
+
+# ---------------------------------------------------------------------------
+# §N+1 Regression: no subprocess spawned during tests (tincan-itk9m)
+# ---------------------------------------------------------------------------
+
+class TestNoSpawnDaemonInTests:
+    """Regression: MainWindow construction must not spawn real tincand processes.
+
+    Verifies the _no_daemon_spawn conftest fixture blocks subprocess.Popen calls
+    even when daemon config has a device address set.
+    """
+
+    def test_mainwindow_with_device_config_spawns_no_process(self, qtbot, monkeypatch):
+        import subprocess as _subprocess
+
+        from tincan_gui.daemon_config import DaemonConfig
+
+        monkeypatch.setattr(
+            "tincan_gui.main.load_daemon_config",
+            lambda: DaemonConfig(backend="map", device="AA:BB:CC:DD:EE:FF"),
+        )
+        popen_calls = []
+        monkeypatch.setattr(_subprocess, "Popen", lambda *a, **kw: popen_calls.append((a, kw)))
+
+        window = MainWindow()
+        qtbot.addWidget(window)
+
+        assert popen_calls == [], (
+            f"subprocess.Popen called {len(popen_calls)} time(s) — "
+            "spawn_daemon mock did not intercept daemon launch"
+        )

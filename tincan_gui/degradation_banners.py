@@ -1,4 +1,4 @@
-"""Capability degradation banners: State A (disconnected), B (Show Notifications off), C (push notifications)."""  # noqa: E501
+"""Capability degradation banners: State A (disconnected), B (Show Notifications off), C (push notifications), call setup required."""  # noqa: E501
 from __future__ import annotations
 
 from typing import Optional
@@ -273,6 +273,43 @@ class ContactsEmptyBanner(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Call setup required banner (h=32, amber) — shown when call_setup_ready=False
+# ---------------------------------------------------------------------------
+
+class CallSetupRequiredBanner(QWidget):
+    """Slim amber banner shown when the SELinux call module is not installed."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(32)
+        self.setStyleSheet(
+            "background-color: #fffbeb; border: 1px solid #fbbf24;"
+        )
+
+        msg = self.tr(
+            "📞 Phone calls: setup required — "
+            "run: cd packaging/selinux && sudo ./install.sh"
+        )
+        self.setAccessibleName(
+            self.tr(
+                "Phone call setup required."
+                " Run: cd packaging/selinux && sudo ./install.sh"
+            )
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 12, 0)
+
+        label = QLabel(msg)
+        label_font = QFont()
+        label_font.setPointSize(11)
+        label.setFont(label_font)
+        label.setStyleSheet("color: #92400e;")
+        label.setWordWrap(True)
+        layout.addWidget(label, stretch=1)
+
+
+# ---------------------------------------------------------------------------
 # Accessible role factory — StateBBanner + StateCBanner → AlertMessage
 # (StateABanner inherits CapabilityBanner and is already covered by its factory)
 # ---------------------------------------------------------------------------
@@ -288,6 +325,8 @@ def _degradation_banner_factory(classname: str, obj) -> Optional[QAccessibleWidg
         return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)
     if isinstance(obj, StateCBanner):
         # State C = informational: ANCS missing, send still works (tincan-5en)
+        return QAccessibleWidget(obj, QAccessible.Role.StaticText)
+    if isinstance(obj, CallSetupRequiredBanner):
         return QAccessibleWidget(obj, QAccessible.Role.StaticText)
     return None
 
