@@ -12,14 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from tincan_gui.thread_view import (
-    BubbleType,
-    MessageBubble,
-    MessageData,
-    ThreadView,
-    _linkify,
-    _linkify_with_highlight,
-)
+from tincan_gui.text_render import _linkify, _linkify_with_highlight
+from tincan_gui.thread_view import BubbleType, MessageBubble, MessageData, ThreadView
 
 
 # ---------------------------------------------------------------------------
