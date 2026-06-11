@@ -58,10 +58,19 @@ _POLL_INTERVAL_SECONDS = 5
 _RECONNECT_INITIAL_INTERVAL_SECONDS = 10
 _RECONNECT_MAX_INTERVAL_SECONDS = 300
 
-# UpdateInbox raising UnknownObject means the OBEX session object is gone — dead session.
-# Contrast: UnknownMethod from Message1.Get is a BlueZ API gap (tincan-572zo) — handled by
-# _fetch_full_body's _failed_handles cache, never propagates to _poll_tick.
+# UnknownObject from general poll_inbox operations (SetFolder, ListMessages) means the session
+# object is gone — dead session. poll_tick triggers recovery on these.
+# NOTE: UnknownObject/UnknownMethod from UpdateInbox specifically is handled inside poll_inbox()
+# because some obexd versions return these when UpdateInbox is simply not implemented.
 _DEAD_SESSION_ERRORS = frozenset({"org.freedesktop.DBus.Error.UnknownObject"})
+
+# Errors that indicate UpdateInbox is not implemented by this obexd/device.
+# These must NOT propagate to _poll_tick as dead-session signals (tincan-bleim).
+_UPDATE_INBOX_UNSUPPORTED_ERRORS = frozenset({
+    "org.freedesktop.DBus.Error.UnknownObject",
+    "org.freedesktop.DBus.Error.UnknownMethod",
+    "org.freedesktop.DBus.Error.UnknownInterface",
+})
 
 
 class ConsentRequired(Exception):
@@ -285,6 +294,7 @@ class MapBackend(BackendInterface):
         self._failed_handles: set[str] = set()  # handles where GetMessage raised; skip on retry
         # display_name.lower() → phone; populated from phone-keyed messages, persists across polls
         self._name_to_phone: dict[str, str] = {}
+        self._update_inbox_unsupported: bool = False
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -338,6 +348,7 @@ class MapBackend(BackendInterface):
         self._initial_poll_done = False
         self._failed_handles.clear()
         self._name_to_phone.clear()
+        self._update_inbox_unsupported = False
 
         if self._service is not None:
             self._service.Connect(device_addr)  # type: ignore[attr-defined]
@@ -384,7 +395,20 @@ class MapBackend(BackendInterface):
         if self._msg_access is None:
             return []
 
-        self._retry(self._msg_access.UpdateInbox)
+        if not self._update_inbox_unsupported:
+            try:
+                self._retry(self._msg_access.UpdateInbox)
+            except dbus.exceptions.DBusException as exc:
+                if exc.get_dbus_name() in _UPDATE_INBOX_UNSUPPORTED_ERRORS:
+                    _log.info(
+                        "UpdateInbox not supported by this obexd — skipping for this session: %s",
+                        exc,
+                    )
+                    self._update_inbox_unsupported = True
+                    # Do NOT re-raise: let subsequent SetFolder/ListMessages detect a genuinely
+                    # dead session and propagate to _poll_tick for proper recovery (tincan-bleim).
+                else:
+                    raise
 
         # Navigate to telecom/msg from whatever the current folder is.
         for _ in range(2):
