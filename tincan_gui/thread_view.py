@@ -234,7 +234,8 @@ class MessageBubble(QWidget):
         body_label.setFont(body_font)
         body_label.setWordWrap(True)
         body_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        body_label.setMinimumWidth(0)  # override natural-text minimumSizeHint so layout can shrink/wrap
+        # override natural-text minimumSizeHint so layout can shrink/wrap
+        body_label.setMinimumWidth(0)
         body_label.setStyleSheet(f"color: {fg};")
         if self._data.bubble_type == BubbleType.BODY_UNAVAILABLE:
             body_label.setText("⚠ Message content unavailable")
