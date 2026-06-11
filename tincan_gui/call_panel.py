@@ -124,7 +124,6 @@ class IncomingCallDialog(QDialog):
 class InCallPanel(QWidget):
     """In-call control bar (88px) that replaces the compose bar (tincan-fx79v)."""
 
-    hold_toggled = Signal(bool)   # True = held, False = resumed
     hang_up_requested = Signal()
     keypad_toggled = Signal(bool)
 
@@ -138,7 +137,6 @@ class InCallPanel(QWidget):
         super().__init__(parent)
         self.setStyleSheet("background: #18181b; border-top: 2px solid #0d9488;")
         self.setFixedHeight(88)
-        self._held = False
         self._elapsed = elapsed_offset
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
@@ -166,13 +164,6 @@ class InCallPanel(QWidget):
         row.addLayout(info_col)
         row.addStretch()
 
-        self._hold_btn = QPushButton("⏸ Hold")
-        self._hold_btn.setFixedSize(100, 38)
-        self._hold_btn.setStyleSheet(self._hold_style(False))
-        self._hold_btn.setCheckable(True)
-        self._hold_btn.toggled.connect(self._on_hold_toggled)
-        row.addWidget(self._hold_btn)
-
         self._keypad_btn = QPushButton("⌨ Keypad")
         self._keypad_btn.setFixedSize(104, 38)
         self._keypad_btn.setStyleSheet(
@@ -193,26 +184,6 @@ class InCallPanel(QWidget):
         )
         hang_btn.clicked.connect(self.hang_up_requested)
         row.addWidget(hang_btn)
-
-    @staticmethod
-    def _hold_style(held: bool) -> str:
-        bg = "#d97706" if not held else "#3f3f46"
-        text = "#ffffff" if not held else "#9ca3af"
-        return (
-            f"QPushButton {{ background: {bg}; color: {text}; border: none;"
-            " font-size: 13px; border-radius: 4px; }"
-            " QPushButton:focus { outline: 2px dashed #3b82f6; }"
-        )
-
-    def _on_hold_toggled(self, held: bool) -> None:
-        self._held = held
-        self._hold_btn.setText("▶ Resume" if held else "⏸ Hold")
-        self._hold_btn.setStyleSheet(self._hold_style(held))
-        self.hold_toggled.emit(held)
-        if held:
-            self._timer.stop()
-        else:
-            self._timer.start()
 
     def _tick(self) -> None:
         self._elapsed += 1
@@ -282,7 +253,6 @@ class DTMFKeypad(QWidget):
 class AudioErrorPanel(QWidget):
     """88px panel shown when HFP audio SCO channel fails (tincan-fx79v)."""
 
-    retry_requested = Signal()
     hang_up_requested = Signal()
 
     def __init__(self, parent: QWidget) -> None:
@@ -308,17 +278,6 @@ class AudioErrorPanel(QWidget):
         msg_col.addWidget(body)
         row.addLayout(msg_col)
         row.addStretch()
-
-        retry_btn = QPushButton("↻ Retry Audio")
-        retry_btn.setFixedSize(100, 30)
-        retry_btn.setAccessibleName("Retry HFP audio connection")
-        retry_btn.setStyleSheet(
-            "QPushButton { background: #27272a; color: #9ca3af; border: 1px solid #3f3f46;"
-            " font-size: 11px; border-radius: 4px; }"
-            " QPushButton:focus { outline: 2px dashed #3b82f6; }"
-        )
-        retry_btn.clicked.connect(self.retry_requested)
-        row.addWidget(retry_btn)
 
         hang_btn = QPushButton("✕ Hang Up")
         hang_btn.setFixedSize(108, 30)
