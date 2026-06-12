@@ -262,7 +262,7 @@ class CallController:
         self._audio_setup_timer_id = None
         if self._modem_path and self._system_bus:
             call_audio.set_ofono_call_volume(self._system_bus, self._modem_path)
-        self._sco_links = call_audio.setup_sco_routing(_IPHONE_MAC_FRAGMENT)
+            self._sco_links = call_audio.setup_sco_routing(_IPHONE_MAC_FRAGMENT)
         return False
 
     def _teardown_call_audio(self) -> None:

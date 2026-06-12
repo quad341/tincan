@@ -208,16 +208,16 @@ def setup_sco_routing(device_mac_fragment: str) -> list[tuple[str, str]]:
 
     links: list[tuple[str, str]] = []
 
-    # bluez_input output_FL/FR → default sink playback_FL/FR
+    # bluez_input ports expose capture_FL/FR/MONO; default sink uses playback_FL/FR/MONO
     for out in bluez_out_ports:
-        channel = out.rsplit(":", 1)[-1].replace("output_", "playback_")
+        channel = out.rsplit(":", 1)[-1].replace("capture_", "playback_")
         target = next((p for p in sink_in_ports if p.endswith(channel)), sink_in_ports[0])
         if _pw_link(out, target):
             links.append((out, target))
 
-    # default source capture_MONO → bluez_output input_MONO
+    # bluez_output ports expose playback_FL/FR/MONO; default source uses capture_FL/FR/MONO
     for inp in bluez_in_ports:
-        channel = inp.rsplit(":", 1)[-1].replace("input_", "capture_")
+        channel = inp.rsplit(":", 1)[-1].replace("playback_", "capture_")
         source = next((p for p in src_out_ports if p.endswith(channel)), src_out_ports[0])
         if _pw_link(source, inp):
             links.append((source, inp))
