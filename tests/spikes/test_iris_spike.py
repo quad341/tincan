@@ -192,12 +192,10 @@ class TestSTTTruncation:
     """_transcribe() truncates transcripts whose word count exceeds MAX_STT_WORDS."""
 
     def _transcribe_mock(self, monkeypatch, whisper_text: str) -> str:
-        import numpy as np
-
         cfg = iris.Cfg()
 
         mock_run = MagicMock()
-        mock_run.return_value.stdout = np.zeros(2, dtype=np.int16).tobytes()
+        mock_run.return_value.stdout = b"\x00\x00\x00\x00"
 
         mock_model = MagicMock()
         seg = MagicMock()
