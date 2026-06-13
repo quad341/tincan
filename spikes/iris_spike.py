@@ -6,9 +6,9 @@ Pipeline:
     → Claude Haiku 4.5 (streaming) → TTS(espeak-ng) → pw-play(bluez_output)
 
 Usage:
-    python spikes/iris_spike.py --device-mac D0:6B:78:33:46:20
-    python spikes/iris_spike.py --device-mac D0:6B:78:33:46:20 --no-calibrate --vad-threshold 600
-    python spikes/iris_spike.py --device-mac D0:6B:78:33:46:20 --model base.en --hangover-ms 700
+    python spikes/iris_spike.py --device-mac <bt-mac>
+    python spikes/iris_spike.py --device-mac <bt-mac> --no-calibrate --vad-threshold 600
+    python spikes/iris_spike.py --device-mac <bt-mac> --model base.en --hangover-ms 700
 
 Prerequisites (see startup check output for install commands):
     pip install faster-whisper anthropic
@@ -91,7 +91,7 @@ MAX_STT_WORDS = 200
 
 @dataclass
 class Cfg:
-    device_mac: str = "D0:6B:78:33:46:20"
+    device_mac: str = ""
     vad_threshold: float = 500.0
     hangover_ms: int = 500
     model_name: str = "tiny.en"
@@ -672,8 +672,8 @@ def main() -> None:
     )
     p.add_argument(
         "--device-mac",
-        default="D0:6B:78:33:46:20",
-        help="Bluetooth device MAC (default: D0:6B:78:33:46:20)",
+        required=True,
+        help="Bluetooth MAC address of the paired iPhone (e.g. AA:BB:CC:DD:EE:FF)",
     )
     p.add_argument(
         "--vad-threshold",
