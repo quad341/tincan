@@ -525,11 +525,12 @@ def _iris_loop(cfg: Cfg, source_node: str, sink_node: str) -> SessionStats:
                         turn.t_stt_done = time.monotonic()
 
                         # Empty STT — re-enter VAD loop silently
-                        non_ws = [w for w in transcript.split() if w.strip()]
-                        if len(non_ws) <= 2:
+                        # Guard on non-whitespace char count (≤2), not word count.
+                        non_ws_chars = len(transcript.strip().replace(" ", ""))
+                        if non_ws_chars <= 2:
                             stats.empty_stt_count += 1
                             print(
-                                f"\r  [debug] empty STT ({len(non_ws)} words): "
+                                f"\r  [debug] empty STT ({non_ws_chars} chars): "
                                 f"{repr(transcript)}",
                                 flush=True,
                             )
