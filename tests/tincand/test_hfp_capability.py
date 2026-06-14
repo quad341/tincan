@@ -26,6 +26,10 @@ Coverage:
      - True accepted without error or signal suppression
      - False accepted without error
 
+  §6 _check_module_loaded() — selinux-store fallback path (tincan-uak1h)
+     - store has matching module dir → True (semodule -l unavailable)
+     - store populated but module dir absent, no .pp marker → None
+
 All subprocess calls (getenforce, semodule) are mocked — no root required.
 """
 from __future__ import annotations
@@ -219,3 +223,66 @@ class TestSetCapabilityCallSetupReady:
     def test_set_false_emits_capability_changed(self, service):
         service.set_capability("call_setup_ready", False)
         service.CapabilityChanged.assert_called_once_with("call_setup_ready", False)
+
+
+# ---------------------------------------------------------------------------
+# §6 _check_module_loaded() — selinux-store fallback path (tincan-uak1h)
+# ---------------------------------------------------------------------------
+
+import pathlib as _pathlib
+
+
+class TestCheckModuleLoadedSelinuxStore:
+    """Fallback 1: /var/lib/selinux/<policy>/active/modules/<priority>/<name>/
+
+    semodule -l raises FileNotFoundError in every case so the tests isolate
+    the directory-scan path exclusively.  The /var/lib/selinux root and the
+    .pp marker path are redirected to a tmp_path structure so no real
+    SELinux store is required.
+    """
+
+    def _fail_semodule(self, monkeypatch):
+        def _raise(*args, **kwargs):
+            raise FileNotFoundError("semodule not found")
+        monkeypatch.setattr(hfp_mod.subprocess, "run", _raise)
+
+    def _redirect_selinux_paths(self, monkeypatch, store_root, marker_root):
+        """Redirect hfp_capability.pathlib.Path calls to our tmp dirs."""
+        _orig = _pathlib.Path
+        _marker_str = "/usr/share/selinux/packages/tincan_hfp_sco.pp"
+
+        def _factory(*args, **kwargs):
+            p = _orig(*args, **kwargs)
+            s = str(p)
+            if s == "/var/lib/selinux":
+                return _orig(store_root)
+            if s == _marker_str:
+                return _orig(marker_root) / "tincan_hfp_sco.pp"
+            return p
+
+        monkeypatch.setattr(hfp_mod.pathlib, "Path", _factory)
+
+    def test_store_with_module_dir_returns_true(self, monkeypatch, tmp_path):
+        store = tmp_path / "store"
+        (store / "targeted" / "active" / "modules" / "200" / "tincan_hfp_sco").mkdir(
+            parents=True
+        )
+        marker_root = tmp_path / "marker"
+        marker_root.mkdir()
+
+        self._fail_semodule(monkeypatch)
+        self._redirect_selinux_paths(monkeypatch, store, marker_root)
+
+        assert hfp_mod._check_module_loaded() is True
+
+    def test_store_without_module_dir_no_marker_returns_none(self, monkeypatch, tmp_path):
+        # Store has the priority dir structure but NOT the module subdir.
+        store = tmp_path / "store"
+        (store / "targeted" / "active" / "modules" / "200").mkdir(parents=True)
+        marker_root = tmp_path / "marker"
+        marker_root.mkdir()  # tincan_hfp_sco.pp intentionally absent here
+
+        self._fail_semodule(monkeypatch)
+        self._redirect_selinux_paths(monkeypatch, store, marker_root)
+
+        assert hfp_mod._check_module_loaded() is None
