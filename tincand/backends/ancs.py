@@ -703,6 +703,39 @@ class ANCSBackend(BackendInterface):
         self._heal_timer_id = GLib.timeout_add(5_000, self._attempt_le_rearm)
         _log.warning("ANCSBackend: HEALING — max 3 attempts at 5 s each")
 
+    def _recycle_advertisement(self) -> None:
+        """Unregister and re-register the LE advertisement slot (non-blocking)."""
+        if self._bus is None:
+            return
+        try:
+            adv_mgr = dbus.Interface(
+                self._bus.get_object("org.bluez", self._adapter_path),
+                _LE_ADV_MANAGER_IFACE,
+            )
+            adv_mgr.UnregisterAdvertisement(_ADV_PATH)
+        except dbus.exceptions.DBusException as exc:
+            _log.debug("ANCSBackend: UnregisterAdvertisement (recycle): %s", exc)
+        GLib.timeout_add(500, self._reregister_advertisement)
+
+    def _reregister_advertisement(self) -> bool:
+        """Re-register LE advertisement 500 ms after unregister (one-shot timer)."""
+        if self._bus is None:
+            return GLib.SOURCE_REMOVE
+        try:
+            adv_mgr = dbus.Interface(
+                self._bus.get_object("org.bluez", self._adapter_path),
+                _LE_ADV_MANAGER_IFACE,
+            )
+            adv_mgr.RegisterAdvertisement(
+                _ADV_PATH, {},
+                reply_handler=self._on_adv_registered,
+                error_handler=self._on_adv_error,
+            )
+            _log.debug("ANCSBackend: RegisterAdvertisement (recycle) called")
+        except dbus.exceptions.DBusException as exc:
+            _log.warning("ANCSBackend: RegisterAdvertisement (recycle) failed: %s", exc)
+        return GLib.SOURCE_REMOVE
+
     def _attempt_le_rearm(self) -> bool:
         """HEALING body — check if Notifying was externally restored; else try again.
 
