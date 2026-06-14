@@ -1158,12 +1158,12 @@ class TestConnectingToHealing:
         timers[1]()
         mock_service.set_capability.assert_called_with("ancs", False)
 
-    def test_poll_fail_schedules_heal_timer_at_5s(self, lc):
+    def test_poll_fail_schedules_heal_timer_at_15s(self, lc):
         backend, _, _, mock_glib, timers, notifying = lc
         notifying[_NOTIF_SRC_PATH] = False
         timers[1]()
         intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
-        assert 5_000 in intervals
+        assert 15_000 in intervals
 
     def test_poll_fail_sets_heal_timer_id(self, lc):
         backend, _, _, _, timers, notifying = lc
@@ -1242,7 +1242,7 @@ class TestActiveToHealing:
         backend._health_check()   # tick explicitly — no GLib timer-ID ordering
         assert backend._heal_timer_id is not None
         intervals = [c.args[0] for c in mock_glib.timeout_add.call_args_list]
-        assert 5_000 in intervals
+        assert 15_000 in intervals
 
     def test_health_check_fail_clears_health_check_id(self, lc):
         backend, _, _, _, timers, notifying = lc
@@ -1257,7 +1257,7 @@ class TestActiveToHealing:
 # ---------------------------------------------------------------------------
 
 class TestHealingToFallback:
-    """3rd _attempt_le_rearm call → FALLBACK entered, ancs_needs_repair=True."""
+    """5th _attempt_le_rearm call → FALLBACK entered, ancs_needs_repair=True."""
 
     @pytest.fixture
     def healing(self, lc):
@@ -1267,37 +1267,36 @@ class TestHealingToFallback:
         timers[1]()   # → HEALING; timers[2] = _attempt_le_rearm
         return backend, mock_service, mock_bus, mock_glib, timers, notifying
 
-    def test_first_attempt_returns_source_continue(self, healing):
+    def test_first_attempt_returns_source_remove(self, healing):
         backend, _, _, mock_glib, _, _ = healing
         result = backend._attempt_le_rearm()
-        assert result == mock_glib.SOURCE_CONTINUE
+        assert result == mock_glib.SOURCE_REMOVE
 
-    def test_second_attempt_returns_source_continue(self, healing):
+    def test_second_attempt_returns_source_remove(self, healing):
         backend, _, _, mock_glib, _, _ = healing
-        backend._attempt_le_rearm()
-        result = backend._attempt_le_rearm()
-        assert result == mock_glib.SOURCE_CONTINUE
-
-    def test_third_attempt_enters_fallback_sets_ancs_needs_repair(self, healing):
-        backend, mock_service, _, _, _, _ = healing
-        backend._attempt_le_rearm()
-        backend._attempt_le_rearm()
-        mock_service.reset_mock()
-        backend._attempt_le_rearm()
-        mock_service.set_capability.assert_called_with("ancs_needs_repair", True)
-
-    def test_third_attempt_returns_source_remove(self, healing):
-        backend, _, _, mock_glib, _, _ = healing
-        backend._attempt_le_rearm()
         backend._attempt_le_rearm()
         result = backend._attempt_le_rearm()
         assert result == mock_glib.SOURCE_REMOVE
 
-    def test_third_attempt_clears_heal_timer_id(self, healing):
+    def test_fifth_attempt_enters_fallback_sets_ancs_needs_repair(self, healing):
+        backend, mock_service, _, _, _, _ = healing
+        for _ in range(4):
+            backend._attempt_le_rearm()
+        mock_service.reset_mock()
+        backend._attempt_le_rearm()
+        mock_service.set_capability.assert_called_with("ancs_needs_repair", True)
+
+    def test_fifth_attempt_returns_source_remove(self, healing):
+        backend, _, _, mock_glib, _, _ = healing
+        for _ in range(4):
+            backend._attempt_le_rearm()
+        result = backend._attempt_le_rearm()
+        assert result == mock_glib.SOURCE_REMOVE
+
+    def test_fifth_attempt_clears_heal_timer_id(self, healing):
         backend, _, _, _, _, _ = healing
-        backend._attempt_le_rearm()
-        backend._attempt_le_rearm()
-        backend._attempt_le_rearm()
+        for _ in range(5):
+            backend._attempt_le_rearm()
         assert backend._heal_timer_id is None
 
     def test_heal_attempts_counter_increments(self, healing):
@@ -1442,22 +1441,23 @@ class TestTimerHygiene:
 
 
 # ---------------------------------------------------------------------------
-# §22 HEALING stub — _attempt_le_rearm contains SPIKE-TBD, makes no D-Bus calls
+# §22 HEALING implementation — _attempt_le_rearm is fully implemented (kzgk7.2)
 # ---------------------------------------------------------------------------
 
-class TestHealingStub:
-    """_attempt_le_rearm is a documented stub pending spike results."""
+class TestHealingImplemented:
+    """_attempt_le_rearm is implemented (no longer a SPIKE-TBD stub)."""
 
-    def test_spike_tbd_comment_in_source(self):
+    def test_spike_tbd_not_in_source(self):
         src = inspect.getsource(ANCSBackend._attempt_le_rearm)
-        assert "SPIKE-TBD" in src
+        assert "SPIKE-TBD" not in src
 
-    def test_stub_makes_no_dbus_bus_calls(self, lc):
+    def test_implementation_makes_dbus_calls_for_notifying_check(self, lc):
         backend, _, mock_bus, _, _, _ = lc
         mock_bus.reset_mock()
         backend._heal_attempts = 0
         backend._attempt_le_rearm()
-        mock_bus.get_object.assert_not_called()
+        # _verify_notifying calls bus.get_object for each char path
+        assert mock_bus.get_object.call_count >= 1
 
 
 # ---------------------------------------------------------------------------
