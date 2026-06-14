@@ -644,7 +644,7 @@ class MainWindow(QMainWindow):
         self._title_bar.bug_button.clicked.connect(self._on_file_bug)
         self._title_bar.bell_button.clicked.connect(self._on_open_notif_center)
         self._banner_a.reconnect_clicked.connect(self._on_reconnect_clicked)
-        self._banner_ancs_repair.reconnect_clicked.connect(self._open_pairing_wizard)
+        self._banner_ancs_repair.reconnect_clicked.connect(self._on_ancs_reconnect_clicked)
         self._adapter_unavailable_banner._dismiss_btn.clicked.connect(
             self._on_adapter_banner_dismissed
         )
@@ -779,6 +779,7 @@ class MainWindow(QMainWindow):
                 self._repair_notified = True
                 self._notifier.dispatch_repair(on_reconnect=self._open_pairing_wizard)
         else:
+            self._banner_ancs_repair.set_reconnecting(False)
             if hasattr(self, "_tray"):
                 self._tray.set_repair_needed(False)
             self._repair_notified = False
@@ -962,6 +963,11 @@ class MainWindow(QMainWindow):
 
     def _on_reconnect_clicked(self) -> None:
         self._dbus_client.request_reconnect()
+
+    def _on_ancs_reconnect_clicked(self) -> None:
+        """Try-to-Reconnect: enter HEALING from FALLBACK."""
+        self._banner_ancs_repair.set_reconnecting(True)
+        self._dbus_client.request_ancs_heal()
 
     def _on_capability_changed(self, feature: str, available: bool) -> None:
         """Handle a CapabilityChanged signal by re-fetching full status.
