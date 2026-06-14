@@ -304,12 +304,17 @@ class TincandClient(QObject):
             return None
 
     def get_status(self) -> dict:
-        """Call GetStatus.  Returns {} when daemon is absent."""
+        """Call GetStatus.  Returns {} when daemon is absent.
+
+        Always includes adapter_path_requested ('' if no mismatch or daemon absent).
+        """
         if not self._bus.isConnected():
             return {}
         result = self._dbus_call(_IFACE_DAEMON, "GetStatus")
         if result is not None:
-            return {str(k): v for k, v in result.items()} if hasattr(result, "items") else {}
+            d = {str(k): v for k, v in result.items()} if hasattr(result, "items") else {}
+            d.setdefault("adapter_path_requested", "")
+            return d
         # Qt fallback: used when dbus-python is unavailable (unit tests with mocks).
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
         if not iface.isValid():
@@ -320,12 +325,49 @@ class TincandClient(QObject):
                 _log.debug("GetStatus failed: %s", raw.errorMessage())
                 return {}
             args = raw.arguments()
-            return _demarshal_map(args[0] if args else {})
+            d = _demarshal_map(args[0] if args else {})
+            d.setdefault("adapter_path_requested", "")
+            return d
         reply = _wrap_reply(raw)
         if not reply.isValid():
             _log.debug("GetStatus failed: %s", reply.error().message())
             return {}
-        return _demarshal_map(reply.value())
+        d = _demarshal_map(reply.value())
+        d.setdefault("adapter_path_requested", "")
+        return d
+
+    def get_adapters(self) -> list[dict]:
+        """Call GetAdapters. Returns [] when daemon is absent or BlueZ unavailable.
+
+        Each dict: path, alias, address, powered(bool),
+        hfp_sco_capable('yes'/'no'/'unknown'), le_capable(bool), is_selected(bool).
+        No dbus.SystemBus() import — all BlueZ queries go via the daemon.
+        """
+        if not self._bus.isConnected():
+            return []
+        result = self._dbus_call(_IFACE_DAEMON, "GetAdapters")
+        if result is not None:
+            return [
+                {str(k): v for k, v in a.items()}
+                for a in result
+                if hasattr(a, "items")
+            ]
+        # Qt fallback
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+        if not iface.isValid():
+            return []
+        raw = iface.call("GetAdapters")
+        if isinstance(raw, QDBusMessage):
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.debug("GetAdapters failed: %s", raw.errorMessage())
+                return []
+            args = raw.arguments()
+            return _demarshal_list_of_maps(args[0] if args else [])
+        reply = _wrap_reply(raw)
+        if not reply.isValid():
+            _log.debug("GetAdapters failed: %s", reply.error().message())
+            return []
+        return _demarshal_list_of_maps(reply.value())
 
     def list_conversations(self) -> list[dict]:
         """Call ListConversations.  Returns [] when daemon is absent.
