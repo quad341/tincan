@@ -23,7 +23,7 @@ criteria (S1–S5, from PRD §Spike Prerequisite) and three open questions
 |---|-------|---------|
 | P1 | ASUS USB-BT500 (RTL8761B) dongle is plugged in | `lsusb \| grep -i 'realtek'` — expect 0b05:1bf6 on ASUS USB-BT500 |
 | P2 | Dongle (hci1) is the active default HCI adapter | `bluetoothctl show` — expect controller A0:AD:9F:7A:15:8E; hci0 = built-in MT7925 (leave enabled but not active) |
-| P3 | iPhone Malala (D0:6B:78:33:46:20) paired to dongle | `bluetoothctl info D0:6B:78:33:46:20` shows Paired:yes Trusted:yes on dongle controller |
+| P3 | Paired iPhone connected to dongle | `bluetoothctl devices` — confirm your iPhone is Paired:yes Trusted:yes on dongle controller |
 | P4 | oFono installed | `ofonod --version` or `which ofonod` |
 | P5 | PipeWire running | `pw-cli --version` |
 | P6 | WirePlumber running | `wpctl status` |

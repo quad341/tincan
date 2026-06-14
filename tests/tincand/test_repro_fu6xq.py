@@ -1,7 +1,7 @@
 """Repro: MAP bodies truncated to the listing Subject preview (tincan-fu6xq).
 
 PROVEN ROOT CAUSE — see /tmp/fu6xq-evidence.txt (live session 2026-06-07,
-daemon "tincand starting with backend=map device=D0:6B:78:33:46:20"):
+daemon "tincand starting with backend=map device=<your-device-mac>"):
 
 On real BlueZ/obexd, ``org.bluez.obex.Message1.Get()`` raises
 ``org.freedesktop.DBus.Error.UnknownObject`` for EVERY message — the live log

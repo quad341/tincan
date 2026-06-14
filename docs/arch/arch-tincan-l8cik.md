@@ -203,7 +203,7 @@ PR #46 went GREEN while the live path stayed broken. **Acceptance requires:**
 2. **Fix mock** (automated): new test `test_message1_get_tmpfile_fetches_full_body` — simulates `Message1.Get(tmpfile)` returning a transfer path whose `Transfer1.Filename` yields a full bMessage. Asserts body > Subject length.
 
 3. **Live acceptance** (MANDATORY before closing):
-   - Receive a real SMS > 128 chars containing a long URL on the operator's phone (Malala, D0:6B:78:33:46:20)
+   - Receive a real SMS > 128 chars containing a long URL on the operator's paired iPhone
    - Confirm the full body renders in tincan (no URL truncation)
    - `/tmp/tincand-*.log` shows `Transfer recv` lines (not `Get failed`)
    - Use the 🐞 File-a-Bug button if still broken; attach trace to the PR

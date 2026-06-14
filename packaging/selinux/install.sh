@@ -29,7 +29,7 @@ echo "Done.  Verify with: semodule -l | grep ${POLICY_NAME}"
 
 echo ""
 echo "--- Verification steps ---"
-echo "1. Connect iPhone Malala and place a live call"
+echo "1. Connect your paired iPhone and place a live call"
 echo "2. Confirm SCO audio works (bidirectional)"
 echo "3. If still failing, capture AVC with:"
 echo "   sudo semodule -DB && <place call> && sudo ausearch -m AVC | audit2allow -M ${POLICY_NAME}_extra"

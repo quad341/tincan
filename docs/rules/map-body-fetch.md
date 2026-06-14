@@ -43,7 +43,7 @@ Test: `test_message1_get_tmpfile_fetches_full_body`
 
 ### 3. Live-hardware verification (MANDATORY, ON MAIN, tracked — does NOT block merge)
 After the change is on `main`, receive a real SMS **longer than 128 characters**
-with a long URL on device Malala (`D0:6B:78:33:46:20`). Confirm in the tincan GUI
+with a long URL on your paired iPhone. Confirm in the tincan GUI
 that the full body renders without truncation. Verify in `/tmp/tincand-*.log`
 that the daemon shows `Transfer recv` lines — NOT `Get failed UnknownObject`.
 
@@ -62,7 +62,7 @@ did not hold on hardware.
 4. (Optional) FYI the operator:
    ```bash
    gc mail send mayor "needs-live-test: <tracking-bead> — MAP body fetch" \
-     "SMS >128 chars with long URL on Malala. Confirm full body in GUI; no 'Get failed' in daemon log."
+     "SMS >128 chars with long URL on your paired iPhone. Confirm full body in GUI; no 'Get failed' in daemon log."
    ```
 5. Close the implementation bead, noting it merged HW-unverified and citing the
    tracking bead. **Do not** hold the bead/PR open waiting for the live test.
