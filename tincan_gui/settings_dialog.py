@@ -5,10 +5,11 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSize, Qt, Signal, Slot
+from PySide6.QtCore import QCoreApplication, QSize, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui._settings import app_settings, bool_value
+from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.theme import is_dark_theme
 
 if TYPE_CHECKING:
@@ -161,6 +163,78 @@ class _AppRowWidget(QWidget):
         return self._deny_btn
 
 
+_active_loaders: list = []
+
+
+class _AdapterLoader(QThread):
+    """Background thread that calls client.get_adapters() and emits results.
+
+    Added to _active_loaders on start, removed on finish, so Qt never tries
+    to delete a still-running thread (which aborts).
+    """
+
+    loaded: Signal = Signal(list)
+
+    def __init__(self, client: object) -> None:
+        super().__init__()
+        self._client = client
+
+    def start(self, priority=QThread.Priority.InheritPriority) -> None:
+        _active_loaders.append(self)
+        self.finished.connect(self._remove_self)
+        super().start(priority)
+
+    @Slot()
+    def _remove_self(self) -> None:
+        try:
+            _active_loaders.remove(self)
+        except ValueError:
+            pass
+
+    def run(self) -> None:
+        try:
+            adapters = self._client.get_adapters()
+        except Exception:
+            adapters = []
+        self.loaded.emit(adapters)
+
+
+class _AdapterRestartBanner(QFrame):
+    """Slim banner prompting user to restart the daemon after an adapter change."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(
+            "_AdapterRestartBanner { background: #1e1e4a; border: 1px solid #6366f1; }"
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(8)
+
+        label = QLabel("Adapter change will take effect after restart")
+        lf = QFont()
+        lf.setPointSize(11)
+        label.setFont(lf)
+        label.setStyleSheet("color: #a5b4fc;")
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        layout.addWidget(label, stretch=1)
+
+        self._restart_btn = QPushButton("Restart Now")
+        self._restart_btn.setStyleSheet(
+            "QPushButton { color: #6366f1; background: transparent;"
+            " border: 1px solid #6366f1; border-radius: 4px; padding: 2px 8px; }"
+            "QPushButton:hover { background: #312e81; }"
+        )
+        layout.addWidget(self._restart_btn)
+
+        self._later_btn = QPushButton("Later")
+        self._later_btn.setStyleSheet(
+            "QPushButton { color: #a1a1aa; background: transparent; border: none; }"
+        )
+        layout.addWidget(self._later_btn)
+
+
 class SettingsDialog(QDialog):
     """Settings dialog: Desktop notifications toggle + ghost Appearance section.
 
@@ -179,6 +253,7 @@ class SettingsDialog(QDialog):
         self._client = client
         self._dark = is_dark_theme()
         self._row_widgets: list[_AppRowWidget] = []
+        self._adapters_list: list[dict] = []
 
         self.setWindowTitle("Settings")
         self.setMinimumSize(400, 300)
@@ -236,9 +311,13 @@ class SettingsDialog(QDialog):
             "color: #f4f4f5;" if self._dark else "color: #111827;"
         )
         if client:
-            nf = client.get_notification_filter()
-            self._mirror_cb.setChecked(bool(nf.get("enabled", True)))
-            self._filter_apps: dict = nf.get("apps", {})
+            try:
+                nf = client.get_notification_filter()
+                self._mirror_cb.setChecked(bool(nf.get("enabled", True)))
+                self._filter_apps: dict = nf.get("apps", {})
+            except Exception:
+                self._mirror_cb.setChecked(True)
+                self._filter_apps = {}
         else:
             self._mirror_cb.setChecked(True)
             self._filter_apps = {}
@@ -324,34 +403,102 @@ class SettingsDialog(QDialog):
         layout.addWidget(bt_hdr)
         layout.addWidget(bt_sep)
 
-        bt_label = QLabel("ANCS Adapter")
-        bt_label.setFont(cb_font)
-        bt_label.setStyleSheet("color: #a1a1aa;" if self._dark else "color: #6b7280;")
-        bt_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        layout.addWidget(bt_label)
+        self._bt_section = QWidget()
+        bt_layout = QVBoxLayout(self._bt_section)
+        bt_layout.setContentsMargins(0, 0, 0, 0)
+        bt_layout.setSpacing(4)
 
-        import os as _os  # noqa: PLC0415
-        adapter_val = _os.environ.get("TINCAN_ANCS_ADAPTER", "")
-        self._adapter_field = QLabel(adapter_val if adapter_val else "/org/bluez/hci0")
-        self._adapter_field.setFont(cb_font)
-        if adapter_val:
-            self._adapter_field.setStyleSheet(
-                "color: #f4f4f5;" if self._dark else "color: #111827;"
+        if self._client:
+            # Full interactive picker (only when a daemon client is available)
+            bt_label_row = QHBoxLayout()
+            bt_adapter_label = QLabel("Bluetooth Adapter")
+            bt_adapter_label.setFont(cb_font)
+            bt_adapter_label.setStyleSheet("color: #a1a1aa;" if self._dark else "color: #6b7280;")
+            bt_adapter_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            bt_label_row.addWidget(bt_adapter_label)
+            bt_label_row.addStretch()
+            self._refresh_btn = QPushButton("↺ Refresh")
+            rf = QFont()
+            rf.setPointSize(11)
+            self._refresh_btn.setFont(rf)
+            self._refresh_btn.setStyleSheet(
+                "QPushButton { color: #6366f1; background: transparent; border: none; }"
+                "QPushButton:hover { text-decoration: underline; }"
             )
+            bt_label_row.addWidget(self._refresh_btn)
+            bt_layout.addLayout(bt_label_row)
+
+            # Unavailable frame (shown when get_adapters() returns [])
+            self._adapter_unavailable_frame = QFrame()
+            self._adapter_unavailable_frame.setStyleSheet(
+                "QFrame { background: #1c1c1f; border: 1px solid #27272a; }"
+            )
+            self._adapter_unavailable_frame.setMinimumHeight(56)
+            unavail_layout = QHBoxLayout(self._adapter_unavailable_frame)
+            unavail_layout.setContentsMargins(12, 8, 12, 8)
+            self._adapter_unavailable_label = QLabel("⚠ Bluetooth service unavailable")
+            uf = QFont()
+            uf.setPointSize(11)
+            self._adapter_unavailable_label.setFont(uf)
+            self._adapter_unavailable_label.setStyleSheet("color: #52525b;")
+            self._adapter_unavailable_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.NoTextInteraction
+            )
+            unavail_layout.addWidget(self._adapter_unavailable_label)
+            self._adapter_unavailable_frame.hide()
+            bt_layout.addWidget(self._adapter_unavailable_frame)
+
+            # Adapter combo (populated async after show)
+            self._adapter_combo = QComboBox()
+            self._adapter_combo.setPlaceholderText("Loading adapters…")
+            self._adapter_combo.setEnabled(False)
+            self._adapter_combo.setAccessibleName("Bluetooth Adapter")
+            bt_layout.addWidget(self._adapter_combo)
+
+            # Capability badges (shown after load)
+            self._adapter_badge_row = QLabel()
+            bf2 = QFont()
+            bf2.setPointSize(10)
+            self._adapter_badge_row.setFont(bf2)
+            self._adapter_badge_row.setStyleSheet("color: #a1a1aa;")
+            self._adapter_badge_row.hide()
+            bt_layout.addWidget(self._adapter_badge_row)
+
+            # Restart banner (shown after adapter selection change)
+            self._adapter_restart_banner = _AdapterRestartBanner()
+            self._adapter_restart_banner.hide()
+            bt_layout.addWidget(self._adapter_restart_banner)
+
+            # Wire BT picker
+            self._adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
+            self._refresh_btn.clicked.connect(self._refresh_adapters)
+            self._adapter_restart_banner._later_btn.clicked.connect(
+                self._adapter_restart_banner.hide
+            )
+            self._adapter_restart_banner._restart_btn.clicked.connect(self._on_adapter_restart_now)
+
+            # Async adapter load
+            self._loader_thread = _AdapterLoader(self._client)
+            self._loader_thread.loaded.connect(self._populate_adapter_combo)
+            self._loader_thread.start()
+            if self._loader_thread.wait(150):
+                QCoreApplication.processEvents()
         else:
-            adapter_font = QFont()
-            adapter_font.setPointSize(11)
-            adapter_font.setItalic(True)
-            self._adapter_field.setFont(adapter_font)
-            self._adapter_field.setStyleSheet(
-                "color: #a1a1aa;" if self._dark else "color: #6b7280;"
-            )
-        self._adapter_field.setToolTip(
-            "Set TINCAN_ANCS_ADAPTER=<path> in your systemd unit or launcher script."
-        )
-        self._adapter_field.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        layout.addWidget(self._adapter_field)
+            # Read-only fallback when no daemon client (legacy / no-D-Bus mode)
+            import os as _os  # noqa: PLC0415
+            bt_label = QLabel("ANCS Adapter")
+            bt_label.setFont(cb_font)
+            bt_label.setStyleSheet("color: #a1a1aa;" if self._dark else "color: #6b7280;")
+            bt_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            bt_layout.addWidget(bt_label)
+            adapter_val = _os.environ.get("TINCAN_ANCS_ADAPTER", "")
+            adapter_label = QLabel(adapter_val if adapter_val else "/org/bluez/hci0")
+            adapter_label.setFont(cb_font)
+            adapter_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            adapter_label.setStyleSheet("color: #a1a1aa;" if self._dark else "color: #6b7280;")
+            bt_layout.addWidget(adapter_label)
 
+        layout.addWidget(self._bt_section)
         layout.addSpacing(20)
 
         # ── APPEARANCE section (ghost/placeholder) ─────────────────────────
@@ -421,7 +568,10 @@ class SettingsDialog(QDialog):
 
         # Live refresh via AppNotificationReceived
         if client:
-            client.app_notification_received.connect(self._on_app_notification_received)
+            try:
+                client.app_notification_received.connect(self._on_app_notification_received)
+            except Exception:
+                pass
 
         # Tab order: desktop CB → mirror CB → row Allow/Deny pairs → close-to-tray CB
         self._rebuild_tab_order()
@@ -431,7 +581,12 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _populate_app_list(self) -> None:
-        seen: list[dict] = self._client.get_seen_apps() if self._client else []
+        seen: list[dict] = []
+        if self._client:
+            try:
+                seen = self._client.get_seen_apps()
+            except Exception:
+                pass
         self._list_widget.clear()
         self._row_widgets = []
         for app in seen:
@@ -471,6 +626,8 @@ class SettingsDialog(QDialog):
             QWidget.setTabOrder(row.allow_button, row.deny_button)
             prev = row.deny_button
         QWidget.setTabOrder(prev, self._close_to_tray_cb)
+        if hasattr(self, "_adapter_combo"):
+            QWidget.setTabOrder(self._close_to_tray_cb, self._adapter_combo)
 
     # ------------------------------------------------------------------
     # Slots
@@ -486,7 +643,10 @@ class SettingsDialog(QDialog):
     def _on_mirror_toggled(self, checked: bool) -> None:
         self._opacity_effect.setOpacity(1.0 if checked else 0.5)
         if self._client:
-            self._client.set_notifications_enabled(checked)
+            try:
+                self._client.set_notifications_enabled(checked)
+            except Exception:
+                pass
 
     def _on_close_to_tray_toggled(self, checked: bool) -> None:
         s = app_settings()
@@ -496,6 +656,114 @@ class SettingsDialog(QDialog):
     @Slot(dict)
     def _on_app_notification_received(self, _payload: dict) -> None:
         self._refresh_app_list()
+
+    # ------------------------------------------------------------------
+    # Adapter picker: load, populate, update badges
+    # ------------------------------------------------------------------
+
+    def _load_adapters_sync(self) -> None:
+        if not self._client:
+            return
+        try:
+            adapters = self._client.get_adapters()
+        except Exception:
+            adapters = []
+        self._populate_adapter_combo(adapters)
+
+    def _populate_adapter_combo(self, adapters: list[dict]) -> None:
+        self._adapters_list = adapters
+
+        self._adapter_combo.blockSignals(True)
+        self._adapter_combo.clear()
+
+        if not adapters:
+            self._adapter_combo.hide()
+            self._adapter_badge_row.hide()
+            self._adapter_unavailable_frame.show()
+            self._bt_section.setEnabled(False)
+            self._adapter_combo.blockSignals(False)
+            return
+
+        self._adapter_unavailable_frame.hide()
+        self._adapter_combo.show()
+
+        saved_path = None
+        try:
+            saved_path = app_settings().value("bluetooth/adapter_path", default=None)
+        except Exception:
+            pass
+
+        selected_idx = 0
+        for i, a in enumerate(adapters):
+            path = str(a.get("path", ""))
+            alias = str(a.get("alias", ""))
+            address = str(a.get("address", ""))
+            label = f"{alias} ({address})" if alias else path
+            self._adapter_combo.addItem(label, path)
+            if a.get("is_selected") or (saved_path and path == saved_path):
+                selected_idx = i
+
+        self._adapter_combo.setCurrentIndex(selected_idx)
+        self._adapter_combo.blockSignals(False)
+
+        if len(adapters) > 1:
+            self._adapter_combo.setEnabled(True)
+        else:
+            self._adapter_combo.setEnabled(False)
+            self._adapter_combo.setAccessibleDescription("Only one adapter available")
+
+        selected = adapters[selected_idx] if adapters else None
+        self._update_adapter_badges(selected)
+
+    def _update_adapter_badges(self, adapter: dict | None) -> None:
+        if adapter is None:
+            self._adapter_badge_row.hide()
+            return
+
+        hfp = adapter.get("hfp_sco_capable")
+        if hfp is True or hfp == "yes":
+            hfp_glyph = "✓"
+        elif hfp is False or hfp == "no":
+            hfp_glyph = "✗"
+        else:
+            hfp_glyph = "?"
+
+        le = adapter.get("le_capable")
+        le_glyph = "✓" if (le is True or le == "yes") else "✗"
+
+        self._adapter_badge_row.setText(
+            f"{hfp_glyph} HFP call audio    {le_glyph} LE advertising"
+        )
+        self._adapter_badge_row.show()
+
+    @Slot(int)
+    def _on_adapter_changed(self, index: int) -> None:
+        if index < 0 or not self._adapters_list:
+            return
+        path = self._adapter_combo.itemData(index, Qt.ItemDataRole.UserRole)
+        if not path:
+            return
+        try:
+            s = app_settings()
+            s.setValue("bluetooth/adapter_path", path)
+            s.sync()
+        except Exception:
+            pass
+        self._adapter_restart_banner.show()
+        if index < len(self._adapters_list):
+            self._update_adapter_badges(self._adapters_list[index])
+
+    def _refresh_adapters(self) -> None:
+        self._adapter_combo.setEnabled(False)
+        self._adapter_combo.setPlaceholderText("Loading adapters…")
+        if self._client:
+            self._loader_thread = _AdapterLoader(self._client)
+            self._loader_thread.loaded.connect(self._populate_adapter_combo)
+            self._loader_thread.start()
+
+    def _on_adapter_restart_now(self) -> None:
+        self._adapter_restart_banner.hide()
+        spawn_daemon("", "")
 
     # ------------------------------------------------------------------
     # Properties / helpers used by tests
