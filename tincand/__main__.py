@@ -173,6 +173,7 @@ def main() -> None:
         _log.error("tincand: another instance already owns %s — exiting", BUS_NAME)
         sys.exit(0)
 
+    service.set_adapter_path(adapter_path)
     service.set_adapter_path_requested(adapter_path_requested)
 
     from tincand.hfp_capability import is_call_setup_ready

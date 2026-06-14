@@ -5,11 +5,14 @@ from typing import Optional
 
 from PySide6.QtCore import QCoreApplication, Signal
 from PySide6.QtGui import QAccessible, QFont
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAccessibleWidget,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -332,3 +335,60 @@ def _degradation_banner_factory(classname: str, obj) -> Optional[QAccessibleWidg
 
 
 QAccessible.installFactory(_degradation_banner_factory)
+
+
+# ---------------------------------------------------------------------------
+# Adapter unavailable banner (tincan-crfu9)
+# ---------------------------------------------------------------------------
+
+class AdapterUnavailableBanner(QFrame):
+    """Full-width banner shown when the daemon fell back to a different BT adapter.
+
+    Populated by update_paths(); shown/hidden by MainWindow._refresh_adapter_unavailable_banner().
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(
+            "AdapterUnavailableBanner { background: #422006; border-bottom: 1px solid #d97706; }"
+        )
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 6, 12, 6)
+        outer.setSpacing(2)
+
+        primary_row = QHBoxLayout()
+        primary_row.setSpacing(8)
+
+        self._primary_label = QLabel()
+        pf = QFont()
+        pf.setPointSize(12)
+        self._primary_label.setFont(pf)
+        self._primary_label.setStyleSheet("color: #fbbf24;")
+        self._primary_label.setWordWrap(True)
+        primary_row.addWidget(self._primary_label, stretch=1)
+
+        self._dismiss_btn = QToolButton()
+        self._dismiss_btn.setText("✕")
+        self._dismiss_btn.setToolTip("Dismiss adapter warning")
+        self._dismiss_btn.setAccessibleName("Dismiss adapter warning")
+        self._dismiss_btn.setStyleSheet(
+            "QToolButton { color: #d97706; border: none; background: transparent; }"
+        )
+        primary_row.addWidget(self._dismiss_btn, alignment=Qt.AlignmentFlag.AlignTop)
+
+        outer.addLayout(primary_row)
+
+        self._hint_label = QLabel("Change adapter in Settings → Bluetooth")
+        hf = QFont()
+        hf.setPointSize(11)
+        self._hint_label.setFont(hf)
+        self._hint_label.setStyleSheet("color: #78716c;")
+        outer.addWidget(self._hint_label)
+
+    def update_paths(self, adapter_path_requested: str, adapter_path: str) -> None:
+        """Set the banner text to name both the unavailable and actual adapters."""
+        self._primary_label.setText(
+            f"⚠ Saved adapter {adapter_path_requested} was unavailable"
+            f" — using {adapter_path} instead."
+        )

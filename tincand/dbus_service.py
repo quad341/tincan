@@ -111,6 +111,7 @@ class TincanService(dbus.service.Object):
         self._call_controller: object | None = None  # set by __main__ after construction
         self._notification_filter = NotificationFilter()
         self._seen_apps = SeenAppsRegistry()
+        self._adapter_path: str = ""
         self._adapter_path_requested: str = ""
 
     # ------------------------------------------------------------------
@@ -184,6 +185,7 @@ class TincanService(dbus.service.Object):
                     {k: dbus.Boolean(v) for k, v in self._capabilities.items()},
                     signature="sb",
                 ),
+                "adapter_path": dbus.String(self._adapter_path),
                 "adapter_path_requested": dbus.String(self._adapter_path_requested),
             },
             signature="sv",
@@ -259,6 +261,10 @@ class TincanService(dbus.service.Object):
     def set_device_name(self, name: str) -> None:
         """Set the human-readable Bluetooth device name (e.g. BlueZ Device1.Alias)."""
         self._device_name = str(name)
+
+    def set_adapter_path(self, path: str) -> None:
+        """Record the resolved BT adapter path the daemon is running with."""
+        self._adapter_path = str(path)
 
     def set_adapter_path_requested(self, path: str) -> None:
         """Record the QSettings adapter path that was unavailable at startup.
