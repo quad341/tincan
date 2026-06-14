@@ -272,6 +272,13 @@ class ANCSBackend(BackendInterface):
             dbus_interface=_PROPS_IFACE,
             path_keyword="path",
         )
+        self._bus.add_signal_receiver(
+            self._on_interfaces_added,
+            signal_name="InterfacesAdded",
+            dbus_interface=_OBJ_MANAGER_IFACE,
+            bus_name="org.bluez",
+            path="/",
+        )
         _log.info("ANCSBackend: started — listening for ANCS device connection")
 
         # Probe for devices already connected before start() was called
@@ -419,6 +426,14 @@ class ANCSBackend(BackendInterface):
                 self._on_device_connected(path)
             else:
                 self._on_device_disconnected()
+
+    def _on_interfaces_added(self, object_path: str, interfaces: dict) -> None:
+        if _DEVICE_IFACE not in interfaces:
+            return
+        if not interfaces[_DEVICE_IFACE].get("Connected", False):
+            return
+        _log.info("ANCSBackend: InterfacesAdded Connected=True for %s", object_path)
+        GLib.idle_add(self._on_device_connected, str(object_path))
 
     def _on_device_connected(self, device_path: str) -> None:
         """Establish LE bond, then discover and subscribe to ANCS chars."""
