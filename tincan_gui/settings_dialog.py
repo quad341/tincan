@@ -200,39 +200,55 @@ class _AdapterLoader(QThread):
 
 
 class _AdapterRestartBanner(QFrame):
-    """Slim banner prompting user to restart the daemon after an adapter change."""
+    """Banner prompting user to restart the daemon after an adapter change (tincan-gu24r)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setStyleSheet(
-            "_AdapterRestartBanner { background: #1e1e4a; border: 1px solid #6366f1; }"
+            "_AdapterRestartBanner { background: #431407; border: 1px solid #f97316; }"
         )
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(8)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(2)
 
-        label = QLabel("Adapter change will take effect after restart")
-        lf = QFont()
-        lf.setPointSize(11)
-        label.setFont(lf)
-        label.setStyleSheet("color: #a5b4fc;")
-        label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        layout.addWidget(label, stretch=1)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+
+        primary = QLabel("⚠ Adapter saved — a daemon restart is required.")
+        pf = QFont()
+        pf.setPointSize(12)
+        primary.setFont(pf)
+        primary.setStyleSheet("color: #fed7aa;")
+        primary.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        top_row.addWidget(primary, stretch=1)
 
         self._restart_btn = QPushButton("Restart Now")
+        self._restart_btn.setFixedSize(110, 28)
         self._restart_btn.setStyleSheet(
-            "QPushButton { color: #6366f1; background: transparent;"
-            " border: 1px solid #6366f1; border-radius: 4px; padding: 2px 8px; }"
-            "QPushButton:hover { background: #312e81; }"
+            "QPushButton { color: #ffffff; background: #f97316;"
+            " border: 1px solid #fb923c; border-radius: 4px; }"
+            "QPushButton:hover { background: #ea6c0a; }"
         )
-        layout.addWidget(self._restart_btn)
+        top_row.addWidget(self._restart_btn)
 
         self._later_btn = QPushButton("Later")
+        self._later_btn.setFixedSize(68, 28)
         self._later_btn.setStyleSheet(
-            "QPushButton { color: #a1a1aa; background: transparent; border: none; }"
+            "QPushButton { color: #fed7aa; background: #431407;"
+            " border: 1px solid #78350f; border-radius: 4px; }"
+            "QPushButton:hover { background: #5c1d0a; }"
         )
-        layout.addWidget(self._later_btn)
+        top_row.addWidget(self._later_btn)
+        outer.addLayout(top_row)
+
+        secondary = QLabel("Your device will need to reconnect after restart.")
+        sf = QFont()
+        sf.setPointSize(11)
+        secondary.setFont(sf)
+        secondary.setStyleSheet("color: #92400e;")
+        secondary.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        outer.addWidget(secondary)
 
 
 class SettingsDialog(QDialog):
@@ -750,6 +766,7 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
         self._adapter_restart_banner.show()
+        self._adapter_restart_banner._restart_btn.setFocus()
         if index < len(self._adapters_list):
             self._update_adapter_badges(self._adapters_list[index])
 
@@ -762,8 +779,32 @@ class SettingsDialog(QDialog):
             self._loader_thread.start()
 
     def _on_adapter_restart_now(self) -> None:
-        self._adapter_restart_banner.hide()
-        spawn_daemon("", "")
+        backend = ""
+        device = ""
+        try:
+            status = self._client.get_status() if self._client else {}
+            backend = status.get("backend", "")
+            device = status.get("device_address", "")
+        except Exception:
+            pass
+        self._sigterm_daemon()
+        spawn_daemon(backend, device)
+        self.close()
+
+    def _sigterm_daemon(self) -> None:
+        import signal as _signal  # noqa: PLC0415
+        try:
+            import dbus as _dbus  # noqa: PLC0415
+            _bus = _dbus.SessionBus()
+            pid = int(
+                _dbus.Interface(
+                    _bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus"),
+                    "org.freedesktop.DBus",
+                ).GetConnectionUnixProcessID("im.tincan.Daemon")
+            )
+            os.kill(pid, _signal.SIGTERM)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Properties / helpers used by tests
