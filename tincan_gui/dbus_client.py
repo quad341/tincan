@@ -483,6 +483,14 @@ class TincandClient(QObject):
         if iface.isValid():
             iface.call("RequestReconnect")
 
+    def request_ancs_heal(self) -> None:
+        """Call RequestANCSHeal on the daemon (GUI Try-to-Reconnect, fire-and-forget)."""
+        if not self._bus.isConnected():
+            return
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+        if iface.isValid():
+            iface.call("RequestANCSHeal")
+
     def refresh_contacts(self) -> None:
         """Call RefreshContacts on the daemon (fire-and-forget, tincan-mox38)."""
         if not self._bus.isConnected():

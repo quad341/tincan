@@ -140,49 +140,80 @@ class StateBBanner(QWidget):
 # ---------------------------------------------------------------------------
 
 class ANCSRepairBanner(QWidget):
-    """Persistent orange banner: ancs_needs_repair=True FALLBACK state (h=56, orange). Design: tincan-5mze.3."""  # noqa: E501
+    """Persistent amber banner: ancs_needs_repair=True FALLBACK state. Design: tincan-kzgk7.5."""
 
     reconnect_clicked = Signal()
 
+    _BTN_IDLE = "Try to Reconnect"
+    _BTN_BUSY = "Reconnecting..."
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(56)
+        self.setMinimumHeight(64)
         self.setStyleSheet(
-            "background-color: #fff7ed; border: 1px solid #f97316;"
+            "background-color: #fff3bf; border: 1px solid #e67700;"
+        )
+        self.setAccessibleName(self.tr("Bluetooth notifications unavailable"))
+        self.setAccessibleDescription(
+            self.tr(
+                "iPhone notifications are paused."
+                " They will resume when your iPhone reconnects over Bluetooth."
+                " Activate Try to Reconnect to start reconnecting."
+            )
         )
 
-        msg = self.tr(
-            "iPhone notifications unavailable - authorization lost,"
-            " tap Reconnect to restore"
-        )
-        accessible_name = self.tr(
-            "iPhone notifications unavailable - authorization lost."
-            " Activate Reconnect to restore."
-        )
-        self.setAccessibleName(accessible_name)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(12, 8, 8, 8)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 8, 0)
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
 
-        label = QLabel(msg)
-        label_font = QFont()
-        label_font.setPointSize(11)
-        label.setFont(label_font)
-        label.setStyleSheet("color: #c2410c;")
-        label.setWordWrap(True)
-        layout.addWidget(label, stretch=1)
+        headline = QLabel(self.tr("Bluetooth notifications unavailable"))
+        headline_font = QFont()
+        headline_font.setPointSize(11)
+        headline_font.setBold(True)
+        headline.setFont(headline_font)
+        headline.setStyleSheet("color: #7c3e00;")
+        text_col.addWidget(headline)
 
-        reconnect_btn = QPushButton(self.tr("Reconnect..."))
-        reconnect_btn.setMinimumWidth(100)
-        reconnect_btn.setAccessibleName(self.tr("Reconnect"))
-        reconnect_btn.setStyleSheet(
-            "QPushButton { color: #c2410c; background: #ffffff; font-size: 12pt;"
-            " border: 1px solid #f97316; border-radius: 4px; padding: 2px 8px; }"
-            "QPushButton:hover { background: #ffedd5; }"
-            "QPushButton:focus { outline: 2px solid #f97316; outline-offset: 2px; }"
+        body = QLabel(
+            self.tr(
+                "iPhone notifications are paused."
+                " They will resume when your iPhone reconnects over Bluetooth."
+            )
         )
-        reconnect_btn.clicked.connect(self.reconnect_clicked)
-        layout.addWidget(reconnect_btn)
+        body_font = QFont()
+        body_font.setPointSize(10)
+        body.setFont(body_font)
+        body.setStyleSheet("color: #7c3e00;")
+        body.setWordWrap(True)
+        text_col.addWidget(body)
+
+        outer.addLayout(text_col, stretch=1)
+
+        self._reconnect_btn = QPushButton(self.tr(self._BTN_IDLE))
+        self._reconnect_btn.setMinimumWidth(140)
+        self._reconnect_btn.setStyleSheet(
+            "QPushButton { color: #7c3e00; background: #ffffff; font-size: 11pt;"
+            " border: 1px solid #e67700; border-radius: 4px; padding: 4px 10px; }"
+            "QPushButton:hover { background: #fff0b3; }"
+            "QPushButton:disabled { color: #a8896b; background: #faf0cc;"
+            " border-color: #c9a050; }"
+            "QPushButton:focus { outline: 2px solid #e67700; outline-offset: 2px; }"
+        )
+        self._reconnect_btn.clicked.connect(self.reconnect_clicked)
+        outer.addWidget(self._reconnect_btn)
+
+    def set_reconnecting(self, reconnecting: bool) -> None:
+        """Switch button between idle and busy states."""
+        self._reconnect_btn.setText(
+            self.tr(self._BTN_BUSY if reconnecting else self._BTN_IDLE)
+        )
+        self._reconnect_btn.setEnabled(not reconnecting)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._reconnect_btn.setFocus()
 
 
 # ---------------------------------------------------------------------------

@@ -744,6 +744,13 @@ class ANCSBackend(BackendInterface):
             "wizard tap-to-reconnect required",
         )
 
+    def request_heal(self) -> None:
+        """GUI-triggered re-entry into HEALING from FALLBACK (Try-to-Reconnect button)."""
+        if self._service is not None:
+            self._service.set_capability("ancs_needs_repair", False)
+        self._heal_attempts = 0
+        self._enter_healing()
+
     def _on_notif_source_changed(self, interface, changed, invalidated):
         if "Value" not in changed:
             return

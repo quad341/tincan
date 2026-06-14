@@ -163,6 +163,12 @@ class TincanService(dbus.service.Object):
         if self._backend is not None:
             self._backend.schedule_reconnect()
 
+    @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="")
+    def RequestANCSHeal(self) -> None:
+        """GUI Try-to-Reconnect: re-enter HEALING from FALLBACK (fire-and-forget)."""
+        if self._backend is not None and hasattr(self._backend, "request_heal"):
+            self._backend.request_heal()
+
     @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="a{sv}")
     def GetStatus(self) -> dbus.Dictionary:
         """Return current daemon status.
