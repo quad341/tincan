@@ -5,8 +5,8 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QCoreApplication, QSize, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QCoreApplication, QModelIndex, QSize, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,6 +22,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
@@ -197,6 +200,47 @@ class _AdapterLoader(QThread):
         except Exception:
             adapters = []
         self.loaded.emit(adapters)
+
+
+class _AdapterItemDelegate(QStyledItemDelegate):
+    """Rich two-line delegate for the BT adapter QComboBox (AC 4).
+
+    Line 1: alias 12pt #f4f4f5 — Line 2: MAC address 10pt #a1a1aa.
+    sizeHint height 50px gives enough room for both lines.
+    """
+
+    _ALIAS_ROLE = Qt.ItemDataRole.UserRole + 1
+    _ADDR_ROLE = Qt.ItemDataRole.UserRole + 2
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        return QSize(option.rect.width() if option.rect.width() > 0 else 200, 50)
+
+    def paint(self, painter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        painter.save()
+        try:
+            if option.state & QStyle.StateFlag.State_Selected:
+                painter.fillRect(option.rect, option.palette.highlight())
+            else:
+                painter.fillRect(option.rect, option.palette.window())
+
+            alias = index.data(self._ALIAS_ROLE) or index.data(Qt.ItemDataRole.DisplayRole) or ""
+            address = index.data(self._ADDR_ROLE) or ""
+            r = option.rect
+            x, w = r.x() + 8, r.width() - 16
+
+            f1 = QFont()
+            f1.setPointSize(12)
+            painter.setFont(f1)
+            painter.setPen(QColor("#f4f4f5"))
+            painter.drawText(x, r.y() + 4, w, 22, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, alias)
+
+            f2 = QFont()
+            f2.setPointSize(10)
+            painter.setFont(f2)
+            painter.setPen(QColor("#a1a1aa"))
+            painter.drawText(x, r.y() + 26, w, 20, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, address)
+        finally:
+            painter.restore()
 
 
 class _AdapterRestartBanner(QFrame):
@@ -480,6 +524,22 @@ class SettingsDialog(QDialog):
             self._adapter_badge_row.hide()
             bt_layout.addWidget(self._adapter_badge_row)
 
+            # Powered-off badge (AC 15: shown when selected adapter is powered off)
+            self._adapter_powered_off_badge = QLabel("⏻ Powered off")
+            pof = QFont()
+            pof.setPointSize(10)
+            self._adapter_powered_off_badge.setFont(pof)
+            self._adapter_powered_off_badge.setStyleSheet(
+                "QLabel { background: #422006; border: 1px solid #d97706;"
+                " color: #fbbf24; padding: 2px 6px; border-radius: 4px; }"
+            )
+            self._adapter_powered_off_badge.setToolTip("This adapter is powered off")
+            self._adapter_powered_off_badge.hide()
+            bt_layout.addWidget(self._adapter_powered_off_badge)
+
+            # Apply rich two-line delegate (AC 4)
+            self._adapter_combo.setItemDelegate(_AdapterItemDelegate(self._adapter_combo))
+
             # Restart banner (shown after adapter selection change)
             self._adapter_restart_banner = _AdapterRestartBanner()
             self._adapter_restart_banner.hide()
@@ -643,7 +703,8 @@ class SettingsDialog(QDialog):
             prev = row.deny_button
         QWidget.setTabOrder(prev, self._close_to_tray_cb)
         if hasattr(self, "_adapter_combo"):
-            QWidget.setTabOrder(self._close_to_tray_cb, self._adapter_combo)
+            QWidget.setTabOrder(self._close_to_tray_cb, self._refresh_btn)
+            QWidget.setTabOrder(self._refresh_btn, self._adapter_combo)
 
     # ------------------------------------------------------------------
     # Slots
@@ -696,11 +757,13 @@ class SettingsDialog(QDialog):
             self._adapter_combo.hide()
             self._adapter_badge_row.hide()
             self._adapter_unavailable_frame.show()
+            self._refresh_btn.hide()  # AC 13: no Refresh link in BlueZ-unavailable state
             self._bt_section.setEnabled(False)
             self._adapter_combo.blockSignals(False)
             return
 
         self._adapter_unavailable_frame.hide()
+        self._refresh_btn.show()
         self._adapter_combo.show()
 
         saved_path = None
@@ -716,17 +779,38 @@ class SettingsDialog(QDialog):
             address = str(a.get("address", ""))
             label = f"{alias} ({address})" if alias else path
             self._adapter_combo.addItem(label, path)
+            # Store alias and address as separate roles for the rich delegate (AC 4)
+            self._adapter_combo.setItemData(i, alias, Qt.ItemDataRole.UserRole + 1)
+            self._adapter_combo.setItemData(i, address, Qt.ItemDataRole.UserRole + 2)
+            # Per-item accessible text (AC 8)
+            hfp = a.get("hfp_sco_capable")
+            hfp_text = "capable" if (hfp is True or hfp == "yes") else (
+                "incapable" if (hfp is False or hfp == "no") else "unknown"
+            )
+            le = a.get("le_capable")
+            le_text = "capable" if (le is True or le == "yes") else "incapable"
+            hci = path.split("/")[-1] if path else ""
+            a11y_text = (
+                f"{hci} — {alias}, HFP call audio {hfp_text}, LE advertising {le_text}"
+            )
+            self._adapter_combo.setItemData(i, a11y_text, Qt.ItemDataRole.AccessibleTextRole)
             if a.get("is_selected") or (saved_path and path == saved_path):
                 selected_idx = i
 
         self._adapter_combo.setCurrentIndex(selected_idx)
         self._adapter_combo.blockSignals(False)
 
-        if len(adapters) > 1:
+        single = len(adapters) == 1
+        if not single:
             self._adapter_combo.setEnabled(True)
+            self._adapter_badge_row.setGraphicsEffect(None)
         else:
             self._adapter_combo.setEnabled(False)
             self._adapter_combo.setAccessibleDescription("Only one adapter available")
+            # AC 14: badge row at 60% opacity for single-adapter case
+            effect = QGraphicsOpacityEffect()
+            effect.setOpacity(0.6)
+            self._adapter_badge_row.setGraphicsEffect(effect)
 
         selected = adapters[selected_idx] if adapters else None
         self._update_adapter_badges(selected)
@@ -734,6 +818,7 @@ class SettingsDialog(QDialog):
     def _update_adapter_badges(self, adapter: dict | None) -> None:
         if adapter is None:
             self._adapter_badge_row.hide()
+            self._adapter_powered_off_badge.hide()
             return
 
         hfp = adapter.get("hfp_sco_capable")
@@ -751,6 +836,12 @@ class SettingsDialog(QDialog):
             f"{hfp_glyph} HFP call audio    {le_glyph} LE advertising"
         )
         self._adapter_badge_row.show()
+
+        # AC 15: powered-off badge
+        if adapter.get("powered") is False:
+            self._adapter_powered_off_badge.show()
+        else:
+            self._adapter_powered_off_badge.hide()
 
     @Slot(int)
     def _on_adapter_changed(self, index: int) -> None:
