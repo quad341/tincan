@@ -246,7 +246,7 @@ These questions require operator input before the design can be finalized:
 `sudo dnf install ofono` — available as `ofono-2.19-2.fc44` in Fedora 44 default repos. No COPR or source build required. Add `Requires: ofono` to tincan.spec.
 
 **OQ-2: Audio prototype first? — RESOLVED 2026-06-09**
-Yes. Spike bead tincan-xy2sb created and routed to tincan/investigator. Reference HW = ASUS USB-BT500 (RTL8761B) dongle; iPhone Malala re-paired to it. All implementation gated on spike OVERALL PASS.
+Yes. Spike bead tincan-xy2sb created and routed to tincan/investigator. Reference HW = ASUS USB-BT500 (RTL8761B) dongle; the test iPhone re-paired to it. All implementation gated on spike OVERALL PASS.
 
 **OQ-3: Target call scope for MVP?**
 Full call features: dial, answer, hangup, hold, DTMF, call swap, multiparty.

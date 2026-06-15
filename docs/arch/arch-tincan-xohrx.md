@@ -50,7 +50,7 @@ is what the spike confirms.
 | Technical | oFono `hfp_hf_bluez5` plugin must be installed (not in Fedora repos) |
 | Technical | WirePlumber must have `bluez5.hfphsp-backend = ofono` config |
 | Technical | Only ONE HFP backend can own the RFCOMM channel — PipeWire native vs oFono, not both |
-| Technical | iPhone MAC is `D0:6B:78:33:46:20` ("Malala") — oFono modem path contains this |
+| Technical | iPhone MAC (e.g. `D0:6B:78:XX:XX:XX`) — oFono modem path contains this |
 | Technical | GUI D-Bus signal stubs are already implemented (tincan-fx79v.3, closed) — daemon must match exactly |
 | Business | Phase 1 only: dial, answer, hangup, DTMF. No hold, swap, multiparty |
 | Business | Do NOT install oFono or switch WirePlumber backend without Jim present |
