@@ -43,21 +43,22 @@ class TestANCSRepairBannerSmoke:
         buttons = banner.findChildren(QPushButton)
         assert any("Reconnect" in b.text() for b in buttons)
 
-    def test_fixed_height_56(self, qtbot):
+    def test_minimum_height_64(self, qtbot):
+        """kzgk7.5: headline+body layout requires at least 64 px."""
         banner = ANCSRepairBanner()
         qtbot.addWidget(banner)
-        assert banner.minimumHeight() == 56
-        assert banner.maximumHeight() == 56
+        assert banner.minimumHeight() == 64
 
     def test_accessible_name_not_empty(self, qtbot):
         banner = ANCSRepairBanner()
         qtbot.addWidget(banner)
         assert banner.accessibleName() != ""
 
-    def test_accessible_name_mentions_reconnect(self, qtbot):
+    def test_accessible_name_mentions_bluetooth(self, qtbot):
+        """kzgk7.5: accessible name is the headline, not a reconnect string."""
         banner = ANCSRepairBanner()
         qtbot.addWidget(banner)
-        assert "Reconnect" in banner.accessibleName() or "reconnect" in banner.accessibleName()
+        assert "Bluetooth" in banner.accessibleName() or "bluetooth" in banner.accessibleName()
 
 
 # ---------------------------------------------------------------------------
@@ -144,14 +145,14 @@ class TestReconnectClickedSignal:
 
         assert received
 
-    def test_reconnect_clicked_connected_to_open_pairing_wizard(self, qtbot):
-        """In MainWindow, reconnect_clicked opens the pairing wizard."""
+    def test_reconnect_clicked_calls_ancs_heal(self, qtbot):
+        """kzgk7.5: reconnect_clicked triggers HEALING via request_ancs_heal, not the wizard."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        with patch.object(window, "_open_pairing_wizard") as mock_wizard:
+        with patch.object(window._dbus_client, "request_ancs_heal") as mock_heal:
             window._banner_ancs_repair.reconnect_clicked.emit()
-        mock_wizard.assert_called_once()
+        mock_heal.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
