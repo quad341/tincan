@@ -111,6 +111,8 @@ class TincanService(dbus.service.Object):
         self._call_controller: object | None = None  # set by __main__ after construction
         self._notification_filter = NotificationFilter()
         self._seen_apps = SeenAppsRegistry()
+        self._adapter_path: str = ""
+        self._adapter_path_requested: str = ""
 
     # ------------------------------------------------------------------
     # im.tincan.Daemon — lifecycle and status
@@ -167,9 +169,12 @@ class TincanService(dbus.service.Object):
     def GetStatus(self) -> dbus.Dictionary:
         """Return current daemon status.
 
-        Keys: connected(b), device_address(s), capabilities(a{sb}).
+        Keys: connected(b), device_address(s), capabilities(a{sb}),
+        adapter_path_requested(s).
         capabilities always includes messages, contacts, ancs — even when
         disconnected (tincan-40c).  Never raises.
+        adapter_path_requested is '' unless the QSettings adapter was absent at
+        startup and the daemon fell back to a different adapter.
         """
         return dbus.Dictionary(
             {
@@ -180,9 +185,42 @@ class TincanService(dbus.service.Object):
                     {k: dbus.Boolean(v) for k, v in self._capabilities.items()},
                     signature="sb",
                 ),
+                "adapter_path": dbus.String(self._adapter_path),
+                "adapter_path_requested": dbus.String(self._adapter_path_requested),
             },
             signature="sv",
         )
+
+    @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="aa{sv}")
+    def GetAdapters(self) -> list:
+        """Return all BlueZ adapters with capability and selection state.
+
+        Each dict: path(s), alias(s), address(s), powered(b),
+        hfp_sco_capable(s: 'yes'/'no'/'unknown'), le_capable(b), is_selected(b).
+        is_selected reflects QSettings bluetooth/adapter_path at call time.
+        Returns [] if BlueZ is unavailable.
+        """
+        from tincand.adapter_check import list_adapters  # noqa: PLC0415
+        from tincand.config import DaemonSettings  # noqa: PLC0415
+
+        settings_path = DaemonSettings().value("bluetooth/adapter_path", default=None)
+        result = []
+        for a in list_adapters():
+            cap = a["hfp_sco_capable"]
+            hfp_str = "yes" if cap is True else ("no" if cap is False else "unknown")
+            result.append(dbus.Dictionary(
+                {
+                    "path": dbus.String(a["path"]),
+                    "alias": dbus.String(a["alias"]),
+                    "address": dbus.String(a["address"]),
+                    "powered": dbus.Boolean(a["powered"]),
+                    "hfp_sco_capable": dbus.String(hfp_str),
+                    "le_capable": dbus.Boolean(a["le_capable"]),
+                    "is_selected": dbus.Boolean(a["path"] == settings_path),
+                },
+                signature="sv",
+            ))
+        return result
 
     @dbus.service.signal(IFACE_DAEMON, signature="s")
     def Connected(self, device_address: str) -> None:  # noqa: N802
@@ -223,6 +261,19 @@ class TincanService(dbus.service.Object):
     def set_device_name(self, name: str) -> None:
         """Set the human-readable Bluetooth device name (e.g. BlueZ Device1.Alias)."""
         self._device_name = str(name)
+
+    def set_adapter_path(self, path: str) -> None:
+        """Record the resolved BT adapter path the daemon is running with."""
+        self._adapter_path = str(path)
+
+    def set_adapter_path_requested(self, path: str) -> None:
+        """Record the QSettings adapter path that was unavailable at startup.
+
+        Set to '' when the running adapter matches what was requested (no mismatch).
+        Set to the QSettings path when the daemon fell back to a different adapter.
+        Reported via GetStatus() as adapter_path_requested.
+        """
+        self._adapter_path_requested = str(path)
 
     # ------------------------------------------------------------------
     # im.tincan.Messages — SMS/iMessage send and receive

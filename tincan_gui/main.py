@@ -47,6 +47,7 @@ from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
     ANCSRepairBanner,
+    AdapterUnavailableBanner,
     CallSetupRequiredBanner,
     ContactsEmptyBanner,
     StateABanner,
@@ -513,6 +514,7 @@ class MainWindow(QMainWindow):
         self._daemon_spawn_attempted: bool = False
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
+        self._adapter_unavailable_banner_dismissed: bool = False
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
@@ -551,6 +553,11 @@ class MainWindow(QMainWindow):
         # Title bar
         self._title_bar = TitleBar()
         root_layout.addWidget(self._title_bar)
+
+        # Adapter-unavailable banner (tincan-crfu9); hidden until mismatch detected
+        self._adapter_unavailable_banner = AdapterUnavailableBanner()
+        self._adapter_unavailable_banner.hide()
+        root_layout.addWidget(self._adapter_unavailable_banner)
 
         # Degradation banners (hidden until daemon signals arrive)
         self._banner_a = StateABanner()
@@ -638,6 +645,9 @@ class MainWindow(QMainWindow):
         self._title_bar.bell_button.clicked.connect(self._on_open_notif_center)
         self._banner_a.reconnect_clicked.connect(self._on_reconnect_clicked)
         self._banner_ancs_repair.reconnect_clicked.connect(self._open_pairing_wizard)
+        self._adapter_unavailable_banner._dismiss_btn.clicked.connect(
+            self._on_adapter_banner_dismissed
+        )
 
     def _wire_dbus(self) -> None:
         c = self._dbus_client
@@ -688,6 +698,27 @@ class MainWindow(QMainWindow):
         else:
             self._title_bar.set_disconnected()
             self._banner_a.show()
+        self._refresh_adapter_unavailable_banner(status)
+
+    def _refresh_adapter_unavailable_banner(self, status: dict | None = None) -> None:
+        """Show or hide the adapter-unavailable banner based on get_status() fields."""
+        if self._adapter_unavailable_banner_dismissed:
+            return
+        if status is None:
+            status = self._dbus_client.get_status()
+        adapter_path = str(status.get("adapter_path", ""))
+        adapter_path_requested = str(status.get("adapter_path_requested", ""))
+        mismatch = adapter_path_requested != "" and adapter_path != adapter_path_requested
+        if mismatch:
+            self._adapter_unavailable_banner.update_paths(adapter_path_requested, adapter_path)
+            self._adapter_unavailable_banner.show()
+        else:
+            self._adapter_unavailable_banner.hide()
+
+    def _on_adapter_banner_dismissed(self) -> None:
+        """Hide adapter-unavailable banner; suppress for the rest of this session."""
+        self._adapter_unavailable_banner_dismissed = True
+        self._adapter_unavailable_banner.hide()
 
     def _sync_compose_state(self) -> None:
         """Gate compose on messaging availability AND conversation selection.

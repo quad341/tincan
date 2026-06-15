@@ -25,6 +25,10 @@ semodule_package -o "${POLICY_NAME}.pp" -m "${POLICY_NAME}.mod"
 
 echo "Installing ${POLICY_NAME}.pp..."
 semodule -i "${POLICY_NAME}.pp"
+# Copy to the standard SELinux packages dir so unprivileged detection works.
+# tincand's hfp_capability._check_module_loaded() looks here when semodule -l
+# is unavailable (denied for non-root on some Fedora kernel/policy combos).
+install -m 644 "${POLICY_NAME}.pp" "/usr/share/selinux/packages/${POLICY_NAME}.pp"
 echo "Done.  Verify with: semodule -l | grep ${POLICY_NAME}"
 
 echo ""
