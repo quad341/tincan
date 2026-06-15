@@ -700,8 +700,8 @@ class ANCSBackend(BackendInterface):
             self._backlog_timer_id = None
         self._backlog_suppress = False
         self._heal_attempts = 0
-        self._heal_timer_id = GLib.timeout_add(5_000, self._attempt_le_rearm)
-        _log.warning("ANCSBackend: HEALING — max 3 attempts at 5 s each")
+        self._heal_timer_id = GLib.timeout_add(15_000, self._attempt_le_rearm)
+        _log.warning("ANCSBackend: HEALING — max 5 attempts at 15 s each (~75 s)")
 
     def _recycle_advertisement(self) -> None:
         """Unregister and re-register the LE advertisement slot (non-blocking)."""
@@ -737,17 +737,18 @@ class ANCSBackend(BackendInterface):
         return GLib.SOURCE_REMOVE
 
     def _attempt_le_rearm(self) -> bool:
-        """HEALING body — check if Notifying was externally restored; else try again.
+        """HEALING body — natural iOS reconnect detection + advertisement recycling.
 
-        Active rearm strategy is SPIKE-TBD (tincan-jr96). This method detects
-        when iOS independently restores Notifying=True (e.g., user re-opened the
-        app) and transitions back to ACTIVE without needing an explicit rearm call.
+        Step 1: check if iOS restored Notifying naturally → ACTIVE.
+        Step 2: recycle LE advertisement slot on first attempt only.
+        Step 3: increment counter and reschedule.
+        Step 4: enter FALLBACK after 5 failed attempts (~75 s total).
         """
-        if (self._heal_timer_id is not None and
-                self._notif_src_path and self._data_src_path and
+        # Step 1: natural iOS reconnect detection
+        if (self._notif_src_path and self._data_src_path and
                 self._verify_notifying(self._notif_src_path) and
                 self._verify_notifying(self._data_src_path)):
-            _log.info("ANCSBackend: HEALING → ACTIVE (Notifying restored)")
+            _log.info("ANCSBackend: HEALING → ACTIVE (Notifying restored by iOS)")
             self._heal_timer_id = None
             self._heal_attempts = 0
             if self._service is not None:
@@ -756,24 +757,34 @@ class ANCSBackend(BackendInterface):
             self._health_check_id = GLib.timeout_add(30_000, self._health_check)
             return GLib.SOURCE_REMOVE
 
-        # SPIKE-TBD: insert hardware-validated rearm strategy here when spike is complete
+        # Step 2: recycle advertisement slot on first attempt only
+        if self._heal_attempts == 0:
+            self._recycle_advertisement()
+            _log.info("ANCSBackend: HEALING attempt 1 — recycling LE advertisement slot")
+
+        # Step 3: increment and log
         self._heal_attempts += 1
         _log.warning(
-            "ANCSBackend: HEALING attempt %d/3 — SPIKE-TBD: no rearm strategy confirmed",
+            "ANCSBackend: HEALING attempt %d/5 — waiting for iOS natural reconnect",
             self._heal_attempts,
         )
-        if self._heal_attempts >= 3:
+
+        # Step 4: enter FALLBACK after 5 attempts
+        if self._heal_attempts >= 5:
             self._heal_timer_id = None
             self._enter_fallback()
             return GLib.SOURCE_REMOVE
-        return GLib.SOURCE_CONTINUE
+
+        # Step 5: reschedule at 15 s
+        self._heal_timer_id = GLib.timeout_add(15_000, self._attempt_le_rearm)
+        return GLib.SOURCE_REMOVE
 
     def _enter_fallback(self) -> None:
         """Enter FALLBACK: all healing attempts exhausted, wizard intervention required."""
         if self._service is not None:
             self._service.set_capability("ancs_needs_repair", True)
         _log.warning(
-            "ANCSBackend: FALLBACK — LE ANCS link could not be re-armed after 3 attempts; "
+            "ANCSBackend: FALLBACK — LE ANCS link could not be re-armed after 5 attempts; "
             "wizard tap-to-reconnect required",
         )
 
