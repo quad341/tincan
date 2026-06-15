@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from gi.repository import GLib
 
+from tincand import call_audio
 from tincand.hfp_capability import is_call_setup_ready
 
 _log = logging.getLogger(__name__)
@@ -59,6 +60,8 @@ class CallController:
         self._modem_path: str | None = None
         self._vcm = None  # org.ofono.VoiceCallManager proxy
         self._audio_timer_id: int | None = None
+        self._audio_setup_timer_id: int | None = None
+        self._sco_links: list[tuple[str, str]] = []
         self._retry_index: int = 0
         self._system_bus = None
         self._manager = None
@@ -122,6 +125,8 @@ class CallController:
         import dbus
 
         _log.info("CallController: bound to HFP modem %s", path)
+        call_audio.verify_dongle_adapter(path)
+        call_audio.verify_usb_autosuspend_off()
         self._modem_path = path
         self._retry_index = 0
         vcm_obj = self._system_bus.get_object(_OFONO_BUS, path)
@@ -147,6 +152,8 @@ class CallController:
         self._vcm = None
         self._modem_path = None
         self._cancel_audio_timer()
+        self._cancel_audio_setup_timer()
+        self._teardown_call_audio()
         if had_calls:
             self._service.on_call_ended()
         self._retry_index = 0
@@ -191,6 +198,8 @@ class CallController:
         call_id = self._short_id(str(path))
         self._calls.pop(call_id, None)
         self._cancel_audio_timer()
+        self._cancel_audio_setup_timer()
+        self._teardown_call_audio()
         self._service.on_call_ended()
 
     def _on_call_property_changed(self, call_id: str, name: str, value: object) -> None:
@@ -208,8 +217,11 @@ class CallController:
                 self._service.on_audio_restored()
             else:
                 self._service.on_call_connected()
+            self._schedule_audio_setup()
         elif new_state == "terminated":
             self._cancel_audio_timer()
+            self._cancel_audio_setup_timer()
+            self._teardown_call_audio()
             self._service.on_call_ended()
 
     # ------------------------------------------------------------------
@@ -232,6 +244,30 @@ class CallController:
             cs.audio_error = True
         self._service.on_audio_error("sco_timeout")
         return False
+
+    # ------------------------------------------------------------------
+    # SCO audio setup (deferred 1 s to let PipeWire register SCO nodes)
+    # ------------------------------------------------------------------
+
+    def _schedule_audio_setup(self) -> None:
+        self._cancel_audio_setup_timer()
+        self._audio_setup_timer_id = GLib.timeout_add(1000, self._on_audio_setup_tick)
+
+    def _cancel_audio_setup_timer(self) -> None:
+        if self._audio_setup_timer_id is not None:
+            GLib.source_remove(self._audio_setup_timer_id)
+            self._audio_setup_timer_id = None
+
+    def _on_audio_setup_tick(self) -> bool:
+        self._audio_setup_timer_id = None
+        if self._modem_path and self._system_bus:
+            call_audio.set_ofono_call_volume(self._system_bus, self._modem_path)
+            self._sco_links = call_audio.setup_sco_routing(_IPHONE_MAC_FRAGMENT)
+        return False
+
+    def _teardown_call_audio(self) -> None:
+        call_audio.teardown_sco_routing(self._sco_links)
+        self._sco_links = []
 
     # ------------------------------------------------------------------
     # Call control (called by TincanService D-Bus methods)
