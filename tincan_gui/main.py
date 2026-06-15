@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui import trace as _trace
+from tincan_gui.ancs_status_dot import ANCSStatusDot
 from tincan_gui.avatar import _color_for_name
 from tincan_gui.bug_report import write_report as _write_bug_report
 from tincan_gui.call_panel import AudioErrorPanel, DTMFKeypad, InCallPanel, IncomingCallDialog
@@ -212,6 +213,11 @@ class TitleBar(QWidget):
 
         layout.addSpacing(8)
 
+        self._ancs_dot = ANCSStatusDot()
+        layout.addWidget(self._ancs_dot)
+
+        layout.addSpacing(8)
+
         self._status_chip = QLabel("○ Disconnected")
         chip_font = QFont()
         chip_font.setPointSize(12)
@@ -231,6 +237,10 @@ class TitleBar(QWidget):
     @property
     def bell_button(self) -> QToolButton:
         return self._bell_btn
+
+    @property
+    def ancs_status_dot(self) -> ANCSStatusDot:
+        return self._ancs_dot
 
     @property
     def status_chip(self) -> QLabel:
@@ -718,6 +728,7 @@ class MainWindow(QMainWindow):
         ancs_needs_repair = bool(caps.get("ancs_needs_repair", False))
         self._update_ancs_repair_banner(ancs_needs_repair)
         self._update_state_c_banner(ancs_ok, ancs_needs_repair)
+        self._title_bar.ancs_status_dot.update_state(ancs_ok, ancs_needs_repair)
         # Contacts-empty hint (tincan-d3xw)
         contacts_empty = bool(caps.get("contacts_empty", False))
         self._banner_contacts_empty.setVisible(contacts_empty)
@@ -914,6 +925,7 @@ class MainWindow(QMainWindow):
         self._banner_ancs_repair.hide()
         self._banner_c.hide()
         self._banner_contacts_empty.hide()
+        self._title_bar.ancs_status_dot.hide()
         self._compose.set_compose_enabled(False, "not connected")
         self._tray.set_connected(False)
 
