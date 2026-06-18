@@ -13,6 +13,7 @@ Run with: python -m pytest tests/tincand/test_main.py -v
 from __future__ import annotations
 
 import argparse
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -100,3 +101,60 @@ class TestSelectBackendUnknown:
         monkeypatch.setenv("TINCAN_BACKEND", "unknown_backend")
         with pytest.raises(SystemExit):
             _select_backend(_args())
+
+
+# ---------------------------------------------------------------------------
+# §5 D-Bus mainloop install order (regression: oFono call control)
+# ---------------------------------------------------------------------------
+
+class TestMainDbusMainloopOrdering:
+    """main() must install the GLib D-Bus mainloop as default BEFORE the first
+    SystemBus() is created.
+
+    dbus-python caches the SystemBus singleton; a connection opened before the
+    default mainloop is set can never subscribe to signals ("connections must be
+    attached to a main loop"). When that happened, CallController's oFono bridge
+    silently failed and every im.tincan.Calls method returned NotAvailable —
+    calls looked broken with no obvious cause. This locks the ordering in.
+    """
+
+    def test_dbus_mainloop_installed_before_first_system_bus(self, monkeypatch):
+        import dbus
+        import dbus.mainloop.glib
+
+        from tincand import __main__ as m
+
+        order: list[str] = []
+
+        monkeypatch.setattr(
+            dbus.mainloop.glib, "DBusGMainLoop",
+            lambda set_as_default=False: order.append("mainloop"),
+        )
+        monkeypatch.setattr(
+            dbus, "SystemBus", lambda: (order.append("systembus"), MagicMock())[1],
+        )
+        monkeypatch.setattr(dbus, "SessionBus", lambda: MagicMock())
+
+        # Neutralise everything else main() touches — no real D-Bus, Qt, or GLib loop.
+        monkeypatch.delenv("TINCAN_ADAPTER", raising=False)
+        monkeypatch.delenv("TINCAN_BACKEND", raising=False)
+        monkeypatch.setattr(
+            "tincand.config.DaemonSettings",
+            lambda *a, **k: MagicMock(value=lambda *a, **k: None),
+        )
+        monkeypatch.setattr("tincand.dbus_service.TincanService", MagicMock())
+        monkeypatch.setattr("tincand.call_controller.CallController", MagicMock())
+        monkeypatch.setattr(m, "_select_backend", lambda *a, **k: MagicMock())
+        monkeypatch.setattr(m.GLib, "MainLoop", lambda: MagicMock(run=lambda: None))
+        monkeypatch.setattr("signal.signal", lambda *a, **k: None)
+        monkeypatch.setattr(
+            sys, "argv", ["tincand", "--backend", "mock", "--device", "AA:BB:CC:DD:EE:FF"],
+        )
+
+        m.main()
+
+        assert "mainloop" in order, "main() never installed the D-Bus GLib mainloop"
+        assert "systembus" in order, "test did not exercise a SystemBus() creation"
+        assert order.index("mainloop") < order.index("systembus"), (
+            f"SystemBus() created before DBusGMainLoop(set_as_default=True): {order}"
+        )

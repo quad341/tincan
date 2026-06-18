@@ -152,13 +152,21 @@ def _select_backend(args: argparse.Namespace, adapter_path: str = "") -> object:
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
-    adapter_path, adapter_path_requested = _resolve_adapter_path(args)
-    backend = _select_backend(args, adapter_path)
 
+    # Install the GLib D-Bus mainloop BEFORE the first bus connection is created.
+    # dbus-python caches the SystemBus/SessionBus singletons, and the first
+    # creation decides whether the connection is bound to a mainloop.
+    # _resolve_adapter_path() and CallController both open SystemBus(); if the
+    # default loop isn't set yet, the cached connection cannot subscribe to
+    # signals ("connections must be attached to a main loop") and oFono call
+    # control silently goes dark. Order matters — keep this before any bus use.
     import dbus
     import dbus.mainloop.glib
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
+    adapter_path, adapter_path_requested = _resolve_adapter_path(args)
+    backend = _select_backend(args, adapter_path)
 
     from tincand.dbus_service import TincanService
 
