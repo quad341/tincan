@@ -8,6 +8,8 @@ Coverage:
   §4 audio timeout — _on_audio_timeout sets audio_error=True and fires on_audio_error
   §5 AudioRestored — active-after-error path fires on_audio_restored;
      normal active fires on_call_connected
+  §6 _discover_modem — prefers the Online HFP modem over an offline one
+     (tincan-a6yeb: dual-adapter dial regression)
 """
 from __future__ import annotations
 
@@ -232,3 +234,76 @@ class TestCallPropertyChangedActive:
     def test_unknown_call_id_ignored(self, ctrl):
         ctrl._on_call_property_changed("no-such-call", "State", "active")
         ctrl._service.on_call_connected.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §6 _discover_modem — Online modem preference (tincan-a6yeb)
+# ---------------------------------------------------------------------------
+
+_IPHONE_PATH_ONLINE = "/org/ofono/modem/d0_6b_78_33_46_20_hfp_1"
+_IPHONE_PATH_OFFLINE = "/org/ofono/modem/d0_6b_78_33_46_20_hfp_0"
+
+
+def _make_controller_with_modems(modems: list) -> object:
+    """Return a CallController whose GetModems returns *modems*.
+
+    Mocks call_audio to prevent any real PipeWire/BlueZ interaction.
+    """
+    service = MagicMock()
+    contact_store = MagicMock()
+    contact_store.get_name.return_value = ""
+
+    mock_bus = MagicMock()
+    mock_manager = MagicMock()
+    mock_manager.GetModems.return_value = modems
+    mock_manager.GetCalls.return_value = []
+    mock_bus.get_object.return_value = MagicMock()
+
+    with (
+        patch("tincand.call_controller.is_call_setup_ready", return_value=True),
+        patch("dbus.SystemBus", return_value=mock_bus),
+        patch("dbus.Interface", return_value=mock_manager),
+        patch("tincand.call_controller.GLib") as mock_glib,
+        patch("tincand.call_controller.call_audio"),
+    ):
+        mock_glib.timeout_add.return_value = 42
+        from tincand.call_controller import CallController
+        ctrl = CallController(service, contact_store)
+
+    ctrl._service = service
+    return ctrl
+
+
+class TestDiscoverModemOnlinePreference:
+    """_discover_modem binds the Online HFP modem when multiple candidates exist."""
+
+    def test_online_modem_wins_over_offline(self):
+        """Online modem is bound when listed after the offline one."""
+        modems = [
+            (_IPHONE_PATH_OFFLINE, {"Type": "hfp", "Online": False}),
+            (_IPHONE_PATH_ONLINE, {"Type": "hfp", "Online": True}),
+        ]
+        ctrl = _make_controller_with_modems(modems)
+        assert ctrl._modem_path == _IPHONE_PATH_ONLINE
+
+    def test_online_modem_wins_when_listed_first(self):
+        """Online modem wins regardless of GetModems ordering."""
+        modems = [
+            (_IPHONE_PATH_ONLINE, {"Type": "hfp", "Online": True}),
+            (_IPHONE_PATH_OFFLINE, {"Type": "hfp", "Online": False}),
+        ]
+        ctrl = _make_controller_with_modems(modems)
+        assert ctrl._modem_path == _IPHONE_PATH_ONLINE
+
+    def test_offline_modem_bound_when_no_online_available(self):
+        """When all iPhone HFP modems are offline the first candidate is still bound."""
+        modems = [(_IPHONE_PATH_OFFLINE, {"Type": "hfp", "Online": False})]
+        ctrl = _make_controller_with_modems(modems)
+        assert ctrl._modem_path == _IPHONE_PATH_OFFLINE
+
+    def test_non_matching_modem_not_bound(self):
+        """A modem whose path doesn't contain the iPhone MAC fragment is skipped."""
+        android_path = "/org/ofono/modem/aa_bb_cc_dd_ee_ff_hfp"
+        modems = [(android_path, {"Type": "hfp", "Online": True})]
+        ctrl = _make_controller_with_modems(modems)
+        assert ctrl._modem_path is None
