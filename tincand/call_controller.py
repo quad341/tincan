@@ -24,8 +24,6 @@ _IFACE_MANAGER = "org.ofono.Manager"
 _IFACE_VCM = "org.ofono.VoiceCallManager"
 _IFACE_CALL = "org.ofono.VoiceCall"
 
-_IPHONE_MAC_FRAGMENT = "d0_6b_78_33_46_20"
-
 _RETRY_STEPS = [1.0, 2.0, 4.0, 8.0, 15.0]
 _AUDIO_TIMEOUT_S = 5
 
@@ -47,7 +45,7 @@ class CallController:
     TincanService via set_call_controller().
     """
 
-    def __init__(self, service: object, contact_store: object) -> None:
+    def __init__(self, service: object, contact_store: object, device_addr: str = "") -> None:
         if not is_call_setup_ready():
             _log.warning(
                 "CallController: call_setup_ready is False — "
@@ -56,6 +54,7 @@ class CallController:
 
         self._service = service
         self._contact_store = contact_store
+        self._mac_fragment: str = device_addr.lower().replace(":", "_")
         self._calls: dict[str, CallState] = {}
         self._modem_path: str | None = None
         self._vcm = None  # org.ofono.VoiceCallManager proxy
@@ -91,7 +90,7 @@ class CallController:
     def _is_hfp_iphone_modem(self, path: str, props: dict) -> bool:
         return (
             str(props.get("Type", "")) == "hfp"
-            and _IPHONE_MAC_FRAGMENT in str(path).lower()
+            and self._mac_fragment in str(path).lower()
         )
 
     def _discover_modem(self) -> None:
@@ -262,7 +261,7 @@ class CallController:
         self._audio_setup_timer_id = None
         if self._modem_path and self._system_bus:
             call_audio.set_ofono_call_volume(self._system_bus, self._modem_path)
-            self._sco_links = call_audio.setup_sco_routing(_IPHONE_MAC_FRAGMENT)
+            self._sco_links = call_audio.setup_sco_routing(self._mac_fragment)
         return False
 
     def _teardown_call_audio(self) -> None:
