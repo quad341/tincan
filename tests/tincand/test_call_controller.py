@@ -268,7 +268,9 @@ def _make_controller_with_modems(modems: list) -> object:
     ):
         mock_glib.timeout_add.return_value = 42
         from tincand.call_controller import CallController
-        ctrl = CallController(service, contact_store)
+        # device_addr must match the fixture modems' MAC so _mac_fragment
+        # actually discriminates (an empty fragment matches every HFP modem).
+        ctrl = CallController(service, contact_store, device_addr="D0:6B:78:33:46:20")
 
     ctrl._service = service
     return ctrl
