@@ -20,7 +20,7 @@ import pytest
 # Helpers — build a CallController with all external deps mocked
 # ---------------------------------------------------------------------------
 
-def _make_controller(*, setup_ready: bool = True):
+def _make_controller(*, setup_ready: bool = True, device_addr: str = "D0:6B:78:33:46:20"):
     """Return a CallController with dbus and GLib fully mocked.
 
     Patches:
@@ -45,7 +45,7 @@ def _make_controller(*, setup_ready: bool = True):
     ):
         mock_glib.timeout_add.return_value = 42
         from tincand.call_controller import CallController
-        ctrl = CallController(service, contact_store)
+        ctrl = CallController(service, contact_store, device_addr=device_addr)
 
     ctrl._service = service
     return ctrl

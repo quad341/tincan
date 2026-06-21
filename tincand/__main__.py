@@ -188,7 +188,8 @@ def main() -> None:
     service.set_capability("call_setup_ready", is_call_setup_ready())
 
     from tincand.call_controller import CallController
-    call_controller = CallController(service, service._contact_store)
+    _device_addr = args.device or os.environ.get("TINCAN_DEVICE", "")
+    call_controller = CallController(service, service._contact_store, device_addr=_device_addr)
     service.set_call_controller(call_controller)
 
     if args.with_ancs and args.backend == "map":
