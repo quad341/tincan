@@ -101,10 +101,19 @@ class CallController:
             self._schedule_retry()
             return
 
-        for path, props in modems:
-            if self._is_hfp_iphone_modem(str(path), dict(props)):
-                self._bind_modem(str(path))
-                return
+        # Prefer an Online iPhone HFP modem. An offline modem — e.g. a stale
+        # entry on a second adapter the phone isn't actively connected through —
+        # exposes no VoiceCallManager, so binding it makes every Dial/Answer
+        # fail with UnknownMethod. Bind the live one.
+        candidates = [
+            (str(path), bool(dict(props).get("Online", False)))
+            for path, props in modems
+            if self._is_hfp_iphone_modem(str(path), dict(props))
+        ]
+        if candidates:
+            candidates.sort(key=lambda c: not c[1])  # Online first
+            self._bind_modem(candidates[0][0])
+            return
 
         self._schedule_retry()
 
