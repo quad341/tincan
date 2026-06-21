@@ -295,6 +295,7 @@ class MapBackend(BackendInterface):
         # display_name.lower() → phone; populated from phone-keyed messages, persists across polls
         self._name_to_phone: dict[str, str] = {}
         self._update_inbox_unsupported: bool = False
+        self._sent_folder_warned: bool = False
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -349,6 +350,7 @@ class MapBackend(BackendInterface):
         self._failed_handles.clear()
         self._name_to_phone.clear()
         self._update_inbox_unsupported = False
+        self._sent_folder_warned = False
 
         if self._service is not None:
             self._service.Connect(device_addr)  # type: ignore[attr-defined]
@@ -426,14 +428,7 @@ class MapBackend(BackendInterface):
         # inbox listing (tincan-5pjzq). The full body comes from
         # Message1.Get(tmpfile), not the Subject, so no filter is needed.
         inbox_raw = self._retry(self._msg_access.ListMessages, "inbox", {})
-        _first_inbox = True
         for msg_path, props in inbox_raw.items():
-            if _first_inbox:
-                _log.warning(
-                    "MAP inbox props (first message) — raw keys: %s",
-                    {str(k): str(v) for k, v in props.items()},
-                )
-                _first_inbox = False
             msg_type = str(props.get("Type", "SMS_GSM")).upper()
             conv_id = str(props.get("ConvID") or props.get("ConversationID") or "")
             attachments: list[dict] = []
@@ -487,26 +482,22 @@ class MapBackend(BackendInterface):
             except dbus.exceptions.DBusException:
                 continue
         if sent_raw is None:
-            _log.warning(
-                "MAP sent folder unavailable (tried 'sent' and 'outbox') — "
-                "iOS does not expose outbound history over MAP; "
-                "sent messages are optimistic-only in the GUI"
-            )
+            if not self._sent_folder_warned:
+                _log.info(
+                    "MAP sent folder unavailable (tried 'sent' and 'outbox') — "
+                    "iOS does not expose outbound history over MAP; "
+                    "sent messages are optimistic-only in the GUI"
+                )
+                self._sent_folder_warned = True
         elif not sent_raw:
-            _log.warning(
-                "MAP '%s' folder returned 0 messages — "
-                "iOS sent-folder may be empty or unsupported",
-                _sent_folder_used,
-            )
+            if not self._sent_folder_warned:
+                _log.debug(
+                    "MAP '%s' folder returned 0 messages",
+                    _sent_folder_used,
+                )
+                self._sent_folder_warned = True
         try:
-            _first_sent = True
             for msg_path, props in (sent_raw or {}).items():
-                if _first_sent:
-                    _log.warning(
-                        "MAP sent props (first message) — raw keys: %s",
-                        {str(k): str(v) for k, v in props.items()},
-                    )
-                    _first_sent = False
                 body = (
                     self._fetch_full_body(str(msg_path))
                     or str(props.get("Subject", "")).strip()
