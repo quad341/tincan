@@ -11,36 +11,40 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import re as _re
 import subprocess
 
 _log = logging.getLogger(__name__)
 
-# RTL8761B (ASUS USB-BT500) adapter MAC in oFono path format (a0:ad:9f:7a:15:8e → underscores)
-_DONGLE_ADAPTER_FRAGMENT = "a0_ad_9f_7a_15_8e"
+# Matches the hciN adapter name in an oFono HFP modem path.
+# oFono paths: /hfp/org/bluez/hciN/dev_XX_XX_XX_XX_XX_XX
+_HCI_RE = _re.compile(r'\b(hci\d+)\b')
+
 # USB vendor:product for ASUS USB-BT500 (RTL8761B)
-_DONGLE_USB_VENDOR = "0b05"
-_DONGLE_USB_PRODUCT = "1bf6"
+_RTL8761B_USB_VENDOR = "0b05"
+_RTL8761B_USB_PRODUCT = "1bf6"
 
 _CALL_VOLUME_MAX = 100
 _OFONO_BUS = "org.ofono"
 _IFACE_CALL_VOLUME = "org.ofono.CallVolume"
 
 
-def verify_dongle_adapter(modem_path: str) -> bool:
-    """Return True if modem_path routes through the RTL8761B dongle (hci1).
+def verify_dongle_adapter(modem_path: str, expected_hci: str) -> bool:
+    """Return True if modem_path routes through the expected adapter (hciN).
 
-    Logs a warning if the path suggests the MT7925 built-in adapter, since
-    SCO audio only works reliably on the dongle (validated 2026-06-11).
+    modem_path:   /hfp/org/bluez/hciN/dev_XX_XX_XX_XX_XX_XX
+    expected_hci: the hciN string of the daemon's configured adapter, e.g. "hci1"
     """
-    ok = _DONGLE_ADAPTER_FRAGMENT in str(modem_path).lower()
+    m = _HCI_RE.search(str(modem_path))
+    modem_hci = m.group(1) if m else ""
+    ok = bool(modem_hci) and modem_hci == expected_hci
     if ok:
-        _log.info("call_audio: modem %s on RTL8761B dongle (hci1) ✓", modem_path)
+        _log.info("call_audio: modem %s on expected adapter %s ✓", modem_path, expected_hci)
     else:
         _log.warning(
-            "call_audio: modem %s not on RTL8761B dongle (fragment %r absent) — "
-            "HFP SCO audio likely broken. Connect iPhone to the ASUS USB-BT500 (hci1).",
-            modem_path,
-            _DONGLE_ADAPTER_FRAGMENT,
+            "call_audio: modem %s on adapter %r (expected %r) — "
+            "HFP SCO audio likely broken",
+            modem_path, modem_hci or "?", expected_hci,
         )
     return ok
 
@@ -59,7 +63,7 @@ def verify_usb_autosuspend_off() -> bool:
         try:
             vendor = (dev / "idVendor").read_text().strip()
             product = (dev / "idProduct").read_text().strip()
-            if vendor != _DONGLE_USB_VENDOR or product != _DONGLE_USB_PRODUCT:
+            if vendor != _RTL8761B_USB_VENDOR or product != _RTL8761B_USB_PRODUCT:
                 continue
             control = dev / "power" / "control"
             if not control.exists():
@@ -77,7 +81,7 @@ def verify_usb_autosuspend_off() -> bool:
         except OSError:
             continue
     _log.debug("call_audio: dongle %s:%s not found in /sys — skipping autosuspend check",
-               _DONGLE_USB_VENDOR, _DONGLE_USB_PRODUCT)
+               _RTL8761B_USB_VENDOR, _RTL8761B_USB_PRODUCT)
     return True
 
 

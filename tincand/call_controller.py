@@ -45,7 +45,7 @@ class CallController:
     TincanService via set_call_controller().
     """
 
-    def __init__(self, service: object, contact_store: object, device_addr: str = "") -> None:
+    def __init__(self, service: object, contact_store: object, device_addr: str = "", adapter_hci: str = "") -> None:
         if not is_call_setup_ready():
             _log.warning(
                 "CallController: call_setup_ready is False — "
@@ -55,6 +55,7 @@ class CallController:
         self._service = service
         self._contact_store = contact_store
         self._mac_fragment: str = device_addr.lower().replace(":", "_")
+        self._adapter_hci: str = adapter_hci
         self._calls: dict[str, CallState] = {}
         self._modem_path: str | None = None
         self._vcm = None  # org.ofono.VoiceCallManager proxy
@@ -133,7 +134,7 @@ class CallController:
         import dbus
 
         _log.info("CallController: bound to HFP modem %s", path)
-        call_audio.verify_dongle_adapter(path)
+        call_audio.verify_dongle_adapter(path, self._adapter_hci)
         call_audio.verify_usb_autosuspend_off()
         self._modem_path = path
         self._retry_index = 0

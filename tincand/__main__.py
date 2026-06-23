@@ -166,6 +166,8 @@ def main() -> None:
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
     adapter_path, adapter_path_requested = _resolve_adapter_path(args)
+    _hci_m = re.search(r'(hci\d+)$', adapter_path)
+    adapter_hci = _hci_m.group(1) if _hci_m else ""
     backend = _select_backend(args, adapter_path)
 
     from tincand.dbus_service import TincanService
@@ -189,7 +191,7 @@ def main() -> None:
 
     from tincand.call_controller import CallController
     _device_addr = args.device or os.environ.get("TINCAN_DEVICE", "")
-    call_controller = CallController(service, service._contact_store, device_addr=_device_addr)
+    call_controller = CallController(service, service._contact_store, device_addr=_device_addr, adapter_hci=adapter_hci)
     service.set_call_controller(call_controller)
 
     if args.with_ancs and args.backend == "map":
