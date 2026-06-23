@@ -191,7 +191,11 @@ def main() -> None:
 
     from tincand.call_controller import CallController
     _device_addr = args.device or os.environ.get("TINCAN_DEVICE", "")
-    call_controller = CallController(service, service._contact_store, device_addr=_device_addr, adapter_hci=adapter_hci)
+    call_controller = CallController(
+        service, service._contact_store,
+        device_addr=_device_addr,
+        adapter_hci=adapter_hci,
+    )
     service.set_call_controller(call_controller)
 
     if args.with_ancs and args.backend == "map":

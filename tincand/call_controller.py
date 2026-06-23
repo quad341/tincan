@@ -45,7 +45,13 @@ class CallController:
     TincanService via set_call_controller().
     """
 
-    def __init__(self, service: object, contact_store: object, device_addr: str = "", adapter_hci: str = "") -> None:
+    def __init__(
+        self,
+        service: object,
+        contact_store: object,
+        device_addr: str = "",
+        adapter_hci: str = "",
+    ) -> None:
         if not is_call_setup_ready():
             _log.warning(
                 "CallController: call_setup_ready is False — "
