@@ -1,5 +1,5 @@
 """Tests: tincand/call_controller.py — CallController decision paths.
-Bead: tincan-z2l9w
+Bead: tincan-z2l9w, tincan-hzcfj.2
 
 Coverage:
   §1 __init__ — is_call_setup_ready()=False logs WARNING
@@ -10,6 +10,9 @@ Coverage:
      normal active fires on_call_connected
   §6 _discover_modem — prefers the Online HFP modem over an offline one
      (tincan-a6yeb: dual-adapter dial regression)
+  §7 adapter_hci — constructor stores kwarg as self._adapter_hci (tincan-hzcfj.2)
+  §8 _bind_modem propagation — adapter_hci forwarded to verify_dongle_adapter (tincan-hzcfj.2)
+  §9 __main__ hciN extraction — regex derives hciN from adapter_path (tincan-hzcfj.2)
 """
 from __future__ import annotations
 
@@ -22,7 +25,7 @@ import pytest
 # Helpers — build a CallController with all external deps mocked
 # ---------------------------------------------------------------------------
 
-def _make_controller(*, setup_ready: bool = True, device_addr: str = "D0:6B:78:33:46:20"):
+def _make_controller(*, setup_ready: bool = True, device_addr: str = "D0:6B:78:33:46:20", adapter_hci: str = ""):
     """Return a CallController with dbus and GLib fully mocked.
 
     Patches:
@@ -47,7 +50,7 @@ def _make_controller(*, setup_ready: bool = True, device_addr: str = "D0:6B:78:3
     ):
         mock_glib.timeout_add.return_value = 42
         from tincand.call_controller import CallController
-        ctrl = CallController(service, contact_store, device_addr=device_addr)
+        ctrl = CallController(service, contact_store, device_addr=device_addr, adapter_hci=adapter_hci)
 
     ctrl._service = service
     return ctrl
@@ -309,3 +312,85 @@ class TestDiscoverModemOnlinePreference:
         modems = [(android_path, {"Type": "hfp", "Online": True})]
         ctrl = _make_controller_with_modems(modems)
         assert ctrl._modem_path is None
+
+
+# ---------------------------------------------------------------------------
+# §7 adapter_hci — constructor stores kwarg (tincan-hzcfj.2)
+# ---------------------------------------------------------------------------
+
+class TestConstructorAdapterHci:
+    """CallController stores the adapter_hci kwarg as self._adapter_hci."""
+
+    def test_stores_supplied_adapter_hci(self):
+        ctrl = _make_controller(adapter_hci="hci1")
+        assert ctrl._adapter_hci == "hci1"
+
+    def test_default_adapter_hci_is_empty_string(self):
+        ctrl = _make_controller()
+        assert ctrl._adapter_hci == ""
+
+
+# ---------------------------------------------------------------------------
+# §8 _bind_modem propagation — adapter_hci forwarded to verify_dongle_adapter
+#    (tincan-hzcfj.2)
+# ---------------------------------------------------------------------------
+
+class TestBindModemAdapterHciPropagation:
+    """_bind_modem passes self._adapter_hci to call_audio.verify_dongle_adapter."""
+
+    def test_passes_hci1_to_verify_dongle_adapter(self):
+        ctrl = _make_controller(adapter_hci="hci1")
+        modem_path = "/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20"
+        with (
+            patch("tincand.call_controller.call_audio") as mock_ca,
+            patch("dbus.Interface") as mock_iface,
+        ):
+            mock_iface.return_value.GetCalls.return_value = []
+            ctrl._bind_modem(modem_path)
+            mock_ca.verify_dongle_adapter.assert_called_once_with(modem_path, "hci1")
+
+    def test_passes_empty_hci_no_exception(self):
+        ctrl = _make_controller(adapter_hci="")
+        modem_path = "/hfp/org/bluez/hci0/dev_D0_6B_78_33_46_20"
+        with (
+            patch("tincand.call_controller.call_audio") as mock_ca,
+            patch("dbus.Interface") as mock_iface,
+        ):
+            mock_ca.verify_dongle_adapter.return_value = False
+            mock_iface.return_value.GetCalls.return_value = []
+            ctrl._bind_modem(modem_path)
+            mock_ca.verify_dongle_adapter.assert_called_once_with(modem_path, "")
+
+
+# ---------------------------------------------------------------------------
+# §9 __main__ hciN extraction — regex pattern (tincan-hzcfj.2)
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+class TestMainAdapterHciExtraction:
+    """adapter_hci is derived from adapter_path by extracting trailing hciN.
+
+    This mirrors the logic in tincand/__main__.py:
+        _hci_m = re.search(r'(hci\\d+)$', adapter_path)
+        adapter_hci = _hci_m.group(1) if _hci_m else ""
+    """
+
+    _PATTERN = r"(hci\d+)$"
+
+    def _extract(self, adapter_path: str) -> str:
+        m = _re.search(self._PATTERN, adapter_path)
+        return m.group(1) if m else ""
+
+    def test_hci1_extracted(self):
+        assert self._extract("/org/bluez/hci1") == "hci1"
+
+    def test_hci0_extracted(self):
+        assert self._extract("/org/bluez/hci0") == "hci0"
+
+    def test_empty_path_yields_empty(self):
+        assert self._extract("") == ""
+
+    def test_path_without_hci_yields_empty(self):
+        assert self._extract("/org/bluez/adapter0") == ""
