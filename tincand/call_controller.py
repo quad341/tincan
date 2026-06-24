@@ -21,6 +21,7 @@ _log = logging.getLogger(__name__)
 
 _OFONO_BUS = "org.ofono"
 _IFACE_MANAGER = "org.ofono.Manager"
+_IFACE_MODEM = "org.ofono.Modem"
 _IFACE_VCM = "org.ofono.VoiceCallManager"
 _IFACE_CALL = "org.ofono.VoiceCall"
 
@@ -45,7 +46,13 @@ class CallController:
     TincanService via set_call_controller().
     """
 
-    def __init__(self, service: object, contact_store: object, device_addr: str = "") -> None:
+    def __init__(
+        self,
+        service: object,
+        contact_store: object,
+        device_addr: str = "",
+        adapter_hci: str = "",
+    ) -> None:
         if not is_call_setup_ready():
             _log.warning(
                 "CallController: call_setup_ready is False — "
@@ -55,6 +62,7 @@ class CallController:
         self._service = service
         self._contact_store = contact_store
         self._mac_fragment: str = device_addr.lower().replace(":", "_")
+        self._adapter_hci: str = adapter_hci
         self._calls: dict[str, CallState] = {}
         self._modem_path: str | None = None
         self._vcm = None  # org.ofono.VoiceCallManager proxy
@@ -62,6 +70,8 @@ class CallController:
         self._audio_setup_timer_id: int | None = None
         self._sco_links: list[tuple[str, str]] = []
         self._retry_index: int = 0
+        self._pending_online_path: str | None = None
+        self._pending_subscription: object | None = None  # dbus SignalMatch
         self._system_bus = None
         self._manager = None
 
@@ -101,21 +111,39 @@ class CallController:
             self._schedule_retry()
             return
 
-        # Prefer an Online iPhone HFP modem. An offline modem — e.g. a stale
-        # entry on a second adapter the phone isn't actively connected through —
-        # exposes no VoiceCallManager, so binding it makes every Dial/Answer
-        # fail with UnknownMethod. Bind the live one.
+        def _rank(path: str, online: bool) -> int:
+            is_pref = bool(self._adapter_hci) and f"/{self._adapter_hci}/" in path
+            return (not is_pref) * 2 + (not online)
+
         candidates = [
             (str(path), bool(dict(props).get("Online", False)))
             for path, props in modems
             if self._is_hfp_iphone_modem(str(path), dict(props))
         ]
-        if candidates:
-            candidates.sort(key=lambda c: not c[1])  # Online first
-            self._bind_modem(candidates[0][0])
+        if not candidates:
+            self._schedule_retry()
             return
 
-        self._schedule_retry()
+        candidates.sort(key=lambda c: _rank(c[0], c[1]))
+        top_path, top_online = candidates[0]
+        top_rank = _rank(top_path, top_online)
+
+        if top_rank == 1:
+            # Preferred adapter modem exists but is Offline — defer bind
+            if top_path != self._pending_online_path:
+                self._subscribe_modem_online(top_path)
+            return
+
+        # Ranks 0, 2, 3: bind immediately
+        if top_rank >= 2:
+            _log.warning(
+                "CallController: preferred adapter %s not available — "
+                "binding fallback %s",
+                self._adapter_hci or "(none configured)",
+                top_path,
+            )
+        self._cancel_pending_subscription()
+        self._bind_modem(top_path)
 
     def _schedule_retry(self) -> None:
         if self._retry_index >= len(_RETRY_STEPS):
@@ -129,11 +157,71 @@ class CallController:
         self._discover_modem()
         return False
 
+    def _subscribe_modem_online(self, path: str) -> None:
+        import dbus
+
+        self._cancel_pending_subscription()
+        self._pending_online_path = path
+        modem_obj = self._system_bus.get_object(_OFONO_BUS, path)
+        modem_iface = dbus.Interface(modem_obj, _IFACE_MODEM)
+        self._pending_subscription = modem_iface.connect_to_signal(
+            "PropertyChanged",
+            lambda name, value: self._on_pending_modem_property_changed(path, name, value),
+        )
+        _log.info(
+            "CallController: preferred adapter %s modem is Offline — "
+            "deferring bind, watching PropertyChanged",
+            self._adapter_hci,
+        )
+
+    def _cancel_pending_subscription(self) -> None:
+        if self._pending_subscription is not None:
+            try:
+                self._pending_subscription.remove()
+            except Exception:
+                pass
+            self._pending_subscription = None
+        self._pending_online_path = None
+
+    def _on_pending_modem_property_changed(self, path: str, name: str, value: object) -> None:
+        if str(name) != "Online" or not bool(value):
+            return
+        if path != self._pending_online_path:
+            return
+        _log.info(
+            "CallController: %s went Online — binding (preferred adapter %s)",
+            path,
+            self._adapter_hci,
+        )
+        self._cancel_pending_subscription()
+        self._bind_modem(path)
+
     def _bind_modem(self, path: str) -> None:
         import dbus
 
-        _log.info("CallController: bound to HFP modem %s", path)
-        call_audio.verify_dongle_adapter(path)
+        is_preferred = bool(self._adapter_hci) and f"/{self._adapter_hci}/" in path
+        if is_preferred and self._modem_path is not None and self._modem_path != path:
+            _log.info(
+                "CallController: re-binding to preferred adapter %s modem "
+                "(was bound to %s)",
+                self._adapter_hci,
+                self._modem_path,
+            )
+        elif is_preferred:
+            _log.info(
+                "CallController: bound to HFP modem %s (preferred adapter %s)",
+                path,
+                self._adapter_hci,
+            )
+        else:
+            _log.warning(
+                "CallController: bound to HFP modem %s "
+                "(fallback — preferred adapter %s not available)",
+                path,
+                self._adapter_hci or "not configured",
+            )
+        self._cancel_pending_subscription()
+        call_audio.verify_dongle_adapter(path, self._adapter_hci)
         call_audio.verify_usb_autosuspend_off()
         self._modem_path = path
         self._retry_index = 0
@@ -148,11 +236,26 @@ class CallController:
             _log.debug("CallController: GetCalls failed: %s", exc)
 
     def _on_modem_added(self, path: str, props: dict) -> None:
-        if self._modem_path is None and self._is_hfp_iphone_modem(str(path), dict(props)):
-            self._bind_modem(str(path))
+        path = str(path)
+        props = dict(props)
+        if not self._is_hfp_iphone_modem(path, props):
+            return
+
+        is_preferred = bool(self._adapter_hci) and f"/{self._adapter_hci}/" in path
+        if is_preferred:
+            self._cancel_pending_subscription()
+            self._discover_modem()
+        elif self._modem_path is None and self._pending_online_path is None:
+            self._discover_modem()
 
     def _on_modem_removed(self, path: str) -> None:
-        if str(path) != self._modem_path:
+        path = str(path)
+
+        if path == self._pending_online_path:
+            self._cancel_pending_subscription()
+            self._schedule_retry()
+
+        if path != self._modem_path:
             return
         _log.info("CallController: HFP modem removed — clearing state")
         had_calls = bool(self._calls)
