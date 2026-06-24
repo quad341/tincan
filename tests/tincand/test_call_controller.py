@@ -173,15 +173,18 @@ class TestAudioTimeout:
     def test_call_audio_error_flag_set_true(self, ctrl):
         cs = _add_fake_call(ctrl, "call0", state="active")
         assert cs.audio_error is False
+        ctrl._audio_timer_call_id = "call0"
         ctrl._on_audio_timeout()
         assert cs.audio_error is True
 
-    def test_all_calls_flagged_on_timeout(self, ctrl):
+    def test_only_timed_out_call_flagged_on_timeout(self, ctrl):
+        # FR2: audio_error scoped to _audio_timer_call_id; other calls untouched
         cs_a = _add_fake_call(ctrl, "call0", state="active")
         cs_b = _add_fake_call(ctrl, "call1", state="active")
+        ctrl._audio_timer_call_id = "call0"
         ctrl._on_audio_timeout()
         assert cs_a.audio_error is True
-        assert cs_b.audio_error is True
+        assert cs_b.audio_error is False
 
     def test_timer_id_cleared_after_timeout(self, ctrl):
         ctrl._audio_timer_id = 42
@@ -227,10 +230,11 @@ class TestCallPropertyChangedActive:
         ctrl._service.on_call_connected.assert_called_once()
         ctrl._service.on_audio_restored.assert_not_called()
 
-    def test_terminated_fires_call_ended(self, ctrl):
+    def test_terminated_does_not_fire_call_ended(self, ctrl):
+        # FR3: terminated in PropertyChanged defers teardown to CallRemoved
         _add_fake_call(ctrl, state="active")
         ctrl._on_call_property_changed("call0", "State", "terminated")
-        ctrl._service.on_call_ended.assert_called_once()
+        ctrl._service.on_call_ended.assert_not_called()
 
     def test_non_state_property_change_ignored(self, ctrl):
         _add_fake_call(ctrl, state="active")
