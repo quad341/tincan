@@ -39,15 +39,23 @@ from tincan_gui import trace as _trace
 from tincan_gui.ancs_status_dot import ANCSStatusDot
 from tincan_gui.avatar import _color_for_name
 from tincan_gui.bug_report import write_report as _write_bug_report
-from tincan_gui.call_panel import AudioErrorPanel, DTMFKeypad, InCallPanel, IncomingCallDialog
+from tincan_gui.call_panel import (
+    AudioErrorPanel,
+    CallEntry,
+    CallWaitingDialog,
+    DTMFKeypad,
+    InCallPanel,
+    IncomingCallDialog,
+    MultiCallPanel,
+)
 from tincan_gui.compose_panel import ComposePanel
 from tincan_gui.conversation_list import ConversationData, ConversationListWidget
 from tincan_gui.daemon_config import DaemonConfig, load_daemon_config, save_daemon_config
 from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
-    ANCSRepairBanner,
     AdapterUnavailableBanner,
+    ANCSRepairBanner,
     CallSetupRequiredBanner,
     ContactsEmptyBanner,
     StateABanner,
@@ -530,7 +538,9 @@ class MainWindow(QMainWindow):
         self._call_caller_name: str = ""
         self._call_setup_ready: bool = True
         self._incall_dialog: IncomingCallDialog | None = None
-        self._incall_panel: InCallPanel | None = None
+        self._incall_panel: MultiCallPanel | None = None
+        self._current_calls: list[CallEntry] = []
+        self._waiting_call_id: str = ""
         self._audio_err_panel: AudioErrorPanel | None = None
         self._dtmf_page: QWidget | None = None
         self._dtmf_keypad: DTMFKeypad | None = None
@@ -662,12 +672,14 @@ class MainWindow(QMainWindow):
         c.message_send_failed.connect(self._on_send_failed)
         self.refresh_requested.connect(self._load_conversations)
         self.refresh_requested.connect(self._dbus_client.refresh_contacts)
-        # HFP call signals (tincan-fx79v.2)
+        # HFP call signals (tincan-fx79v.2 / tincan-nd6pt)
         c.call_incoming.connect(self._on_call_incoming)
         c.call_connected.connect(self._on_call_connected)
         c.call_ended.connect(self._on_call_ended)
         c.audio_error.connect(self._on_audio_error)
         c.audio_restored.connect(self._on_audio_restored)
+        c.call_waiting.connect(self._on_call_waiting)
+        c.call_held.connect(self._on_call_held)
 
     def _maybe_spawn_daemon(self) -> None:
         """Spawn tincand if config has a device and no spawn has been attempted yet."""
@@ -1433,19 +1445,31 @@ class MainWindow(QMainWindow):
         self._dbus_client.hangup()
         self._incall_dialog = None
 
-    def _enter_call(self, caller_name: str) -> None:
-        """Build pages 1-2 and switch compose_stack to InCallPanel (page 1).
+    def _enter_call(self, caller_name: str, call_id: str = "") -> None:
+        """Build pages 1-2 and switch compose_stack to MultiCallPanel (page 1).
 
         Page 3 (DTMFKeypad+InCallPanel) is created lazily on first keypad open
         so the embedded InCallPanel timer is synced to the actual call elapsed time.
         """
         self._incall_dialog = None
         self._call_caller_name = caller_name
+        self._current_calls = [
+            CallEntry(call_id=call_id, name=caller_name, avatar_pixmap=None, state="active")
+        ]
+        c = self._dbus_client
 
-        # Page 1: InCallPanel
-        self._incall_panel = InCallPanel(caller_name, None, self._compose_stack)
-        self._incall_panel.hang_up_requested.connect(self._on_hang_up)
+        # Page 1: MultiCallPanel
+        self._incall_panel = MultiCallPanel(self._compose_stack)
+        self._incall_panel.update_calls(self._current_calls)
+        self._incall_panel.hang_up_requested.connect(c.hangup)
         self._incall_panel.keypad_toggled.connect(self._on_keypad_toggled)
+        self._incall_panel.swap_requested.connect(c.swap_calls)
+        self._incall_panel.end_all_requested.connect(self._on_end_all)
+        self._incall_panel.hold_and_answer_requested.connect(c.hold_and_answer)
+        self._incall_panel.release_and_answer_requested.connect(c.release_and_answer)
+        self._incall_panel.decline_waiting_requested.connect(
+            lambda: c.hangup(self._waiting_call_id)
+        )
         self._compose_stack.insertWidget(self._PAGE_INCALL, self._incall_panel)
 
         # Page 2: AudioErrorPanel
@@ -1490,6 +1514,8 @@ class MainWindow(QMainWindow):
                 w.deleteLater()
                 setattr(self, attr, None)
         self._dtmf_keypad = None
+        self._current_calls = []
+        self._waiting_call_id = ""
 
     def _on_call_connected(self) -> None:
         """CallConnected: ensure we're on the InCallPanel page (answer already switches)."""
@@ -1506,6 +1532,44 @@ class MainWindow(QMainWindow):
     def _on_audio_restored(self) -> None:
         if self._incall_panel is not None:
             self._compose_stack.setCurrentIndex(self._PAGE_INCALL)
+
+    def _on_call_waiting(
+        self, waiting_call_id: str, waiting_number: str, waiting_name: str
+    ) -> None:
+        """Show CallWaitingDialog for an incoming waiting call."""
+        if self._incall_panel is None:
+            return
+        self._waiting_call_id = waiting_call_id
+        c = self._dbus_client
+        dlg = CallWaitingDialog(
+            waiting_name=waiting_name or waiting_number,
+            waiting_number=waiting_number,
+            active_name=self._call_caller_name,
+            active_elapsed=self._incall_panel.elapsed,
+            parent=self,
+        )
+        dlg.hold_and_answer_requested.connect(c.hold_and_answer)
+        dlg.release_and_answer_requested.connect(c.release_and_answer)
+        dlg.declined.connect(lambda: c.hangup(waiting_call_id))
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+
+    def _on_call_held(self, call_id: str, _number: str) -> None:
+        """Update the panel when a call transitions to held state."""
+        if self._incall_panel is None:
+            return
+        for entry in self._current_calls:
+            if entry.call_id == call_id or not call_id:
+                entry.state = "held"
+                break
+        self._incall_panel.update_calls(self._current_calls)
+
+    def _on_end_all(self) -> None:
+        """Hang up all currently tracked calls."""
+        c = self._dbus_client
+        for entry in list(self._current_calls):
+            c.hangup(entry.call_id)
 
     def _on_hang_up(self) -> None:
         self._dbus_client.hangup()
