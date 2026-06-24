@@ -84,6 +84,9 @@ _GUI_SUBSCRIPTIONS: list[tuple[str, str, str, str]] = [
     (IFACE_CALLS, "CallEnded",      "_on_call_ended",     ""),
     (IFACE_CALLS, "AudioError",     "_on_audio_error",    "QString"),
     (IFACE_CALLS, "AudioRestored",  "_on_audio_restored", ""),
+    # im.tincan.Calls — multi-call signals (tincan-nd6pt)
+    (IFACE_CALLS, "CallWaiting",    "_on_call_waiting",   "QString,QString,QString"),
+    (IFACE_CALLS, "CallHeld",       "_on_call_held",      "QString,QString"),
 ]
 
 # (interface, method_name) — every iface.call()/asyncCall()/_dbus_call() in TincandClient
@@ -106,6 +109,7 @@ _GUI_METHOD_CALLS: list[tuple[str, str]] = [
     (IFACE_CALLS, "Answer"),
     (IFACE_CALLS, "Hangup"),
     (IFACE_CALLS, "SendDtmf"),
+    # HoldAndAnswer, ReleaseAndAnswer, SwapCalls omitted — tincan-zn064 not yet live
 ]
 
 # D-Bus signature → expected @Slot argument count (used in compatibility checks)
