@@ -460,6 +460,10 @@ class CallWaitingDialog(QDialog):
         self.declined.emit()
         self.reject()
 
+    def reject(self) -> None:
+        self.declined.emit()
+        super().reject()
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
         if key == Qt.Key.Key_H:
