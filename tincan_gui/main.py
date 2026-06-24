@@ -1409,7 +1409,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     # HFP call state machine (tincan-fx79v.2)
-    # Pages: 0=ComposePanel, 1=InCallPanel, 2=AudioErrorPanel, 3=DTMFPage
+    # Pages: 0=ComposePanel, 1=MultiCallPanel, 2=AudioErrorPanel, 3=DTMFPage
     # ------------------------------------------------------------------
 
     _PAGE_COMPOSE = 0
@@ -1542,7 +1542,7 @@ class MainWindow(QMainWindow):
         self._waiting_call_id = waiting_call_id
         c = self._dbus_client
         dlg = CallWaitingDialog(
-            waiting_name=waiting_name or waiting_number,
+            waiting_name=waiting_name,
             waiting_number=waiting_number,
             active_name=self._call_caller_name,
             active_elapsed=self._incall_panel.elapsed,
@@ -1560,7 +1560,7 @@ class MainWindow(QMainWindow):
         if self._incall_panel is None:
             return
         for entry in self._current_calls:
-            if entry.call_id == call_id or not call_id:
+            if entry.call_id == call_id or not call_id:  # empty call_id = apply to any call
                 entry.state = "held"
                 break
         self._incall_panel.update_calls(self._current_calls)
