@@ -111,6 +111,11 @@ _GUI_METHOD_CALLS: list[tuple[str, str]] = [
     (IFACE_CALLS, "Answer"),
     (IFACE_CALLS, "Hangup"),
     (IFACE_CALLS, "SendDtmf"),
+    # multi-call methods (tincan-o9klv)
+    (IFACE_CALLS, "GetCalls"),
+    (IFACE_CALLS, "SwapCalls"),
+    (IFACE_CALLS, "HoldAndAnswer"),
+    (IFACE_CALLS, "ReleaseAndAnswer"),
 ]
 
 # D-Bus signature → expected @Slot argument count (used in compatibility checks)

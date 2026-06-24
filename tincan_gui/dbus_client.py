@@ -764,6 +764,27 @@ class TincandClient(QObject):
             _log.debug("dial(%r) failed: %s", number, exc)
             return ""
 
+    def get_calls(self) -> list[tuple[str, str, str, str]]:
+        """Return the list of active calls as (call_id, number, state, direction) tuples."""
+        try:
+            result = self._dbus_call(_IFACE_CALLS, "GetCalls")
+            return [(str(c[0]), str(c[1]), str(c[2]), str(c[3])) for c in (result or [])]
+        except Exception as exc:
+            _log.debug("get_calls() failed: %s", exc)
+            return []
+
+    def swap_calls(self) -> None:
+        """Swap the active and held calls via HFP."""
+        self._dbus_call(_IFACE_CALLS, "SwapCalls")
+
+    def hold_and_answer(self) -> None:
+        """Put the active call on hold and answer the waiting call."""
+        self._dbus_call(_IFACE_CALLS, "HoldAndAnswer")
+
+    def release_and_answer(self) -> None:
+        """Release the active call and answer the waiting call."""
+        self._dbus_call(_IFACE_CALLS, "ReleaseAndAnswer")
+
     def send_dtmf(self, key: str) -> None:
         """Send a DTMF tone during an active HFP call.
 
