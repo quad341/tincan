@@ -15,6 +15,8 @@ Coverage:
   §10 Adapter-aware modem selection — 6 NF1 scenarios (tincan-aggkh / tincan-3vc85):
       cold-start-both-offline, preferred-online, only-fallback-online, re-bind,
       no-adapter-configured, subscription-cleanup
+  §11 T3/T4/FR6 additions (tincan-8gpmz):
+      §D/§E via lambda capture, §I idempotent cancel, §J hci10 disambiguation, FR6 SetProperty
 """
 from __future__ import annotations
 
@@ -509,6 +511,38 @@ class TestColdStartBothOffline:
         ctrl._on_pending_modem_property_changed(_FALLBACK_PATH, "Online", True)
         assert ctrl._modem_path is None
 
+    def test_lambda_callback_triggers_preferred_bind(self):
+        """T3/§D: PropertyChanged lambda from connect_to_signal fires bind correctly."""
+        modems = [(_PREFERRED_PATH, _HFP_OFFLINE), (_FALLBACK_PATH, _HFP_OFFLINE)]
+        ctrl, mock_mgr = _make_adapter_ctrl(modems)
+        callback = next(
+            c[0][1]
+            for c in mock_mgr.connect_to_signal.call_args_list
+            if c[0][0] == "PropertyChanged"
+        )
+        with (
+            patch("dbus.Interface", return_value=mock_mgr),
+            patch("tincand.call_controller.call_audio"),
+        ):
+            callback("Online", True)
+        assert ctrl._modem_path == _PREFERRED_PATH
+
+    def test_lambda_callback_with_superseded_path_is_ignored(self):
+        """T3/§E: lambda captured for old path is a no-op after subscription superseded."""
+        modems = [(_PREFERRED_PATH, _HFP_OFFLINE), (_FALLBACK_PATH, _HFP_OFFLINE)]
+        ctrl, mock_mgr = _make_adapter_ctrl(modems)
+        callback = next(
+            c[0][1]
+            for c in mock_mgr.connect_to_signal.call_args_list
+            if c[0][0] == "PropertyChanged"
+        )
+        # Simulate subscription superseded: pending path changed to something else
+        ctrl._pending_online_path = _FALLBACK_PATH
+        # Fire the old lambda (closure still captures _PREFERRED_PATH)
+        callback("Online", True)
+        # Stale-path guard: _PREFERRED_PATH != _FALLBACK_PATH → no bind
+        assert ctrl._modem_path is None
+
 
 class TestPreferredOnlineAtDiscovery:
     """Scenario 2: preferred hci1 Online at discovery time (tincan-aggkh).
@@ -693,3 +727,115 @@ class TestSubscriptionCleanup:
         modems = [(_PREFERRED_PATH, _HFP_ONLINE)]
         ctrl, _ = _make_adapter_ctrl(modems)
         assert ctrl._pending_subscription is None
+
+    def test_cancel_idempotent_on_double_call(self):
+        """§I: _cancel_pending_subscription does not raise when called twice consecutively."""
+        modems = [(_PREFERRED_PATH, _HFP_OFFLINE)]
+        ctrl, _ = _make_adapter_ctrl(modems)
+        ctrl._cancel_pending_subscription()  # first: clears both fields
+        ctrl._cancel_pending_subscription()  # second: already None, must not raise
+        assert ctrl._pending_subscription is None
+        assert ctrl._pending_online_path is None
+
+
+# ---------------------------------------------------------------------------
+# §11 Adapter-aware modem selection — T4 + FR6 additions (tincan-8gpmz)
+#
+# §J: hci10/hci1 disambiguation — preference check uses /{hci}/ (slashed)
+#     so /hci10/ does not match adapter_hci="hci1". (tincan-t9met R5)
+# FR6: proactive SetProperty Powered=true on preferred Offline modem.
+#     (tincan-odlh9)
+# ---------------------------------------------------------------------------
+
+_HCI10_PATH = "/hfp/org/bluez/hci10/dev_d0_6b_78_33_46_20"
+
+
+class TestHciDisambiguation:
+    """§J: adapter_hci='hci1' does NOT match /hci10/ paths (tincan-8gpmz / tincan-t9met R5).
+
+    Three cases distinguish correct (slashed) from wrong (bare substring) behaviour:
+    (a) hci10 Online logged as fallback WARNING — not preferred INFO;
+    (b) hci10 Offline triggers immediate fallback bind, not deferred subscription;
+    (c) hci1 wins preference over hci10 when both are present.
+    """
+
+    def test_hci10_online_logged_as_fallback_not_preferred(self, caplog):
+        """hci10 Online → fallback WARNING; bare-substring impl would emit INFO instead."""
+        modems = [
+            (_HCI10_PATH,    _HFP_ONLINE),
+            (_FALLBACK_PATH, _HFP_OFFLINE),
+        ]
+        with caplog.at_level(logging.WARNING, logger="tincand.call_controller"):
+            ctrl, _ = _make_adapter_ctrl(modems, adapter_hci="hci1")
+        assert ctrl._modem_path == _HCI10_PATH
+        assert any(
+            ("fallback" in r.message or "not available" in r.message)
+            and r.levelno == logging.WARNING
+            for r in caplog.records
+        )
+
+    def test_hci10_offline_no_deferred_bind_subscription(self):
+        """hci10 Offline → immediate fallback bind; bare-substring impl would defer."""
+        modems = [(_HCI10_PATH, _HFP_OFFLINE)]
+        ctrl, _ = _make_adapter_ctrl(modems, adapter_hci="hci1")
+        assert ctrl._modem_path == _HCI10_PATH
+        assert ctrl._pending_online_path is None
+
+    def test_hci1_preferred_over_hci10_when_both_online(self):
+        """hci1 wins rank=0; hci10 (non-preferred) ranks 2 — hci1 binds."""
+        modems = [
+            (_HCI10_PATH,    _HFP_ONLINE),
+            (_PREFERRED_PATH, _HFP_ONLINE),
+        ]
+        ctrl, _ = _make_adapter_ctrl(modems, adapter_hci="hci1")
+        assert ctrl._modem_path == _PREFERRED_PATH
+
+
+class TestFR6SetPropertyPowered:
+    """FR6: proactive SetProperty Powered=true on preferred Offline modem (tincan-8gpmz / tincan-odlh9).
+
+    When rank=1 (preferred modem Offline), _subscribe_modem_online calls
+    SetProperty("Powered", dbus.Boolean(True)) on the modem proxy before the
+    PropertyChanged subscription. Errors from SetProperty are suppressed; the
+    subscription is created regardless.
+    """
+
+    def test_set_property_powered_called_at_rank1(self):
+        """SetProperty('Powered') invoked on modem proxy when rank=1 (preferred Offline)."""
+        modems = [(_PREFERRED_PATH, _HFP_OFFLINE), (_FALLBACK_PATH, _HFP_OFFLINE)]
+        _, mock_mgr = _make_adapter_ctrl(modems)
+        powered_calls = [
+            c for c in mock_mgr.SetProperty.call_args_list
+            if c[0][0] == "Powered"
+        ]
+        assert len(powered_calls) == 1
+
+    def test_set_property_not_called_when_preferred_already_online(self):
+        """SetProperty('Powered') NOT called when preferred modem is already Online (rank=0)."""
+        modems = [(_PREFERRED_PATH, _HFP_ONLINE)]
+        _, mock_mgr = _make_adapter_ctrl(modems)
+        powered_calls = [
+            c for c in mock_mgr.SetProperty.call_args_list
+            if c[0][0] == "Powered"
+        ]
+        assert len(powered_calls) == 0
+
+    def test_set_property_not_called_without_adapter_hci(self):
+        """With adapter_hci='', no deferred-bind path — SetProperty('Powered') not called."""
+        modems = [(_PREFERRED_PATH, _HFP_OFFLINE), (_FALLBACK_PATH, _HFP_OFFLINE)]
+        _, mock_mgr = _make_adapter_ctrl(modems, adapter_hci="")
+        powered_calls = [
+            c for c in mock_mgr.SetProperty.call_args_list
+            if c[0][0] == "Powered"
+        ]
+        assert len(powered_calls) == 0
+
+    def test_set_property_error_suppressed_subscription_still_created(self):
+        """SetProperty exception does not propagate; _pending_subscription is still set."""
+        modems = [(_PREFERRED_PATH, _HFP_ONLINE)]  # bind immediately, no pending sub yet
+        ctrl, mock_mgr = _make_adapter_ctrl(modems)
+        mock_mgr.SetProperty.side_effect = Exception("org.ofono.Error.InProgress")
+        with patch("dbus.Interface", return_value=mock_mgr):
+            ctrl._subscribe_modem_online(_PREFERRED_PATH)
+        assert ctrl._pending_subscription is not None
+        assert ctrl._pending_online_path == _PREFERRED_PATH
