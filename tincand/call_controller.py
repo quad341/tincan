@@ -88,6 +88,8 @@ class CallController:
     # ------------------------------------------------------------------
 
     def _is_hfp_iphone_modem(self, path: str, props: dict) -> bool:
+        if not self._mac_fragment:
+            return False
         return (
             str(props.get("Type", "")) == "hfp"
             and self._mac_fragment in str(path).lower()

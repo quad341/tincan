@@ -174,6 +174,12 @@ def setup_sco_routing(device_mac_fragment: str) -> list[tuple[str, str]]:
     If ports are not yet registered (PipeWire may take ~1s after call active),
     logs a warning and returns an empty list.
     """
+    if not device_mac_fragment:
+        _log.warning(
+            "setup_sco_routing called with empty MAC address — "
+            "skipping PipeWire port wiring"
+        )
+        return []
     mac = device_mac_fragment.lower().replace(":", "_")
 
     outputs = _pw_list_outputs()

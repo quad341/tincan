@@ -122,6 +122,13 @@ class TestIsHfpIphoneModem:
         props = {"Type": "HFP"}
         assert ctrl._is_hfp_iphone_modem(path, props) is False
 
+    def test_false_when_mac_fragment_empty(self):
+        # empty device_addr → mac_fragment="" → vacuous match guard kicks in
+        ctrl = _make_controller(device_addr="")
+        path = "/org/ofono/modem/d0_6b_78_33_46_20_iPhone"
+        props = {"Type": "hfp"}
+        assert ctrl._is_hfp_iphone_modem(path, props) is False
+
 
 # ---------------------------------------------------------------------------
 # §3 _short_id — path component extraction
