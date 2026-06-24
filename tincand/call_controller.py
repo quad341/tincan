@@ -164,6 +164,20 @@ class CallController:
         self._pending_online_path = path
         modem_obj = self._system_bus.get_object(_OFONO_BUS, path)
         modem_iface = dbus.Interface(modem_obj, _IFACE_MODEM)
+        _log.info(
+            "CallController: sending Powered=true to %s (preferred adapter %s) "
+            "to trigger SLC establishment",
+            path,
+            self._adapter_hci,
+        )
+        try:
+            modem_iface.SetProperty("Powered", dbus.Boolean(True))
+        except Exception as exc:
+            _log.debug(
+                "CallController: SetProperty Powered=true on %s suppressed: %s",
+                path,
+                exc,
+            )
         self._pending_subscription = modem_iface.connect_to_signal(
             "PropertyChanged",
             lambda name, value: self._on_pending_modem_property_changed(path, name, value),
