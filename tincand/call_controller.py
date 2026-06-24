@@ -72,6 +72,7 @@ class CallController:
         self._retry_index: int = 0
         self._pending_online_path: str | None = None
         self._pending_subscription: object | None = None  # dbus SignalMatch
+        self._vcm_signal_matches: list = []  # dbus SignalMatch — remove() on rebind
         self._system_bus = None
         self._manager = None
 
@@ -136,7 +137,7 @@ class CallController:
 
         # Ranks 0, 2, 3: bind immediately
         if top_rank >= 2:
-            _log.warning(
+            _log.debug(
                 "CallController: preferred adapter %s not available — "
                 "binding fallback %s",
                 self._adapter_hci or "(none configured)",
@@ -183,9 +184,10 @@ class CallController:
             lambda name, value: self._on_pending_modem_property_changed(path, name, value),
         )
         _log.info(
-            "CallController: preferred adapter %s modem is Offline — "
+            "CallController: preferred adapter %s modem %s is Offline — "
             "deferring bind, watching PropertyChanged",
             self._adapter_hci,
+            path,
         )
 
     def _cancel_pending_subscription(self) -> None:
@@ -197,10 +199,23 @@ class CallController:
             self._pending_subscription = None
         self._pending_online_path = None
 
+    def _cancel_vcm_subscriptions(self) -> None:
+        for match in self._vcm_signal_matches:
+            try:
+                match.remove()
+            except Exception:
+                pass
+        self._vcm_signal_matches = []
+
     def _on_pending_modem_property_changed(self, path: str, name: str, value: object) -> None:
         if str(name) != "Online" or not bool(value):
             return
         if path != self._pending_online_path:
+            _log.debug(
+                "CallController: ignoring stale PropertyChanged from %s (watching %s)",
+                path,
+                self._pending_online_path,
+            )
             return
         _log.info(
             "CallController: %s went Online — binding (preferred adapter %s)",
@@ -212,6 +227,9 @@ class CallController:
 
     def _bind_modem(self, path: str) -> None:
         import dbus
+
+        if self._modem_path and self._modem_path != path:
+            _log.info("CallController: re-binding to %s (was bound to %s)", path, self._modem_path)
 
         is_preferred = bool(self._adapter_hci) and f"/{self._adapter_hci}/" in path
         if is_preferred and self._modem_path is not None and self._modem_path != path:
@@ -235,14 +253,19 @@ class CallController:
                 self._adapter_hci or "not configured",
             )
         self._cancel_pending_subscription()
+        self._cancel_vcm_subscriptions()
         call_audio.verify_dongle_adapter(path, self._adapter_hci)
         call_audio.verify_usb_autosuspend_off()
         self._modem_path = path
         self._retry_index = 0
         vcm_obj = self._system_bus.get_object(_OFONO_BUS, path)
         self._vcm = dbus.Interface(vcm_obj, _IFACE_VCM)
-        self._vcm.connect_to_signal("CallAdded", self._on_call_added)
-        self._vcm.connect_to_signal("CallRemoved", self._on_call_removed)
+        self._vcm_signal_matches.append(
+            self._vcm.connect_to_signal("CallAdded", self._on_call_added)
+        )
+        self._vcm_signal_matches.append(
+            self._vcm.connect_to_signal("CallRemoved", self._on_call_removed)
+        )
         try:
             for call_path, props in self._vcm.GetCalls():
                 self._on_call_added(call_path, props)
@@ -274,6 +297,7 @@ class CallController:
         _log.info("CallController: HFP modem removed — clearing state")
         had_calls = bool(self._calls)
         self._calls.clear()
+        self._cancel_vcm_subscriptions()
         self._vcm = None
         self._modem_path = None
         self._cancel_audio_timer()
