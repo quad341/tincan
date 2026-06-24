@@ -211,7 +211,8 @@ class CallController:
             caller_name = self._contact_store.get_name(number) or ""
             self._service.on_call_incoming(caller_name, number)
         elif state == "waiting":
-            self._service.on_call_waiting(call_id)
+            caller_name = self._contact_store.get_name(number) or ""
+            self._service.on_call_waiting(call_id, number, caller_name)
 
     def _on_call_removed(self, path: str) -> None:
         call_id = self._short_id(str(path))
@@ -236,7 +237,7 @@ class CallController:
         cs.state = new_state
         if new_state == "active":
             self._cancel_audio_timer()
-            self._service.on_call_active(call_id)
+            self._service.on_call_active(call_id, cs.number)
             if cs.audio_error:
                 cs.audio_error = False
                 self._service.on_audio_restored()
@@ -244,7 +245,7 @@ class CallController:
                 self._service.on_call_connected()
             self._schedule_audio_setup()
         elif new_state == "held":
-            self._service.on_call_held(call_id)
+            self._service.on_call_held(call_id, cs.number)
         elif new_state == "terminated":
             pass  # CallRemoved handles teardown once _calls is empty
 
