@@ -845,3 +845,32 @@ class TestFR6SetPropertyPowered:
             ctrl._subscribe_modem_online(_PREFERRED_PATH)
         assert ctrl._pending_subscription is not None
         assert ctrl._pending_online_path == _PREFERRED_PATH
+
+
+# ---------------------------------------------------------------------------
+# §12 _bind_modem integration — real call_audio contract (cross-module arity)
+#
+# Every other controller test patches tincand.call_controller.call_audio, so
+# the verify_dongle_adapter(path, adapter_hci) call site is never exercised
+# against the real function. This binds with call_audio UNPATCHED — only the
+# dbus bus/Interface is stubbed — so a future arity drift between the two
+# modules surfaces as a TypeError here instead of crashing at runtime.
+# ---------------------------------------------------------------------------
+
+class TestBindModemRealCallAudio:
+    """_bind_modem against the real call_audio module must not raise (arity guard)."""
+
+    def test_bind_modem_does_not_raise_with_real_call_audio(self):
+        ctrl = _make_controller(device_addr="D0:6B:78:33:46:20")
+        ctrl._adapter_hci = "hci1"
+        ctrl._system_bus = MagicMock()
+
+        mock_vcm = MagicMock()
+        mock_vcm.GetCalls.return_value = []
+
+        # dbus.Interface is stubbed; call_audio is deliberately NOT patched so
+        # the real verify_dongle_adapter(path, adapter_hci) signature is hit.
+        with patch("dbus.Interface", return_value=mock_vcm):
+            ctrl._bind_modem(_PREFERRED_PATH)
+
+        assert ctrl._modem_path == _PREFERRED_PATH
