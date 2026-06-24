@@ -1,6 +1,6 @@
 # PRD: HFP Modem Selection Race — Adapter-Aware Binding (tincan-3puyb)
 
-**Status:** Draft  
+**Status:** Approved (designer review complete 2026-06-24; pending architect approach decision for FR1–FR3)  
 **Author:** tincan/planner  
 **Date:** 2026-06-24  
 **Source bead:** tincan-3puyb  
@@ -147,6 +147,27 @@ path and whether it is the preferred adapter or a fallback.
 INFO  CallController: bound to HFP modem /hfp/org/bluez/hci1/dev_... (preferred adapter hci1)
 WARN  CallController: bound to HFP modem /hfp/org/bluez/hci0/dev_... (fallback — preferred adapter hci1 not available)
 ```
+
+Additionally, two states introduced by FR2 and FR3 MUST also emit log lines
+(added per designer review 2026-06-24, tincan-rl848):
+
+**FR2 deferred-bind entry (Gap 1):** When the preferred modem is found but
+Offline, and the controller defers binding to wait for `PropertyChanged`:
+
+```
+INFO  CallController: preferred adapter hci1 modem is Offline — deferring bind, watching PropertyChanged
+```
+
+**FR3 re-bind event (Gap 2):** When the controller switches from a
+non-preferred modem to the preferred one that has come Online:
+
+```
+INFO  CallController: re-binding to preferred adapter hci1 modem (was bound to /hfp/org/bluez/hci0/dev_...)
+```
+
+All log lines MUST use the bare `hciN` name (not the full adapter path) in
+the parenthetical and MUST include the full modem path as the primary
+identifier, consistent with the `CallController:` prefix convention.
 
 ### FR6 — Optional: proactively force preferred modem Online
 
