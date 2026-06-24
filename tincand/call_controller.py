@@ -99,6 +99,8 @@ class CallController:
     # ------------------------------------------------------------------
 
     def _is_hfp_iphone_modem(self, path: str, props: dict) -> bool:
+        if not self._mac_fragment:
+            return False
         return (
             str(props.get("Type", "")) == "hfp"
             and self._mac_fragment in str(path).lower()
@@ -228,10 +230,10 @@ class CallController:
     def _bind_modem(self, path: str) -> None:
         import dbus
 
-        if self._modem_path and self._modem_path != path:
+        is_preferred = bool(self._adapter_hci) and f"/{self._adapter_hci}/" in path
+        if self._modem_path and self._modem_path != path and not is_preferred:
             _log.info("CallController: re-binding to %s (was bound to %s)", path, self._modem_path)
 
-        is_preferred = bool(self._adapter_hci) and f"/{self._adapter_hci}/" in path
         if is_preferred and self._modem_path is not None and self._modem_path != path:
             _log.info(
                 "CallController: re-binding to preferred adapter %s modem "

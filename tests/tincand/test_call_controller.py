@@ -3,13 +3,15 @@ Bead: tincan-z2l9w
 
 Coverage:
   §1 __init__ — is_call_setup_ready()=False logs WARNING
-  §2 _is_hfp_iphone_modem — True/False classification branches
+  §2 _is_hfp_iphone_modem — True/False classification branches (inc. empty mac, tincan-5tojh)
   §3 _short_id — path component extraction
   §4 audio timeout — _on_audio_timeout sets audio_error=True and fires on_audio_error
   §5 AudioRestored — active-after-error path fires on_audio_restored;
      normal active fires on_call_connected
   §6 _discover_modem — prefers the Online HFP modem over an offline one
      (tincan-a6yeb: dual-adapter dial regression)
+  §7 _cancel_vcm_subscriptions — signal match cleanup on rebind and modem-removed
+     (tincan-8o1pj VCM leak fix coverage)
 """
 from __future__ import annotations
 
@@ -120,6 +122,13 @@ class TestIsHfpIphoneModem:
         # Type comparison is lowercase-normalised
         path = "/org/ofono/modem/d0_6b_78_33_46_20_iPhone"
         props = {"Type": "HFP"}
+        assert ctrl._is_hfp_iphone_modem(path, props) is False
+
+    def test_false_when_mac_fragment_empty(self):
+        # tincan-5tojh: empty device_addr must never vacuously match every HFP modem
+        ctrl = _make_controller(device_addr="")
+        path = "/org/ofono/modem/any_device_hfp"
+        props = {"Type": "hfp"}
         assert ctrl._is_hfp_iphone_modem(path, props) is False
 
 
@@ -309,3 +318,86 @@ class TestDiscoverModemOnlinePreference:
         modems = [(android_path, {"Type": "hfp", "Online": True})]
         ctrl = _make_controller_with_modems(modems)
         assert ctrl._modem_path is None
+
+
+# ---------------------------------------------------------------------------
+# §7 _cancel_vcm_subscriptions — signal match cleanup on rebind + modem-removed
+# ---------------------------------------------------------------------------
+
+_MODEM_OLD = "/org/ofono/modem/d0_6b_78_33_46_20_hfp_old"
+_MODEM_NEW = "/org/ofono/modem/d0_6b_78_33_46_20_hfp_new"
+
+
+class TestCancelVcmSubscriptions:
+    """_cancel_vcm_subscriptions() is called on rebind and modem-removed,
+    removing each match and clearing the list (tincan-8o1pj VCM leak fix)."""
+
+    @pytest.fixture
+    def ctrl(self):
+        return _make_controller()
+
+    def test_rebind_removes_previous_vcm_signal_matches(self, ctrl):
+        """Binding a new modem calls remove() on each signal match from the prior bind."""
+        match_a = MagicMock()
+        match_b = MagicMock()
+        ctrl._vcm_signal_matches = [match_a, match_b]
+        ctrl._modem_path = _MODEM_OLD
+
+        with (
+            patch("dbus.Interface", return_value=MagicMock()),
+            patch("tincand.call_controller.call_audio"),
+        ):
+            ctrl._bind_modem(_MODEM_NEW)
+
+        match_a.remove.assert_called_once()
+        match_b.remove.assert_called_once()
+
+    def test_rebind_replaces_signal_matches_with_new_ones(self, ctrl):
+        """After rebind, old matches are absent from _vcm_signal_matches; new ones present."""
+        old_match = MagicMock()
+        ctrl._vcm_signal_matches = [old_match]
+        ctrl._modem_path = _MODEM_OLD
+
+        new_vcm = MagicMock()
+        new_vcm.GetCalls.return_value = []
+        new_match_1 = MagicMock()
+        new_match_2 = MagicMock()
+        new_vcm.connect_to_signal.side_effect = [new_match_1, new_match_2]
+
+        with (
+            patch("dbus.Interface", return_value=new_vcm),
+            patch("tincand.call_controller.call_audio"),
+        ):
+            ctrl._bind_modem(_MODEM_NEW)
+
+        assert old_match not in ctrl._vcm_signal_matches
+        assert new_match_1 in ctrl._vcm_signal_matches
+        assert new_match_2 in ctrl._vcm_signal_matches
+
+    def test_on_modem_removed_cancels_vcm_signal_matches(self, ctrl):
+        """_on_modem_removed calls remove() on each signal match and clears the list."""
+        match_a = MagicMock()
+        match_b = MagicMock()
+        ctrl._vcm_signal_matches = [match_a, match_b]
+        ctrl._modem_path = _MODEM_OLD
+
+        with (
+            patch("tincand.call_controller.call_audio"),
+            patch("tincand.call_controller.GLib"),
+        ):
+            ctrl._on_modem_removed(_MODEM_OLD)
+
+        match_a.remove.assert_called_once()
+        match_b.remove.assert_called_once()
+        assert ctrl._vcm_signal_matches == []
+
+    def test_on_modem_removed_ignores_unbound_modem(self, ctrl):
+        """_on_modem_removed does not clear matches when the path is not the bound modem."""
+        match = MagicMock()
+        ctrl._vcm_signal_matches = [match]
+        ctrl._modem_path = _MODEM_OLD
+
+        ctrl._on_modem_removed(_MODEM_NEW)
+
+        match.remove.assert_not_called()
+        assert ctrl._vcm_signal_matches == [match]
