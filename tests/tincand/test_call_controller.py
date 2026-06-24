@@ -642,7 +642,9 @@ class TestRebindWhenPreferredComesOnline:
 
 
 class TestNoAdapterConfigured:
-    """Scenario 5: adapter_hci="" — falls through to Online-first sort, no regression (tincan-aggkh).
+    """Scenario 5: adapter_hci="" — falls through to Online-first sort, no regression.
+
+    (tincan-aggkh)
 
     NF2: with empty adapter_hci all candidates rank equally; Online still beats
     Offline; no deferred-bind path is triggered.
@@ -676,7 +678,9 @@ class TestNoAdapterConfigured:
 
 
 class TestSubscriptionCleanup:
-    """Scenario 6: no stale PropertyChanged subscriptions after bind or modem-removed (tincan-aggkh).
+    """Scenario 6: no stale PropertyChanged subscriptions after bind or modem-removed.
+
+    (tincan-aggkh)
 
     NF4: every subscription is cancelled on bind, modem-removed, or re-bind.
     """
@@ -792,7 +796,9 @@ class TestHciDisambiguation:
 
 
 class TestFR6SetPropertyPowered:
-    """FR6: proactive SetProperty Powered=true on preferred Offline modem (tincan-8gpmz / tincan-odlh9).
+    """FR6: proactive SetProperty Powered=true on preferred Offline modem.
+
+    (tincan-8gpmz / tincan-odlh9)
 
     When rank=1 (preferred modem Offline), _subscribe_modem_online calls
     SetProperty("Powered", dbus.Boolean(True)) on the modem proxy before the
