@@ -31,10 +31,15 @@ _DTMF_KEYS = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["*", "0", "#"]
 
 
 class IncomingCallDialog(QDialog):
-    """Semi-modal dialog shown when an HFP call arrives (tincan-fx79v)."""
+    """Semi-modal dialog shown when an HFP call arrives (tincan-fx79v).
+
+    Pass has_active_call=True to show the Call Waiting variant (tincan-o7yjg).
+    """
 
     answered = Signal()
     declined = Signal()
+    hold_and_answer_requested = Signal()
+    release_and_answer_requested = Signal()
 
     def __init__(
         self,
@@ -42,8 +47,28 @@ class IncomingCallDialog(QDialog):
         caller_number: str,
         avatar_pixmap: QPixmap | None,
         parent: QWidget,
+        has_active_call: bool = False,
+        active_call_name: str = "",
+        active_call_elapsed: int = 0,
+        active_call_pixmap: QPixmap | None = None,
     ) -> None:
         super().__init__(parent, Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint)
+        self._call_waiting = has_active_call
+        if not has_active_call:
+            self._init_incoming(caller_name, caller_number, avatar_pixmap)
+        else:
+            self._init_call_waiting(
+                caller_name, caller_number, avatar_pixmap,
+                active_call_name, active_call_elapsed, active_call_pixmap,
+            )
+        self.move(parent.geometry().center() - self.rect().center())
+
+    def _init_incoming(
+        self,
+        caller_name: str,
+        caller_number: str,
+        avatar_pixmap: QPixmap | None,
+    ) -> None:
         self.setWindowTitle("Incoming Call")
         self.setStyleSheet("background: #18181b; color: #f4f4f5;")
         self.setFixedSize(340, 290)
@@ -103,9 +128,130 @@ class IncomingCallDialog(QDialog):
         btn_row.addWidget(self._answer_btn)
         layout.addLayout(btn_row)
 
-        self.move(
-            parent.geometry().center() - self.rect().center()
+    def _init_call_waiting(
+        self,
+        caller_name: str,
+        caller_number: str,
+        avatar_pixmap: QPixmap | None,
+        active_call_name: str,
+        active_call_elapsed: int,
+        active_call_pixmap: QPixmap | None,
+    ) -> None:
+        self.setWindowTitle("Call Waiting")
+        self.setStyleSheet("background: #18181b; color: #f4f4f5;")
+        self.setFixedSize(340, 420)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 24, 16, 16)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        # waiting caller
+        avatar = AvatarWidget(caller_name, size=68)
+        if avatar_pixmap:
+            avatar.set_photo_pixmap(avatar_pixmap)
+        layout.addWidget(avatar, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        name_lbl = QLabel(caller_name or caller_number)
+        name_lbl.setStyleSheet("color: #f4f4f5; font-size: 20px; font-weight: 500;")
+        name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(name_lbl)
+
+        if caller_name:
+            num_lbl = QLabel(caller_number)
+            num_lbl.setStyleSheet("color: #9ca3af; font-size: 13px;")
+            num_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(num_lbl)
+
+        status_lbl = QLabel("Calling…")
+        status_lbl.setStyleSheet("color: #6b7280; font-size: 11px;")
+        status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(status_lbl)
+
+        # active call mini-row
+        mini = QWidget()
+        mini.setStyleSheet(
+            "QWidget { background: #27272a; border-left: 4px solid #0d9488;"
+            " border-radius: 3px; }"
         )
+        mini_layout = QHBoxLayout(mini)
+        mini_layout.setContentsMargins(8, 4, 8, 4)
+        mini_layout.setSpacing(6)
+
+        mini_avatar = AvatarWidget(active_call_name, size=24)
+        if active_call_pixmap:
+            mini_avatar.set_photo_pixmap(active_call_pixmap)
+        mini_layout.addWidget(mini_avatar)
+
+        active_name_lbl = QLabel(active_call_name)
+        active_name_lbl.setStyleSheet("color: #f4f4f5; font-size: 11px;")
+        mini_layout.addWidget(active_name_lbl)
+
+        self._active_timer_lbl = QLabel()
+        self._active_timer_lbl.setStyleSheet("color: #86efac; font-size: 10px;")
+        self._active_timer_lbl.setAccessibleName("Active call duration")
+        mini_layout.addWidget(self._active_timer_lbl)
+        mini_layout.addStretch()
+
+        self._active_elapsed = active_call_elapsed
+        self._update_active_timer()
+        self._active_timer = QTimer(self)
+        self._active_timer.setInterval(1000)
+        self._active_timer.timeout.connect(self._tick_active_timer)
+        self._active_timer.start()
+
+        layout.addWidget(mini)
+        layout.addStretch()
+
+        # Hold & Answer + Release & Answer
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+
+        self._hold_btn = QPushButton("Hold && Answer")
+        self._hold_btn.setFixedSize(162, 44)
+        self._hold_btn.setDefault(False)
+        self._hold_btn.setStyleSheet(
+            "QPushButton { background: #16a34a; color: #ffffff; border: none;"
+            " font-size: 13px; border-radius: 4px; }"
+            " QPushButton:focus { outline: 2px dashed #3b82f6; outline-offset: 2px; }"
+        )
+        self._hold_btn.setAccessibleName("Hold active call and answer waiting call")
+        self._hold_btn.clicked.connect(self._on_hold_and_answer)
+        action_row.addWidget(self._hold_btn)
+
+        self._release_btn = QPushButton("Release && Answer")
+        self._release_btn.setFixedSize(162, 44)
+        self._release_btn.setDefault(False)
+        self._release_btn.setStyleSheet(
+            "QPushButton { background: #dc2626; color: #ffffff; border: none;"
+            " font-size: 13px; border-radius: 4px; }"
+            " QPushButton:focus { outline: 2px dashed #3b82f6; outline-offset: 2px; }"
+        )
+        self._release_btn.setAccessibleName("Release active call and answer waiting call")
+        self._release_btn.clicked.connect(self._on_release_and_answer)
+        action_row.addWidget(self._release_btn)
+
+        layout.addLayout(action_row)
+
+        # full-width Decline (ghost)
+        self._decline_btn = QPushButton("✕  Decline")
+        self._decline_btn.setFixedHeight(44)
+        self._decline_btn.setStyleSheet(
+            "QPushButton { background: #27272a; color: #9ca3af; border: 1px solid #3f3f46;"
+            " font-size: 14px; border-radius: 4px; }"
+            " QPushButton:focus { outline: 2px dashed #3b82f6; outline-offset: 2px; }"
+        )
+        self._decline_btn.clicked.connect(self._on_decline)
+        layout.addWidget(self._decline_btn)
+
+    def _update_active_timer(self) -> None:
+        h, rem = divmod(self._active_elapsed, 3600)
+        m, s = divmod(rem, 60)
+        self._active_timer_lbl.setText(f"{h}:{m:02d}:{s:02d}")
+
+    def _tick_active_timer(self) -> None:
+        self._active_elapsed += 1
+        self._update_active_timer()
 
     def _on_decline(self) -> None:
         self.declined.emit()
@@ -115,6 +261,14 @@ class IncomingCallDialog(QDialog):
         self.answered.emit()
         self.accept()
 
+    def _on_hold_and_answer(self) -> None:
+        self.hold_and_answer_requested.emit()
+        self.accept()
+
+    def _on_release_and_answer(self) -> None:
+        self.release_and_answer_requested.emit()
+        self.accept()
+
     def disable_answer(self, reason: str) -> None:
         """Disable the Answer button (e.g. call_setup_ready=False) with tooltip."""
         self._answer_btn.setEnabled(False)
@@ -122,8 +276,13 @@ class IncomingCallDialog(QDialog):
         self._answer_btn.setAccessibleDescription(reason)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape:
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
             self._on_decline()
+        elif self._call_waiting and key == Qt.Key.Key_H:
+            self._on_hold_and_answer()
+        elif self._call_waiting and key == Qt.Key.Key_R:
+            self._on_release_and_answer()
         else:
             super().keyPressEvent(event)
 
