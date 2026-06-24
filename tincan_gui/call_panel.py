@@ -24,10 +24,16 @@ _DTMF_KEYS = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["*", "0", "#"]
 
 
 class IncomingCallDialog(QDialog):
-    """Semi-modal dialog shown when an HFP call arrives (tincan-fx79v)."""
+    """Semi-modal dialog shown when an HFP call arrives or is waiting (tincan-fx79v, tincan-o7yjg).
+
+    Pass has_active_call=True to show Call Waiting mode: the dialog gains a
+    mini active-call row and replaces Answer with Hold&Answer / Release&Answer.
+    """
 
     answered = Signal()
     declined = Signal()
+    hold_and_answer_requested = Signal()
+    release_and_answer_requested = Signal()
 
     def __init__(
         self,
@@ -35,16 +41,31 @@ class IncomingCallDialog(QDialog):
         caller_number: str,
         avatar_pixmap: QPixmap | None,
         parent: QWidget,
+        has_active_call: bool = False,
+        active_call_name: str = "",
+        active_call_elapsed: int = 0,
+        active_call_pixmap: QPixmap | None = None,
     ) -> None:
         super().__init__(parent, Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint)
-        self.setWindowTitle("Incoming Call")
+        self._has_active_call = has_active_call
         self.setStyleSheet("background: #18181b; color: #f4f4f5;")
-        self.setFixedSize(340, 290)
+
+        if has_active_call:
+            self.setWindowTitle("Call Waiting")
+            self.setFixedSize(340, 420)
+        else:
+            self.setWindowTitle("Incoming Call")
+            self.setFixedSize(340, 290)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 24, 16, 16)
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        if has_active_call:
+            self._build_active_mini_row(
+                layout, active_call_name, active_call_elapsed, active_call_pixmap
+            )
 
         avatar = AvatarWidget(caller_name, size=68)
         if avatar_pixmap:
@@ -63,13 +84,70 @@ class IncomingCallDialog(QDialog):
             num_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(num_lbl)
 
-        status_lbl = QLabel("Incoming call via HFP…")
+        status_lbl = QLabel(
+            "Waiting call via HFP…" if has_active_call else "Incoming call via HFP…"
+        )
         status_lbl.setStyleSheet("color: #6b7280; font-size: 11px;")
         status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(status_lbl)
 
         layout.addStretch()
 
+        if has_active_call:
+            self._build_call_waiting_buttons(layout)
+        else:
+            self._build_incoming_buttons(layout)
+
+        self.move(
+            parent.geometry().center() - self.rect().center()
+        )
+
+    # ------------------------------------------------------------------
+    # Layout helpers
+    # ------------------------------------------------------------------
+
+    def _build_active_mini_row(
+        self,
+        layout: QVBoxLayout,
+        active_name: str,
+        elapsed: int,
+        pixmap: QPixmap | None,
+    ) -> None:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        mini_avatar = AvatarWidget(active_name, size=24)
+        if pixmap:
+            mini_avatar.set_photo_pixmap(pixmap)
+        row.addWidget(mini_avatar)
+
+        info = QVBoxLayout()
+        info.setSpacing(0)
+        name_lbl = QLabel(active_name or "Active call")
+        name_lbl.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        info.addWidget(name_lbl)
+        h, rem = divmod(elapsed, 3600)
+        m, s = divmod(rem, 60)
+        timer_lbl = QLabel(f"{h}:{m:02d}:{s:02d}")
+        timer_lbl.setStyleSheet("color: #6b7280; font-size: 10px;")
+        info.addWidget(timer_lbl)
+        row.addLayout(info)
+        row.addStretch()
+
+        sep_label = QLabel("— on hold —")
+        sep_label.setStyleSheet("color: #3f3f46; font-size: 10px;")
+        row.addWidget(sep_label)
+
+        container = QWidget()
+        container.setStyleSheet(
+            "background: #27272a; border-radius: 4px; border: 1px solid #3f3f46;"
+        )
+        container.setLayout(row)
+        container.setContentsMargins(8, 6, 8, 6)
+        layout.addWidget(container)
+        layout.addSpacing(8)
+
+    def _build_incoming_buttons(self, layout: QVBoxLayout) -> None:
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
 
@@ -96,27 +174,93 @@ class IncomingCallDialog(QDialog):
         btn_row.addWidget(self._answer_btn)
         layout.addLayout(btn_row)
 
-        self.move(
-            parent.geometry().center() - self.rect().center()
+    def _build_call_waiting_buttons(self, layout: QVBoxLayout) -> None:
+        action_row = QHBoxLayout()
+        action_row.setSpacing(12)
+
+        self._hold_btn = QPushButton("⏸  Hold & Answer")
+        self._hold_btn.setFixedSize(162, 44)
+        self._hold_btn.setStyleSheet(
+            "QPushButton { background: #16a34a; color: #ffffff; border: none;"
+            " font-size: 13px; border-radius: 4px; }"
+            " QPushButton:focus { outline: 2px dashed #3b82f6; outline-offset: 2px; }"
         )
+        self._hold_btn.setDefault(False)
+        self._hold_btn.setAutoDefault(False)
+        self._hold_btn.clicked.connect(self._on_hold_and_answer)
+
+        self._release_btn = QPushButton("✕  Release & Answer")
+        self._release_btn.setFixedSize(162, 44)
+        self._release_btn.setStyleSheet(
+            "QPushButton { background: #dc2626; color: #ffffff; border: none;"
+            " font-size: 13px; border-radius: 4px; }"
+            " QPushButton:focus { outline: 2px dashed #3b82f6; outline-offset: 2px; }"
+        )
+        self._release_btn.setDefault(False)
+        self._release_btn.setAutoDefault(False)
+        self._release_btn.clicked.connect(self._on_release_and_answer)
+
+        action_row.addWidget(self._hold_btn)
+        action_row.addWidget(self._release_btn)
+        layout.addLayout(action_row)
+        layout.addSpacing(8)
+
+        self._decline_btn = QPushButton("✕  Decline")
+        self._decline_btn.setFixedHeight(44)
+        self._decline_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #9ca3af; border: 1px solid #3f3f46;"
+            " font-size: 14px; border-radius: 4px; }"
+            " QPushButton:hover { background: #27272a; }"
+            " QPushButton:focus { outline: 2px dashed #3b82f6; outline-offset: 2px; }"
+        )
+        self._decline_btn.setDefault(False)
+        self._decline_btn.setAutoDefault(False)
+        self._decline_btn.clicked.connect(self._on_decline)
+        layout.addWidget(self._decline_btn)
+
+    # ------------------------------------------------------------------
+    # Action handlers
+    # ------------------------------------------------------------------
 
     def _on_decline(self) -> None:
-        self.declined.emit()
         self.reject()
+
+    def reject(self) -> None:
+        self.declined.emit()
+        super().reject()
 
     def _on_answer(self) -> None:
         self.answered.emit()
         self.accept()
 
+    def _on_hold_and_answer(self) -> None:
+        self.hold_and_answer_requested.emit()
+        self.accept()
+
+    def _on_release_and_answer(self) -> None:
+        self.release_and_answer_requested.emit()
+        self.accept()
+
     def disable_answer(self, reason: str) -> None:
         """Disable the Answer button (e.g. call_setup_ready=False) with tooltip."""
-        self._answer_btn.setEnabled(False)
-        self._answer_btn.setToolTip(reason)
-        self._answer_btn.setAccessibleDescription(reason)
+        if self._has_active_call:
+            self._hold_btn.setEnabled(False)
+            self._hold_btn.setToolTip(reason)
+            self._release_btn.setEnabled(False)
+            self._release_btn.setToolTip(reason)
+        else:
+            self._answer_btn.setEnabled(False)
+            self._answer_btn.setToolTip(reason)
+            self._answer_btn.setAccessibleDescription(reason)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape:
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
             self._on_decline()
+        elif self._has_active_call and key == Qt.Key.Key_H:
+            self._on_hold_and_answer()
+        elif self._has_active_call and key == Qt.Key.Key_R:
+            self._on_release_and_answer()
         else:
             super().keyPressEvent(event)
 

@@ -193,7 +193,7 @@ class TincandClient(QObject):
     audio_restored = Signal()
     call_active = Signal(str, str)     # (call_id, number)
     call_held = Signal(str, str)       # (call_id, number)
-    call_waiting = Signal(str, str, str)  # (call_id, number, direction)
+    call_waiting = Signal(str, str, str)  # (call_id, number, name)
     call_removed = Signal(str)         # call_id
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
@@ -732,9 +732,9 @@ class TincandClient(QObject):
         self.call_held.emit(str(call_id), str(number))
 
     @Slot(str, str, str)
-    def _on_call_waiting(self, call_id: str, number: str, direction: str) -> None:
-        _log.debug("tincand: CallWaiting(%s, %s, %s)", call_id, number, direction)
-        self.call_waiting.emit(str(call_id), str(number), str(direction))
+    def _on_call_waiting(self, call_id: str, number: str, name: str) -> None:
+        _log.debug("tincand: CallWaiting(%s)", call_id)
+        self.call_waiting.emit(str(call_id), str(number), str(name))
 
     @Slot(str)
     def _on_call_removed(self, call_id: str) -> None:
@@ -763,6 +763,20 @@ class TincandClient(QObject):
         except Exception as exc:
             _log.debug("dial(%r) failed: %s", number, exc)
             return ""
+
+    def hold_and_answer(self) -> None:
+        """Hold the active call and answer the waiting call."""
+        try:
+            self._dbus_call(_IFACE_CALLS, "HoldAndAnswer")
+        except Exception as exc:
+            _log.debug("hold_and_answer() failed: %s", exc)
+
+    def release_and_answer(self) -> None:
+        """Release the active call and answer the waiting call."""
+        try:
+            self._dbus_call(_IFACE_CALLS, "ReleaseAndAnswer")
+        except Exception as exc:
+            _log.debug("release_and_answer() failed: %s", exc)
 
     def send_dtmf(self, key: str) -> None:
         """Send a DTMF tone during an active HFP call.

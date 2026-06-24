@@ -662,8 +662,9 @@ class MainWindow(QMainWindow):
         c.message_send_failed.connect(self._on_send_failed)
         self.refresh_requested.connect(self._load_conversations)
         self.refresh_requested.connect(self._dbus_client.refresh_contacts)
-        # HFP call signals (tincan-fx79v.2)
+        # HFP call signals (tincan-fx79v.2, tincan-o7yjg)
         c.call_incoming.connect(self._on_call_incoming)
+        c.call_waiting.connect(self._on_call_waiting)
         c.call_connected.connect(self._on_call_connected)
         c.call_ended.connect(self._on_call_ended)
         c.audio_error.connect(self._on_audio_error)
@@ -1431,6 +1432,39 @@ class MainWindow(QMainWindow):
 
     def _on_call_decline(self) -> None:
         self._dbus_client.hangup()
+        self._incall_dialog = None
+
+    def _on_call_waiting(self, call_id: str, number: str, name: str) -> None:
+        """Show IncomingCallDialog in Call Waiting mode for a second incoming call."""
+        active_elapsed = self._incall_panel.elapsed if self._incall_panel else 0
+        active_name = self._call_caller_name
+        dlg = IncomingCallDialog(
+            caller_name=name or number,
+            caller_number=number,
+            avatar_pixmap=None,
+            parent=self,
+            has_active_call=True,
+            active_call_name=active_name,
+            active_call_elapsed=active_elapsed,
+        )
+        if not self._call_setup_ready:
+            dlg.disable_answer(
+                "Phone calls: setup required. Run: cd packaging/selinux && sudo ./install.sh"
+            )
+        self._incall_dialog = dlg
+        dlg.declined.connect(lambda: self._dbus_client.hangup(call_id))
+        dlg.hold_and_answer_requested.connect(self._on_hold_and_answer_accepted)
+        dlg.release_and_answer_requested.connect(self._on_release_and_answer_accepted)
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+
+    def _on_hold_and_answer_accepted(self) -> None:
+        self._dbus_client.hold_and_answer()
+        self._incall_dialog = None
+
+    def _on_release_and_answer_accepted(self) -> None:
+        self._dbus_client.release_and_answer()
         self._incall_dialog = None
 
     def _enter_call(self, caller_name: str) -> None:
