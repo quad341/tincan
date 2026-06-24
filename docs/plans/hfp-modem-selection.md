@@ -2,7 +2,8 @@
 
 **PM bead:** tincan-rl848 (design review complete 2026-06-24)  
 **PRD:** docs/PRD.md  
-**Architecture bead:** tincan-t9met (in progress — approach decision pending)  
+**Architecture bead:** tincan-t9met (CLOSED — A1 approved)  
+**Designer review bead:** tincan-fv4j0 (CLOSED — A1 approved with 2 required fixes)  
 **Date:** 2026-06-24
 
 ---
@@ -49,31 +50,50 @@ additions incorporated into PRD:
 
 ## Architecture Status
 
-tincan-t9met is in progress with the architect. Open decisions (OQ1–OQ4)
-include: approach selection (A1/A2/A3), fallback timeout policy, FR6
-(proactive SetProperty Powered=true), and `_on_modem_removed` re-bind
-behavior. Implementation beads block on tincan-t9met.
+tincan-t9met is CLOSED. Architect selected A1 (rank-then-defer with PropertyChanged watch).
+FR6 (proactive SetProperty Powered=true) deferred to tincan-odlh9.
+
+## Designer Review (tincan-fv4j0, 2026-06-24)
+
+Designer approved A1. Two required changes before implementation closes:
+
+- **R2 (required):** Re-bind log missing from `_bind_modem()`. When switching
+  from non-preferred to preferred modem at runtime, the log is indistinguishable
+  from cold-start bind. Add pre-check: if `self._modem_path` is set and differs
+  from `path`, emit INFO "re-binding to HFP modem %s (was bound to %s)". → tincan-5jeeu
+- **T1–T4 (required):** Test infrastructure for §A–§J needs `adapter_hci` param
+  in `_make_controller_with_modems`, oFono-format paths, PropertyChanged callback
+  capture, and §J hci10/hci1 disambiguation test. → tincan-aggkh (updated)
+
+Also recommended (P2–P3, non-blocking):
+- R1 (P2): Merge deferred-bind rationale into `_subscribe_modem_online` log wording
+- R3 (P3): Remove duplicate WARN from `_discover_modem()` fallback path
+- R4 (P3): Add DEBUG log in stale-path guard → tincan-eld4u
 
 ---
 
 ## Bead Tree
 
 ```
-tincan-t9met  [architect — approach decision]
-    ├── tincan-3vc85  [builder] Adapter-aware modem selection in call_controller.py (FR1–FR5)
-    │       └── tincan-aggkh  [validator] Unit tests: modem selection scenarios (NF1)
-    └── tincan-odlh9  [builder, deferred] FR6: proactive SetProperty Powered=true (if architect approves)
+tincan-t9met  [architect — CLOSED]
+    ├── tincan-3vc85  [builder — CLOSED] Adapter-aware modem selection (FR1–FR5)
+    │   ├── tincan-5jeeu  [builder — open] R2: re-bind detection log in _bind_modem()
+    │   ├── tincan-aggkh  [validator — in progress] Unit tests §A–§J (updated T1–T4)
+    │   └── tincan-eld4u  [builder — open] Log polish (R1/R3/R4)
+    └── tincan-odlh9  [builder, deferred] FR6: proactive SetProperty Powered=true
 ```
 
 ---
 
 ## Beads
 
-| ID | Title | Target | Depends on |
-|----|-------|--------|------------|
-| tincan-3vc85 | Adapter-aware modem selection (FR1–FR5) | builder | tincan-t9met |
-| tincan-aggkh | Unit tests: modem selection (NF1) | validator | tincan-3vc85 |
-| tincan-odlh9 | FR6: proactive SetProperty Powered=true | builder (deferred) | tincan-t9met + architect approval |
+| ID | Title | Status | Target | Depends on |
+|----|-------|--------|--------|------------|
+| tincan-3vc85 | Adapter-aware modem selection (FR1–FR5) | CLOSED | builder | tincan-t9met |
+| tincan-5jeeu | R2: re-bind detection log in _bind_modem() | open | builder | tincan-3vc85 |
+| tincan-aggkh | Unit tests: modem selection §A–§J (NF1) | in progress | validator | tincan-3vc85 |
+| tincan-eld4u | Log polish: R1/R3/R4 | open | builder | tincan-3vc85 |
+| tincan-odlh9 | FR6: proactive SetProperty Powered=true | open (deferred) | builder | tincan-t9met + architect approval |
 
 ---
 
@@ -132,7 +152,9 @@ work regardless of whether FR6 is present).
 
 ## Build Order
 
-1. tincan-t9met closes (architect) → unblocks builder
-2. Builder implements FR1–FR5 in `call_controller.py`
-3. Validator writes unit tests against the implementation
-4. (Optional) FR6 builder bead if architect approves
+1. ~~tincan-t9met closes (architect) → unblocks builder~~ DONE
+2. ~~Builder implements FR1–FR5 in `call_controller.py`~~ DONE (tincan-3vc85)
+3. Builder fixes re-bind log in `_bind_modem()` (tincan-5jeeu) — unblocked
+4. Validator completes unit tests §A–§J with T1–T4 infrastructure (tincan-aggkh) — in progress
+5. Builder applies log polish R1/R3/R4 (tincan-eld4u) — unblocked, P3
+6. (Deferred) FR6 builder bead if architect approves (tincan-odlh9)
