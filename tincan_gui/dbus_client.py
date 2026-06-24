@@ -723,12 +723,12 @@ class TincandClient(QObject):
 
     @Slot(str, str)
     def _on_call_active(self, call_id: str, number: str) -> None:
-        _log.debug("tincand: CallActive(%s, %s)", call_id, number)
+        _log.debug("tincand: CallActive(%s)", call_id)
         self.call_active.emit(str(call_id), str(number))
 
     @Slot(str, str)
     def _on_call_held(self, call_id: str, number: str) -> None:
-        _log.debug("tincand: CallHeld(%s, %s)", call_id, number)
+        _log.debug("tincand: CallHeld(%s)", call_id)
         self.call_held.emit(str(call_id), str(number))
 
     @Slot(str, str, str)
