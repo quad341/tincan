@@ -46,8 +46,8 @@ from tincan_gui.daemon_config import DaemonConfig, load_daemon_config, save_daem
 from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
-    ANCSRepairBanner,
     AdapterUnavailableBanner,
+    ANCSRepairBanner,
     CallSetupRequiredBanner,
     ContactsEmptyBanner,
     StateABanner,
@@ -668,6 +668,11 @@ class MainWindow(QMainWindow):
         c.call_ended.connect(self._on_call_ended)
         c.audio_error.connect(self._on_audio_error)
         c.audio_restored.connect(self._on_audio_restored)
+        # multi-call signals (tincan-o7yjg)
+        c.call_waiting.connect(self._on_call_waiting)
+        c.call_active.connect(self._on_call_active_signal)
+        c.call_held.connect(self._on_call_held_signal)
+        c.call_removed.connect(self._on_call_removed_signal)
 
     def _maybe_spawn_daemon(self) -> None:
         """Spawn tincand if config has a device and no spawn has been attempted yet."""
@@ -1433,6 +1438,66 @@ class MainWindow(QMainWindow):
         self._dbus_client.hangup()
         self._incall_dialog = None
 
+    def _on_call_waiting_decline(self, call_id: str) -> None:
+        self._dbus_client.hangup(call_id)
+        self._incall_dialog = None
+
+    def _on_call_waiting(self, call_id: str, number: str, name: str) -> None:
+        if self._incall_panel is None:
+            return
+        dlg = IncomingCallDialog(
+            caller_name=name,
+            caller_number=number,
+            avatar_pixmap=None,
+            parent=self,
+            has_active_call=True,
+            active_call_name=self._call_caller_name,
+            active_call_elapsed=self._incall_panel.elapsed,
+        )
+        self._incall_dialog = dlg
+        dlg.declined.connect(lambda: self._on_call_waiting_decline(call_id))
+        dlg.hold_and_answer_requested.connect(self._on_hold_and_answer)
+        dlg.release_and_answer_requested.connect(self._on_release_and_answer)
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+        self._incall_panel.add_call(call_id, number, "incoming", "waiting")
+
+    def _on_hold_and_answer(self) -> None:
+        try:
+            self._dbus_client.hold_and_answer()
+        except Exception as exc:
+            QMessageBox.warning(self, "Hold & Answer Failed", str(exc))
+        self._incall_dialog = None
+
+    def _on_release_and_answer(self) -> None:
+        try:
+            self._dbus_client.release_and_answer()
+        except Exception as exc:
+            QMessageBox.warning(self, "Release & Answer Failed", str(exc))
+        self._incall_dialog = None
+
+    def _on_swap_calls(self) -> None:
+        try:
+            self._dbus_client.swap_calls()
+        except Exception as exc:
+            QMessageBox.warning(self, "Swap Failed", str(exc))
+
+    def _on_end_all_calls(self) -> None:
+        self._dbus_client.hangup()
+
+    def _on_call_active_signal(self, call_id: str, _number: str) -> None:
+        if self._incall_panel is not None:
+            self._incall_panel.update_call_state(call_id, "active")
+
+    def _on_call_held_signal(self, call_id: str, _number: str) -> None:
+        if self._incall_panel is not None:
+            self._incall_panel.update_call_state(call_id, "held")
+
+    def _on_call_removed_signal(self, call_id: str) -> None:
+        if self._incall_panel is not None:
+            self._incall_panel.remove_call(call_id)
+
     def _enter_call(self, caller_name: str) -> None:
         """Build pages 1-2 and switch compose_stack to InCallPanel (page 1).
 
@@ -1446,6 +1511,14 @@ class MainWindow(QMainWindow):
         self._incall_panel = InCallPanel(caller_name, None, self._compose_stack)
         self._incall_panel.hang_up_requested.connect(self._on_hang_up)
         self._incall_panel.keypad_toggled.connect(self._on_keypad_toggled)
+        self._incall_panel.swap_calls_requested.connect(self._on_swap_calls)
+        self._incall_panel.end_all_calls_requested.connect(self._on_end_all_calls)
+        self._incall_panel.hold_and_answer_requested.connect(self._on_hold_and_answer)
+        self._incall_panel.release_and_answer_requested.connect(self._on_release_and_answer)
+        self._incall_panel.hang_up_call_requested.connect(self._dbus_client.hangup)
+        # seed call rows from daemon state
+        for call_id, number, state, direction in self._dbus_client.get_calls():
+            self._incall_panel.add_call(call_id, number, direction, state)
         self._compose_stack.insertWidget(self._PAGE_INCALL, self._incall_panel)
 
         # Page 2: AudioErrorPanel

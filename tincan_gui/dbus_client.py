@@ -191,6 +191,10 @@ class TincandClient(QObject):
     call_ended = Signal()
     audio_error = Signal(str)          # reason
     audio_restored = Signal()
+    call_active = Signal(str, str)     # (call_id, number)
+    call_held = Signal(str, str)       # (call_id, number)
+    call_waiting = Signal(str, str, str)  # (call_id, number, direction)
+    call_removed = Signal(str)         # call_id
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -234,11 +238,19 @@ class TincandClient(QObject):
                       self, "1_on_audio_error(QString)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "AudioRestored",
                       self, "1_on_audio_restored()"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "CallActive",
+                      self, "1_on_call_active(QString,QString)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "CallHeld",
+                      self, "1_on_call_held(QString,QString)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "CallWaiting",
+                      self, "1_on_call_waiting(QString,QString,QString)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_CALLS, "CallRemoved",
+                      self, "1_on_call_removed(QString)"),
         ]
         if not all(_ok):
             _log.warning("tincan D-Bus: some signal subscriptions failed: %s", _ok)
         else:
-            _log.debug("tincan D-Bus: all 13 signal subscriptions registered")
+            _log.debug("tincan D-Bus: all 17 signal subscriptions registered")
 
     # ------------------------------------------------------------------
     # D-Bus signal → Qt signal bridges
@@ -709,6 +721,26 @@ class TincandClient(QObject):
         _log.debug("tincand: AudioRestored")
         self.audio_restored.emit()
 
+    @Slot(str, str)
+    def _on_call_active(self, call_id: str, number: str) -> None:
+        _log.debug("tincand: CallActive(%s, %s)", call_id, number)
+        self.call_active.emit(str(call_id), str(number))
+
+    @Slot(str, str)
+    def _on_call_held(self, call_id: str, number: str) -> None:
+        _log.debug("tincand: CallHeld(%s, %s)", call_id, number)
+        self.call_held.emit(str(call_id), str(number))
+
+    @Slot(str, str, str)
+    def _on_call_waiting(self, call_id: str, number: str, direction: str) -> None:
+        _log.debug("tincand: CallWaiting(%s, %s, %s)", call_id, number, direction)
+        self.call_waiting.emit(str(call_id), str(number), str(direction))
+
+    @Slot(str)
+    def _on_call_removed(self, call_id: str) -> None:
+        _log.debug("tincand: CallRemoved(%s)", call_id)
+        self.call_removed.emit(str(call_id))
+
     def answer(self, call_id: str = "") -> None:
         """Answer the current incoming HFP call."""
         try:
@@ -731,6 +763,27 @@ class TincandClient(QObject):
         except Exception as exc:
             _log.debug("dial(%r) failed: %s", number, exc)
             return ""
+
+    def get_calls(self) -> list[tuple[str, str, str, str]]:
+        """Return the list of active calls as (call_id, number, state, direction) tuples."""
+        try:
+            result = self._dbus_call(_IFACE_CALLS, "GetCalls")
+            return [(str(c[0]), str(c[1]), str(c[2]), str(c[3])) for c in (result or [])]
+        except Exception as exc:
+            _log.debug("get_calls() failed: %s", exc)
+            return []
+
+    def swap_calls(self) -> None:
+        """Swap the active and held calls via HFP."""
+        self._dbus_call(_IFACE_CALLS, "SwapCalls")
+
+    def hold_and_answer(self) -> None:
+        """Put the active call on hold and answer the waiting call."""
+        self._dbus_call(_IFACE_CALLS, "HoldAndAnswer")
+
+    def release_and_answer(self) -> None:
+        """Release the active call and answer the waiting call."""
+        self._dbus_call(_IFACE_CALLS, "ReleaseAndAnswer")
 
     def send_dtmf(self, key: str) -> None:
         """Send a DTMF tone during an active HFP call.
