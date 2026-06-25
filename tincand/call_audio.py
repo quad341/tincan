@@ -26,11 +26,15 @@ _OFONO_BUS = "org.ofono"
 _IFACE_CALL_VOLUME = "org.ofono.CallVolume"
 
 
-def verify_dongle_adapter(modem_path: str) -> bool:
+def verify_dongle_adapter(modem_path: str, adapter_hci: str = "") -> bool:
     """Return True if modem_path routes through the RTL8761B dongle (hci1).
 
     Logs a warning if the path suggests the MT7925 built-in adapter, since
     SCO audio only works reliably on the dongle (validated 2026-06-11).
+
+    ``adapter_hci`` is the configured adapter token (e.g. ``hci1``) and, when
+    provided, names the adapter the iPhone should be connected to in the
+    warning message.
     """
     ok = _DONGLE_ADAPTER_FRAGMENT in str(modem_path).lower()
     if ok:
@@ -38,9 +42,11 @@ def verify_dongle_adapter(modem_path: str) -> bool:
     else:
         _log.warning(
             "call_audio: modem %s not on RTL8761B dongle (fragment %r absent) — "
-            "HFP SCO audio likely broken. Connect iPhone to the ASUS USB-BT500 (hci1).",
+            "HFP SCO audio likely broken. Connect iPhone to the configured "
+            "adapter %s (ASUS USB-BT500).",
             modem_path,
             _DONGLE_ADAPTER_FRAGMENT,
+            adapter_hci or "hci1",
         )
     return ok
 
