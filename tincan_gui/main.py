@@ -46,8 +46,8 @@ from tincan_gui.daemon_config import DaemonConfig, load_daemon_config, save_daem
 from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
-    ANCSRepairBanner,
     AdapterUnavailableBanner,
+    ANCSRepairBanner,
     CallSetupRequiredBanner,
     ContactsEmptyBanner,
     StateABanner,
@@ -1438,11 +1438,15 @@ class MainWindow(QMainWindow):
         self._dbus_client.hangup()
         self._incall_dialog = None
 
-    def _on_call_waiting(self, call_id: str, number: str, direction: str) -> None:
+    def _on_call_waiting_decline(self, call_id: str) -> None:
+        self._dbus_client.hangup(call_id)
+        self._incall_dialog = None
+
+    def _on_call_waiting(self, call_id: str, number: str, name: str) -> None:
         if self._incall_panel is None:
             return
         dlg = IncomingCallDialog(
-            caller_name="",
+            caller_name=name,
             caller_number=number,
             avatar_pixmap=None,
             parent=self,
@@ -1451,13 +1455,13 @@ class MainWindow(QMainWindow):
             active_call_elapsed=self._incall_panel.elapsed,
         )
         self._incall_dialog = dlg
-        dlg.declined.connect(lambda: self._dbus_client.hangup(call_id))
+        dlg.declined.connect(lambda: self._on_call_waiting_decline(call_id))
         dlg.hold_and_answer_requested.connect(self._on_hold_and_answer)
         dlg.release_and_answer_requested.connect(self._on_release_and_answer)
         dlg.raise_()
         dlg.activateWindow()
         dlg.show()
-        self._incall_panel.add_call(call_id, number, direction, "waiting")
+        self._incall_panel.add_call(call_id, number, "incoming", "waiting")
 
     def _on_hold_and_answer(self) -> None:
         try:

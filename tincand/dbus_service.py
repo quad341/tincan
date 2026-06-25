@@ -767,7 +767,7 @@ class TincanService(dbus.service.Object):
         pass
 
     @dbus.service.signal(IFACE_CALLS, signature="sss")
-    def CallWaiting(self, call_id: str, number: str, direction: str) -> None:  # noqa: N802
+    def CallWaiting(self, call_id: str, number: str, name: str) -> None:  # noqa: N802
         pass
 
     @dbus.service.signal(IFACE_CALLS, signature="ss")
@@ -809,18 +809,18 @@ class TincanService(dbus.service.Object):
 
     def on_call_active(self, call_id: str, number: str) -> None:
         """Called by CallController before on_call_connected when call goes active."""
-        _log.info("CallActive: %s <%s>", call_id, number)
+        _log.info("CallActive: %s", call_id)
         self.CallActive(str(call_id), str(number))
 
     def on_call_held(self, call_id: str, number: str) -> None:
         """Called by CallController when a call is placed on hold."""
-        _log.info("CallHeld: %s <%s>", call_id, number)
+        _log.info("CallHeld: %s", call_id)
         self.CallHeld(str(call_id), str(number))
 
-    def on_call_waiting(self, call_id: str, number: str, direction: str) -> None:
+    def on_call_waiting(self, call_id: str, number: str, name: str) -> None:
         """Called by CallController when a second call arrives while one is active."""
-        _log.info("CallWaiting: %s <%s> %s", call_id, number, direction)
-        self.CallWaiting(str(call_id), str(number), str(direction))
+        _log.info("CallWaiting: %s", call_id)
+        self.CallWaiting(str(call_id), str(number), str(name))
 
     def on_call_removed(self, call_id: str) -> None:
         """Called by CallController when a specific call is removed."""

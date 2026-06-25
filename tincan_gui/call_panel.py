@@ -18,14 +18,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tincan_gui.avatar import AvatarWidget
+
 _STATE_BORDER = {"active": "#0d9488", "held": "#d97706", "waiting": "#6366f1"}
 _STATE_BADGE = {
     "active": ("▶ Active", "#0d9488"),
     "held": ("⏸ Held", "#d97706"),
     "waiting": ("☎ Waiting", "#6366f1"),
 }
-
-from tincan_gui.avatar import AvatarWidget
 
 _DTMF_KEYS = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["*", "0", "#"]]
 
