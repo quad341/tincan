@@ -59,8 +59,10 @@ class CallController:
         self._modem_path: str | None = None
         self._vcm = None  # org.ofono.VoiceCallManager proxy
         self._audio_timer_id: int | None = None
+        self._audio_timer_call_id: str | None = None
         self._audio_setup_timer_id: int | None = None
         self._sco_links: list[tuple[str, str]] = []
+        self._call_sigs: dict[str, object] = {}  # SignalMatch per call_id
         self._retry_index: int = 0
         self._system_bus = None
         self._manager = None
@@ -88,6 +90,8 @@ class CallController:
     # ------------------------------------------------------------------
 
     def _is_hfp_iphone_modem(self, path: str, props: dict) -> bool:
+        if not self._mac_fragment:
+            return False
         return (
             str(props.get("Type", "")) == "hfp"
             and self._mac_fragment in str(path).lower()
@@ -156,6 +160,10 @@ class CallController:
             return
         _log.info("CallController: HFP modem removed — clearing state")
         had_calls = bool(self._calls)
+        for call_id, sig in list(self._call_sigs.items()):
+            sig.remove()
+            self._service.on_call_removed(call_id)
+        self._call_sigs.clear()
         self._calls.clear()
         self._vcm = None
         self._modem_path = None
@@ -185,10 +193,11 @@ class CallController:
 
         call_obj = self._system_bus.get_object(_OFONO_BUS, str(path))
         call_iface = dbus.Interface(call_obj, _IFACE_CALL)
-        call_iface.connect_to_signal(
+        sig = call_iface.connect_to_signal(
             "PropertyChanged",
             lambda name, val, _cid=call_id: self._on_call_property_changed(_cid, name, val),
         )
+        self._call_sigs[call_id] = sig
 
         self._calls[call_id] = CallState(
             call_id=call_id,
@@ -201,14 +210,22 @@ class CallController:
         if state == "incoming":
             caller_name = self._contact_store.get_name(number) or ""
             self._service.on_call_incoming(caller_name, number)
+        elif state == "waiting":
+            caller_name = self._contact_store.get_name(number) or ""
+            self._service.on_call_waiting(call_id, number, caller_name)
 
     def _on_call_removed(self, path: str) -> None:
         call_id = self._short_id(str(path))
+        sig = self._call_sigs.pop(call_id, None)
+        if sig is not None:
+            sig.remove()
         self._calls.pop(call_id, None)
-        self._cancel_audio_timer()
-        self._cancel_audio_setup_timer()
-        self._teardown_call_audio()
-        self._service.on_call_ended()
+        self._service.on_call_removed(call_id)
+        if not self._calls:
+            self._cancel_audio_timer()
+            self._cancel_audio_setup_timer()
+            self._teardown_call_audio()
+            self._service.on_call_ended()
 
     def _on_call_property_changed(self, call_id: str, name: str, value: object) -> None:
         if str(name) != "State":
@@ -220,35 +237,38 @@ class CallController:
         cs.state = new_state
         if new_state == "active":
             self._cancel_audio_timer()
+            self._service.on_call_active(call_id, cs.number)
             if cs.audio_error:
                 cs.audio_error = False
                 self._service.on_audio_restored()
             else:
                 self._service.on_call_connected()
             self._schedule_audio_setup()
+        elif new_state == "held":
+            self._service.on_call_held(call_id, cs.number)
         elif new_state == "terminated":
-            self._cancel_audio_timer()
-            self._cancel_audio_setup_timer()
-            self._teardown_call_audio()
-            self._service.on_call_ended()
+            pass  # CallRemoved handles teardown once _calls is empty
 
     # ------------------------------------------------------------------
     # Audio timeout
     # ------------------------------------------------------------------
 
-    def _start_audio_timer(self) -> None:
+    def _start_audio_timer(self, call_id: str = "") -> None:
         self._cancel_audio_timer()
+        self._audio_timer_call_id = call_id
         self._audio_timer_id = GLib.timeout_add(_AUDIO_TIMEOUT_S * 1000, self._on_audio_timeout)
 
     def _cancel_audio_timer(self) -> None:
         if self._audio_timer_id is not None:
             GLib.source_remove(self._audio_timer_id)
             self._audio_timer_id = None
+        self._audio_timer_call_id = None
 
     def _on_audio_timeout(self) -> bool:
         self._audio_timer_id = None
         _log.warning("CallController: audio timeout (%ds) — emitting AudioError", _AUDIO_TIMEOUT_S)
-        for cs in self._calls.values():
+        cs = self._calls.get(self._audio_timer_call_id or "")
+        if cs is not None:
             cs.audio_error = True
         self._service.on_audio_error("sco_timeout")
         return False
@@ -287,7 +307,7 @@ class CallController:
         cs = self._resolve_call(call_id)
         call_obj = self._system_bus.get_object(_OFONO_BUS, cs.ofono_path)
         dbus.Interface(call_obj, _IFACE_CALL).Answer()
-        self._start_audio_timer()
+        self._start_audio_timer(cs.call_id)
 
     def hangup_call(self, call_id: str) -> None:
         import dbus
@@ -303,13 +323,32 @@ class CallController:
         if self._vcm is None:
             raise RuntimeError("oFono VoiceCallManager not available — HFP modem not found")
         path = self._vcm.Dial(number, "")
-        self._start_audio_timer()
-        return self._short_id(str(path))
+        call_id = self._short_id(str(path))
+        self._start_audio_timer(call_id)
+        return call_id
 
     def send_dtmf(self, key: str) -> None:
         if self._vcm is None:
             raise RuntimeError("oFono VoiceCallManager not available")
         self._vcm.SendTones(key)
+
+    def get_calls(self) -> list[CallState]:
+        return list(self._calls.values())
+
+    def swap_calls(self) -> None:
+        if self._vcm is None:
+            raise RuntimeError("oFono VoiceCallManager not available")
+        self._vcm.SwapCalls()
+
+    def hold_and_answer(self) -> None:
+        if self._vcm is None:
+            raise RuntimeError("oFono VoiceCallManager not available")
+        self._vcm.HoldAndAnswer()
+
+    def release_and_answer(self) -> None:
+        if self._vcm is None:
+            raise RuntimeError("oFono VoiceCallManager not available")
+        self._vcm.ReleaseAndAnswer()
 
     def _resolve_call(self, call_id: str) -> CallState:
         if call_id and call_id in self._calls:

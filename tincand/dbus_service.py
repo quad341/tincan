@@ -691,6 +691,61 @@ class TincanService(dbus.service.Object):
                 str(exc), name="org.ofono.Error.Failed"
             ) from exc
 
+    @dbus.service.method(IFACE_CALLS, in_signature="", out_signature="a(ssss)")
+    def GetCalls(self) -> list:  # noqa: N802
+        self._require_call_setup_ready()
+        if self._call_controller is None:
+            return []
+        return [
+            (cs.call_id, cs.number, cs.state, cs.direction)
+            for cs in self._call_controller.get_calls()
+        ]
+
+    @dbus.service.method(IFACE_CALLS, in_signature="", out_signature="")
+    def SwapCalls(self) -> None:  # noqa: N802
+        self._require_call_setup_ready()
+        if self._call_controller is None:
+            raise dbus.exceptions.DBusException(
+                "oFono not available — install oFono to use call features",
+                name="org.freedesktop.DBus.Error.ServiceUnknown",
+            )
+        try:
+            self._call_controller.swap_calls()
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc), name="org.ofono.Error.Failed"
+            ) from exc
+
+    @dbus.service.method(IFACE_CALLS, in_signature="", out_signature="")
+    def HoldAndAnswer(self) -> None:  # noqa: N802
+        self._require_call_setup_ready()
+        if self._call_controller is None:
+            raise dbus.exceptions.DBusException(
+                "oFono not available — install oFono to use call features",
+                name="org.freedesktop.DBus.Error.ServiceUnknown",
+            )
+        try:
+            self._call_controller.hold_and_answer()
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc), name="org.ofono.Error.Failed"
+            ) from exc
+
+    @dbus.service.method(IFACE_CALLS, in_signature="", out_signature="")
+    def ReleaseAndAnswer(self) -> None:  # noqa: N802
+        self._require_call_setup_ready()
+        if self._call_controller is None:
+            raise dbus.exceptions.DBusException(
+                "oFono not available — install oFono to use call features",
+                name="org.freedesktop.DBus.Error.ServiceUnknown",
+            )
+        try:
+            self._call_controller.release_and_answer()
+        except Exception as exc:
+            raise dbus.exceptions.DBusException(
+                str(exc), name="org.ofono.Error.Failed"
+            ) from exc
+
     @dbus.service.signal(IFACE_CALLS, signature="ss")
     def IncomingCall(self, caller_name: str, caller_number: str) -> None:  # noqa: N802
         pass
@@ -709,6 +764,22 @@ class TincanService(dbus.service.Object):
 
     @dbus.service.signal(IFACE_CALLS, signature="")
     def AudioRestored(self) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_CALLS, signature="sss")
+    def CallWaiting(self, call_id: str, number: str, name: str) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_CALLS, signature="ss")
+    def CallHeld(self, call_id: str, number: str) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_CALLS, signature="ss")
+    def CallActive(self, call_id: str, number: str) -> None:  # noqa: N802
+        pass
+
+    @dbus.service.signal(IFACE_CALLS, signature="s")
+    def CallRemoved(self, call_id: str) -> None:  # noqa: N802
         pass
 
     def on_call_incoming(self, caller_name: str, caller_number: str) -> None:
@@ -735,6 +806,26 @@ class TincanService(dbus.service.Object):
         """Called by CallController when SCO audio recovers after an error."""
         _log.info("AudioRestored")
         self.AudioRestored()
+
+    def on_call_active(self, call_id: str, number: str) -> None:
+        """Called by CallController before on_call_connected when call goes active."""
+        _log.info("CallActive: %s", call_id)
+        self.CallActive(str(call_id), str(number))
+
+    def on_call_held(self, call_id: str, number: str) -> None:
+        """Called by CallController when a call is placed on hold."""
+        _log.info("CallHeld: %s", call_id)
+        self.CallHeld(str(call_id), str(number))
+
+    def on_call_waiting(self, call_id: str, number: str, name: str) -> None:
+        """Called by CallController when a second call arrives while one is active."""
+        _log.info("CallWaiting: %s", call_id)
+        self.CallWaiting(str(call_id), str(number), str(name))
+
+    def on_call_removed(self, call_id: str) -> None:
+        """Called by CallController when a specific call is removed."""
+        _log.info("CallRemoved: %s", call_id)
+        self.CallRemoved(str(call_id))
 
     def on_app_notification_received(self, notif: dict) -> None:
         """Handle a non-SMS iOS app notification from the ANCS backend.
