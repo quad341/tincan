@@ -210,6 +210,7 @@ class IncomingCallDialog(QDialog):
         self._hold_btn = QPushButton("Hold && Answer")
         self._hold_btn.setFixedSize(162, 44)
         self._hold_btn.setDefault(False)
+        self._hold_btn.setAutoDefault(False)
         self._hold_btn.setStyleSheet(
             "QPushButton { background: #16a34a; color: #ffffff; border: none;"
             " font-size: 13px; border-radius: 4px; }"
@@ -222,6 +223,7 @@ class IncomingCallDialog(QDialog):
         self._release_btn = QPushButton("Release && Answer")
         self._release_btn.setFixedSize(162, 44)
         self._release_btn.setDefault(False)
+        self._release_btn.setAutoDefault(False)
         self._release_btn.setStyleSheet(
             "QPushButton { background: #dc2626; color: #ffffff; border: none;"
             " font-size: 13px; border-radius: 4px; }"
@@ -236,6 +238,7 @@ class IncomingCallDialog(QDialog):
         # full-width Decline (ghost)
         self._decline_btn = QPushButton("✕  Decline")
         self._decline_btn.setFixedHeight(44)
+        self._decline_btn.setAutoDefault(False)
         self._decline_btn.setStyleSheet(
             "QPushButton { background: #27272a; color: #9ca3af; border: 1px solid #3f3f46;"
             " font-size: 14px; border-radius: 4px; }"
