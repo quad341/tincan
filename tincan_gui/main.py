@@ -46,8 +46,8 @@ from tincan_gui.daemon_config import DaemonConfig, load_daemon_config, save_daem
 from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
-    ANCSRepairBanner,
     AdapterUnavailableBanner,
+    ANCSRepairBanner,
     CallSetupRequiredBanner,
     ContactsEmptyBanner,
     StateABanner,
@@ -1452,12 +1452,16 @@ class MainWindow(QMainWindow):
                 "Phone calls: setup required. Run: cd packaging/selinux && sudo ./install.sh"
             )
         self._incall_dialog = dlg
-        dlg.declined.connect(lambda: self._dbus_client.hangup(call_id))
+        dlg.declined.connect(lambda: self._on_call_waiting_decline(call_id))
         dlg.hold_and_answer_requested.connect(self._on_hold_and_answer_accepted)
         dlg.release_and_answer_requested.connect(self._on_release_and_answer_accepted)
         dlg.raise_()
         dlg.activateWindow()
         dlg.show()
+
+    def _on_call_waiting_decline(self, call_id: str) -> None:
+        self._dbus_client.hangup(call_id)
+        self._incall_dialog = None
 
     def _on_hold_and_answer_accepted(self) -> None:
         self._dbus_client.hold_and_answer()
