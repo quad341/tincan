@@ -6,12 +6,14 @@ Encodes the manually-validated 2026-06-11 recipe:
   (3) verify dongle USB autosuspend is disabled
   (4) set oFono CallVolume Speaker/Mic to max when call goes active
   (5) wire PipeWire SCO routing: bluez_input→sink, source→bluez_output; tear down on hangup
+  (6) uplink TTS mixer: null-sink mixing (mic + iris_tts) → bluez_output (tincan-rfb86)
 """
 from __future__ import annotations
 
 import logging
 import pathlib
 import subprocess
+from dataclasses import dataclass, field
 
 _log = logging.getLogger(__name__)
 
@@ -244,3 +246,206 @@ def teardown_sco_routing(links: list[tuple[str, str]]) -> None:
         _pw_unlink(out_port, in_port)
     if links:
         _log.info("call_audio: SCO routing torn down (%d links)", len(links))
+
+
+# ---------------------------------------------------------------------------
+# Uplink TTS mixer (tincan-rfb86)
+# ---------------------------------------------------------------------------
+# Builds a PipeWire null-sink mixing graph:
+#   (mic + iris_tts) → null-sink → bluez_output
+# Barge-in: BargeInController gates TTS mute when operator mic is active.
+# ---------------------------------------------------------------------------
+
+_UPLINK_MIXER_SINK = "tincan_iris_uplink_mix"
+
+
+@dataclass
+class UplinkMixerCtx:
+    """Live context for the uplink TTS mixer; pass to teardown_uplink_mixer()."""
+    module_id: int
+    mixer_sink_name: str
+    mic_links: list[tuple[str, str]] = field(default_factory=list)
+    tts_links: list[tuple[str, str]] = field(default_factory=list)
+    out_links: list[tuple[str, str]] = field(default_factory=list)
+
+
+def _pactl_load_null_sink(sink_name: str) -> int | None:
+    """Load a PipeWire null-sink module. Return module ID, or None on failure."""
+    try:
+        r = subprocess.run(
+            ["pactl", "load-module", "module-null-sink",
+             f"sink_name={sink_name}",
+             "media.class=Audio/Sink",
+             "channel_map=mono"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            _log.warning(
+                "call_audio: pactl load-module module-null-sink failed (rc=%d): %s",
+                r.returncode, r.stderr.strip(),
+            )
+            return None
+        module_id = int(r.stdout.strip())
+        _log.info("call_audio: null-sink %r loaded as module %d", sink_name, module_id)
+        return module_id
+    except Exception as exc:
+        _log.warning("call_audio: pactl load-module error: %s", exc)
+        return None
+
+
+def _pactl_unload_module(module_id: int) -> None:
+    """Unload a PipeWire module by ID."""
+    try:
+        subprocess.run(
+            ["pactl", "unload-module", str(module_id)],
+            capture_output=True, text=True, timeout=5,
+        )
+        _log.debug("call_audio: unloaded module %d", module_id)
+    except Exception as exc:
+        _log.debug("call_audio: pactl unload-module error: %s", exc)
+
+
+def setup_uplink_mixer(
+    device_mac_fragment: str,
+    tts_source_name: str | None = None,
+) -> UplinkMixerCtx | None:
+    """Create a PipeWire null-sink uplink mixer: (mic + optional_tts) → bluez_output.
+
+    Returns None if required ports are not found or the null-sink cannot be created.
+    """
+    mac = device_mac_fragment.lower().replace(":", "_")
+    sink_name = _UPLINK_MIXER_SINK
+
+    module_id = _pactl_load_null_sink(sink_name)
+    if module_id is None:
+        return None
+
+    outputs = _pw_list_outputs()
+    inputs = _pw_list_inputs()
+
+    mic_out_ports = [
+        p for p in outputs
+        if "capture" in p.lower()
+        and "bluez" not in p.lower()
+        and sink_name not in p
+        and (tts_source_name is None or tts_source_name not in p)
+    ]
+    mixer_in_ports = [p for p in inputs if sink_name in p and "monitor" not in p]
+    monitor_out_ports = [p for p in outputs if sink_name in p and "monitor" in p]
+    bluez_in_ports = [p for p in inputs if "bluez_output" in p.lower() and mac in p.lower()]
+
+    if not mic_out_ports:
+        _log.warning("call_audio: uplink mixer: no mic capture ports found")
+        _pactl_unload_module(module_id)
+        return None
+    if not mixer_in_ports:
+        _log.warning("call_audio: uplink mixer: no null-sink input ports for %r", sink_name)
+        _pactl_unload_module(module_id)
+        return None
+    if not bluez_in_ports:
+        _log.warning("call_audio: uplink mixer: no bluez_output ports for MAC %s", mac)
+        _pactl_unload_module(module_id)
+        return None
+    if not monitor_out_ports:
+        _log.warning("call_audio: uplink mixer: no null-sink monitor output ports found")
+        _pactl_unload_module(module_id)
+        return None
+
+    ctx = UplinkMixerCtx(module_id=module_id, mixer_sink_name=sink_name)
+
+    for out in mic_out_ports:
+        channel = out.rsplit(":", 1)[-1].replace("capture_", "playback_")
+        target = next((p for p in mixer_in_ports if p.endswith(channel)), mixer_in_ports[0])
+        if _pw_link(out, target):
+            ctx.mic_links.append((out, target))
+
+    for out in monitor_out_ports:
+        channel = out.rsplit(":", 1)[-1].replace("capture_", "playback_")
+        target = next((p for p in bluez_in_ports if p.endswith(channel)), bluez_in_ports[0])
+        if _pw_link(out, target):
+            ctx.out_links.append((out, target))
+
+    if tts_source_name:
+        connect_tts_to_uplink(ctx, tts_source_name)
+
+    _log.info(
+        "call_audio: uplink mixer ready — mic=%d tts=%d out=%d links",
+        len(ctx.mic_links), len(ctx.tts_links), len(ctx.out_links),
+    )
+    return ctx
+
+
+def connect_tts_to_uplink(mixer_ctx: UplinkMixerCtx, tts_source_name: str) -> bool:
+    """Connect a TTS source port to the uplink null-sink. Returns True on success."""
+    outputs = _pw_list_outputs()
+    inputs = _pw_list_inputs()
+
+    tts_out_ports = [p for p in outputs if tts_source_name in p]
+    mixer_in_ports = [
+        p for p in inputs
+        if mixer_ctx.mixer_sink_name in p and "monitor" not in p
+    ]
+
+    if not tts_out_ports:
+        _log.warning("call_audio: uplink mixer: no TTS output ports for %r", tts_source_name)
+        return False
+    if not mixer_in_ports:
+        _log.warning(
+            "call_audio: uplink mixer: no null-sink inputs for %r",
+            mixer_ctx.mixer_sink_name,
+        )
+        return False
+
+    created = False
+    for out in tts_out_ports:
+        channel = out.rsplit(":", 1)[-1].replace("capture_", "playback_")
+        target = next((p for p in mixer_in_ports if p.endswith(channel)), mixer_in_ports[0])
+        if _pw_link(out, target):
+            mixer_ctx.tts_links.append((out, target))
+            created = True
+
+    return created
+
+
+def teardown_uplink_mixer(mixer_ctx: UplinkMixerCtx) -> None:
+    """Disconnect all links and unload the null-sink module."""
+    all_links = mixer_ctx.mic_links + mixer_ctx.tts_links + mixer_ctx.out_links
+    for out_port, in_port in all_links:
+        _pw_unlink(out_port, in_port)
+    _pactl_unload_module(mixer_ctx.module_id)
+    _log.info(
+        "call_audio: uplink mixer torn down (module %d, %d mic + %d tts + %d out links)",
+        mixer_ctx.module_id,
+        len(mixer_ctx.mic_links),
+        len(mixer_ctx.tts_links),
+        len(mixer_ctx.out_links),
+    )
+
+
+class BargeInController:
+    """VAD-based barge-in: mutes TTS uplink while operator mic is active.
+
+    Call update(mic_rms) each audio frame. Returns True while TTS should be
+    muted (operator speaking or within the hangover window).
+    """
+
+    def __init__(self, threshold_rms: float = 500.0, hangover_frames: int = 10) -> None:
+        self._threshold = threshold_rms
+        self._hangover = hangover_frames
+        self._silence_run = 0
+        self._muted = False
+
+    def update(self, mic_rms: float) -> bool:
+        """Update with current mic RMS. Returns True if TTS should be muted."""
+        if mic_rms >= self._threshold:
+            self._silence_run = 0
+            self._muted = True
+        elif self._muted:
+            self._silence_run += 1
+            if self._silence_run >= self._hangover:
+                self._muted = False
+                self._silence_run = 0
+        return self._muted
+
+    def is_muted(self) -> bool:
+        return self._muted
