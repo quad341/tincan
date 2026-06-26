@@ -1,14 +1,13 @@
 """Tests: tincand/call_audio.py — verify_dongle_adapter, verify_usb_autosuspend_off.
-Bead: tincan-3by2j
+Bead: tincan-3by2j (corrected: tincan-ggh48)
 
 Coverage:
   verify_dongle_adapter:
-  - Returns True when modem_path contains _DONGLE_ADAPTER_FRAGMENT (exact lowercase).
-  - Returns True when modem_path contains fragment in upper/mixed case (case-insensitive).
-  - Returns False when modem_path does not contain the fragment.
-  - Returns False for an empty path.
-  - No WARNING logged when fragment is present.
-  - WARNING logged when fragment is absent.
+  - Returns True when adapter_hci matches a path component in modem_path.
+  - Returns False when adapter_hci does not match any path component.
+  - Returns True (graceful skip) when adapter_hci is empty.
+  - No WARNING logged when adapter_hci matches.
+  - WARNING logged when adapter_hci is set but path does not contain it.
 
   verify_usb_autosuspend_off:
   - Returns True when /sys/bus/usb/devices does not exist (sysfs absent — no block).
@@ -30,7 +29,6 @@ import pathlib
 import pytest
 
 from tincand.call_audio import (
-    _DONGLE_ADAPTER_FRAGMENT,
     _DONGLE_USB_PRODUCT,
     _DONGLE_USB_VENDOR,
     verify_dongle_adapter,
@@ -99,34 +97,27 @@ def missing_usb_root(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 class TestVerifyDongleAdapter:
-    """verify_dongle_adapter — True iff modem_path contains the dongle MAC fragment."""
+    """verify_dongle_adapter — True iff /{adapter_hci}/ appears in modem_path."""
 
-    def test_returns_true_when_fragment_present_lowercase(self):
-        path = f"/org/ofono/{_DONGLE_ADAPTER_FRAGMENT}/hfp"
-        assert verify_dongle_adapter(path) is True
+    def test_returns_true_when_adapter_hci_matches_path(self):
+        path = "/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20"
+        assert verify_dongle_adapter(path, "hci1") is True
 
-    def test_returns_true_when_fragment_uppercase(self):
-        path = f"/org/ofono/{_DONGLE_ADAPTER_FRAGMENT.upper()}/hfp"
-        assert verify_dongle_adapter(path) is True
+    def test_returns_false_when_adapter_hci_not_in_path(self):
+        path = "/hfp/org/bluez/hci0/dev_D0_6B_78_33_46_20"
+        assert verify_dongle_adapter(path, "hci1") is False
 
-    def test_returns_true_when_fragment_mixed_case(self):
-        path = f"/org/ofono/{_DONGLE_ADAPTER_FRAGMENT.title()}/hfp"
-        assert verify_dongle_adapter(path) is True
+    def test_returns_true_when_adapter_hci_empty(self):
+        assert verify_dongle_adapter("/hfp/org/bluez/hci0/dev_D0_6B_78_33_46_20", "") is True
 
-    def test_returns_false_when_fragment_absent(self):
-        assert verify_dongle_adapter("/org/ofono/hci0/hfp") is False
-
-    def test_returns_false_for_empty_path(self):
-        assert verify_dongle_adapter("") is False
-
-    def test_no_warning_when_fragment_present(self, caplog):
+    def test_no_warning_when_adapter_hci_matches(self, caplog):
         with caplog.at_level(logging.WARNING, logger="tincand.call_audio"):
-            verify_dongle_adapter(f"/org/ofono/{_DONGLE_ADAPTER_FRAGMENT}/hfp")
+            verify_dongle_adapter("/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20", "hci1")
         assert not any(r.levelname == "WARNING" for r in caplog.records)
 
-    def test_warning_logged_when_fragment_absent(self, caplog):
+    def test_warning_logged_when_adapter_hci_not_in_path(self, caplog):
         with caplog.at_level(logging.WARNING, logger="tincand.call_audio"):
-            verify_dongle_adapter("/org/ofono/hci0/hfp")
+            verify_dongle_adapter("/hfp/org/bluez/hci0/dev_D0_6B_78_33_46_20", "hci1")
         assert any(r.levelname == "WARNING" for r in caplog.records)
 
 
