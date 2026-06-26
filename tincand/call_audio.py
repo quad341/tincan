@@ -339,7 +339,11 @@ def setup_uplink_mixer(
         _pactl_unload_module(module_id)
         return None
     if not mixer_in_ports:
-        _log.warning("call_audio: uplink mixer: no null-sink input ports for %r", sink_name)
+        _log.warning(
+            "call_audio: uplink mixer: no null-sink input ports for %r — unloading "
+            "(PipeWire may need more time; will retry if configured)",
+            sink_name,
+        )
         _pactl_unload_module(module_id)
         return None
     if not bluez_in_ports:
@@ -347,7 +351,10 @@ def setup_uplink_mixer(
         _pactl_unload_module(module_id)
         return None
     if not monitor_out_ports:
-        _log.warning("call_audio: uplink mixer: no null-sink monitor output ports found")
+        _log.warning(
+            "call_audio: uplink mixer: no null-sink monitor output ports found — unloading "
+            "(PipeWire may need more time; will retry if configured)"
+        )
         _pactl_unload_module(module_id)
         return None
 
