@@ -39,9 +39,6 @@ All subprocess calls mocked — no real PipeWire or pactl required.
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
-from typing import NamedTuple
-from unittest.mock import call, patch
 
 import pytest
 
