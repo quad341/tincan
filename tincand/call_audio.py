@@ -422,6 +422,31 @@ def teardown_uplink_mixer(mixer_ctx: UplinkMixerCtx) -> None:
     )
 
 
+def apply_barge_in_frame(
+    ctx: UplinkMixerCtx,
+    controller: "BargeInController",
+    mic_rms: float,
+) -> bool:
+    """Update VAD state and actuate TTS pw-links accordingly.
+
+    On False→True transition (operator starts speaking): unlinks every port
+    pair in ctx.tts_links so iris audio is removed from the uplink.
+    On True→False transition (hangover expires): re-links ctx.tts_links so
+    iris resumes.  Returns True while TTS is muted.
+    """
+    was_muted = controller.is_muted()
+    now_muted = controller.update(mic_rms)
+
+    if not was_muted and now_muted:
+        for out_port, in_port in ctx.tts_links:
+            _pw_unlink(out_port, in_port)
+    elif was_muted and not now_muted:
+        for out_port, in_port in ctx.tts_links:
+            _pw_link(out_port, in_port)
+
+    return now_muted
+
+
 class BargeInController:
     """VAD-based barge-in: mutes TTS uplink while operator mic is active.
 
