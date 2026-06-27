@@ -31,7 +31,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Backend to use (default: TINCAN_BACKEND env var). "
-            "Choices: mock, ancs."
+            f"Choices: {', '.join(sorted(_BACKENDS))}."
         ),
     )
     parser.add_argument(
