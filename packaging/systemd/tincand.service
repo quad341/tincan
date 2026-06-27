@@ -1,0 +1,20 @@
+[Unit]
+Description=tincand — Bluetooth bridge daemon (im.tincan.Daemon / im.tincan.Calls)
+Documentation=https://github.com/quad341/tincan
+After=bluetooth.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jaword/projects/tincan
+Environment=PYTHONPATH=/home/jaword/projects/tincan
+ExecStart=/home/jaword/projects/tincan/.venv/bin/python -m tincand --backend map
+ExecStopPost=/bin/sh -c 'logger -t tincand-stop "tincand stopped: uid=$UID ppid=$PPID comm=$(cat /proc/$PPID/comm 2>/dev/null || echo unknown)"'
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tincand
+
+[Install]
+WantedBy=default.target

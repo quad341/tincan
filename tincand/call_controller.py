@@ -10,6 +10,7 @@ If oFono is absent, the controller logs a WARNING and stays idle.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from gi.repository import GLib
@@ -27,6 +28,13 @@ _IFACE_CALL = "org.ofono.VoiceCall"
 
 _RETRY_STEPS = [1.0, 2.0, 4.0, 8.0, 15.0]
 _AUDIO_TIMEOUT_S = 5
+
+_HCI_RE = re.compile(r"/(hci\d+)/")
+
+
+def _adapter_hci_from_path(path: str) -> str:
+    m = _HCI_RE.search(path)
+    return m.group(1) if m else ""
 
 
 @dataclass
@@ -258,7 +266,17 @@ class CallController:
             )
         self._cancel_pending_subscription()
         self._cancel_vcm_subscriptions()
-        call_audio.verify_dongle_adapter(path, self._adapter_hci)
+        adapter_ok = call_audio.verify_dongle_adapter(path, self._adapter_hci)
+        if hasattr(self._service, "set_adapter_warning"):
+            if adapter_ok:
+                self._service.set_adapter_warning("")
+            else:
+                actual_hci = _adapter_hci_from_path(path)
+                warn = (
+                    f"iPhone connected on {actual_hci} (built-in, no SCO). "
+                    f"Connect iPhone to the ASUS USB-BT500 ({self._adapter_hci}) for call audio."
+                )
+                self._service.set_adapter_warning(warn)
         call_audio.verify_usb_autosuspend_off()
         self._modem_path = path
         self._retry_index = 0
