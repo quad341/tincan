@@ -113,6 +113,8 @@ class TincanService(dbus.service.Object):
         self._seen_apps = SeenAppsRegistry()
         self._adapter_path: str = ""
         self._adapter_path_requested: str = ""
+        self._adapter_warning: str = ""
+        self._device_discovered: bool = False
 
     # ------------------------------------------------------------------
     # im.tincan.Daemon — lifecycle and status
@@ -176,11 +178,15 @@ class TincanService(dbus.service.Object):
         """Return current daemon status.
 
         Keys: connected(b), device_address(s), capabilities(a{sb}),
-        adapter_path_requested(s).
+        adapter_path_requested(s), adapter_warning(s), device_discovered(b).
         capabilities always includes messages, contacts, ancs — even when
         disconnected (tincan-40c).  Never raises.
         adapter_path_requested is '' unless the QSettings adapter was absent at
         startup and the daemon fell back to a different adapter.
+        adapter_warning is '' when adapter is correct; non-empty is actionable
+        operator guidance (plain text, no ANSI/Markdown).
+        device_discovered is True when the device address came from oFono
+        auto-discovery rather than explicit config/CLI.
         """
         return dbus.Dictionary(
             {
@@ -193,6 +199,8 @@ class TincanService(dbus.service.Object):
                 ),
                 "adapter_path": dbus.String(self._adapter_path),
                 "adapter_path_requested": dbus.String(self._adapter_path_requested),
+                "adapter_warning": dbus.String(self._adapter_warning),
+                "device_discovered": dbus.Boolean(self._device_discovered),
             },
             signature="sv",
         )
@@ -280,6 +288,24 @@ class TincanService(dbus.service.Object):
         Reported via GetStatus() as adapter_path_requested.
         """
         self._adapter_path_requested = str(path)
+
+    def set_adapter_warning(self, text: str) -> None:
+        """Set or clear the adapter mismatch warning.
+
+        Non-empty text means the iPhone is connected on the wrong adapter (no SCO).
+        Empty string means adapter is correct or state is unknown.
+        Plain text only — no ANSI codes, no Markdown.
+        """
+        self._adapter_warning = str(text)
+
+    def set_device_discovered(self, discovered: bool) -> None:
+        """Record whether the device address came from oFono auto-discovery.
+
+        True only when _resolve_device_address() found the device via oFono
+        GetModems() (Step 4 of the priority chain).  False for explicit
+        CLI/env/config sources.
+        """
+        self._device_discovered = bool(discovered)
 
     # ------------------------------------------------------------------
     # im.tincan.Messages — SMS/iMessage send and receive
