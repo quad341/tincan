@@ -94,6 +94,8 @@ _GUI_SUBSCRIPTIONS: list[tuple[str, str, str, str]] = [
 # (interface, method_name) — every iface.call()/asyncCall()/_dbus_call() in TincandClient
 _GUI_METHOD_CALLS: list[tuple[str, str]] = [
     (IFACE_DAEMON,   "GetStatus"),
+    (IFACE_DAEMON,   "GetAdapters"),       # pre-existing gap — add for parity
+    (IFACE_DAEMON,   "GetHFPDevices"),     # new in PR #146
     (IFACE_DAEMON,   "GetNotificationFilter"),
     (IFACE_DAEMON,   "SetNotificationsEnabled"),
     (IFACE_DAEMON,   "SetAppFilter"),
