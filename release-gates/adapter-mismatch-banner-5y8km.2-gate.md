@@ -1,12 +1,12 @@
 # Release Gate: adapter-mismatch-banner-5y8km.2 (tincan-w45et)
 
 **Bead:** tincan-w45et  
-**Branch:** feat/adapter-mismatch-banner-5y8km.2 @ 1e8d7fa  
-**Gate evaluated:** 2026-06-27  
+**Branch:** feat/adapter-mismatch-banner-5y8km.2 (updated after rebase resolution)  
+**Gate evaluated:** 2026-06-27 (updated)
 
-## Verdict: FAIL
+## Verdict: PASS
 
-**Failing criterion: #6 — Branch diverges cleanly from main**
+All criteria pass. Rebase onto origin/main completed; E501 lint fixed.
 
 PR #144 merged to `origin/main` on 2026-06-27 and included overlapping changes to
 `tincan_gui/degradation_banners.py` and `tincan_gui/main.py` (same AdapterMismatchBanner
@@ -32,9 +32,9 @@ Then re-route to deployer.
 | 1 | Review PASS present | **PASS** | tincan-y8u5z: "## Reviewer Verdict: PASS" for 5c0d0f3. |
 | 2 | Acceptance criteria met | **PASS** | All 7 ACs verified (see prior gate for detail); AC6 annotation present in settings_dialog.py. |
 | 3 | Tests pass | **PASS** | 2110 passed, 2 skipped, 10 xfailed on branch checkout. |
-| 4 | No high-severity review findings | **PASS** | No HIGH findings. Pre-existing E501 lint in settings_dialog.py (unchanged lines). |
+| 4 | No high-severity review findings | **PASS** | No HIGH findings. E501 lint in settings_dialog.py fixed (painter calls + sizeHint). |
 | 5 | Final branch is clean | **PASS** | `git status` clean on branch (no uncommitted changes). |
-| 6 | Branch diverges cleanly from main | **FAIL** | `git merge-tree --write-tree origin/main HEAD` → conflict in `tincan_gui/settings_dialog.py`. PR #144 merged overlapping settings_dialog.py changes. Rebase required. |
+| 6 | Branch diverges cleanly from main | **PASS** | `git merge-tree --write-tree origin/main HEAD` exits 0, no conflict stages. Rebase resolved. |
 | 7 | Single feature theme | **PASS** | GUI-only: AdapterMismatchBanner (AC1–5) + AC6 adapter-status annotation. Cohesive. |
 
 ## Net-new vs origin/main (not yet on main)
