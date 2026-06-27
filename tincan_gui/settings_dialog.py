@@ -272,18 +272,19 @@ class _AdapterItemDelegate(QStyledItemDelegate):
             address = index.data(self._ADDR_ROLE) or ""
             r = option.rect
             x, w = r.x() + 8, r.width() - 16
+            _align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
             f1 = QFont()
             f1.setPointSize(12)
             painter.setFont(f1)
             painter.setPen(QColor("#f4f4f5"))
-            painter.drawText(x, r.y() + 4, w, 22, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, alias)
+            painter.drawText(x, r.y() + 4, w, 22, _align, alias)
 
             f2 = QFont()
             f2.setPointSize(10)
             painter.setFont(f2)
             painter.setPen(QColor("#a1a1aa"))
-            painter.drawText(x, r.y() + 26, w, 20, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, address)
+            painter.drawText(x, r.y() + 26, w, 20, _align, address)
         finally:
             painter.restore()
 
@@ -593,6 +594,7 @@ class SettingsDialog(QDialog):
             self._adapter_mismatch_annotation.setTextInteractionFlags(
                 Qt.TextInteractionFlag.NoTextInteraction
             )
+            self._adapter_mismatch_annotation.setTextFormat(Qt.TextFormat.PlainText)
             self._adapter_mismatch_annotation.hide()
             bt_layout.addWidget(self._adapter_mismatch_annotation)
 
@@ -753,7 +755,8 @@ class SettingsDialog(QDialog):
             action = self._filter_apps.get(app_id, "allow")
             row = _AppRowWidget(app_id, label_hint, action, self._client, self._dark)
             item = QListWidgetItem()
-            item.setSizeHint(QSize(1, row.sizeHint().height()))  # width=1: let view use viewport width
+            # width=1: let view use viewport width
+            item.setSizeHint(QSize(1, row.sizeHint().height()))
             self._list_widget.addItem(item)
             self._list_widget.setItemWidget(item, row)
             self._row_widgets.append(row)

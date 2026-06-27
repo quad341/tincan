@@ -1063,7 +1063,8 @@ class MainWindow(QMainWindow):
             caps = {"messages": True, "contacts": True, "ancs": True}
             name = str(device_address)
 
-        # Persist device address so next startup reads config instead of needing --device (tincan-oxthc).
+        # Persist device address so next startup reads config
+        # instead of needing --device (tincan-oxthc).
         if device_address:
             cfg = load_daemon_config()
             if cfg.device != device_address:
