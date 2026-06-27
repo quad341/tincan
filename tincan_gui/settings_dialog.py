@@ -966,6 +966,12 @@ class SettingsDialog(QDialog):
             if saved_mac and mac == saved_mac:
                 selected_idx = i
 
+        if saved_mac and selected_idx == 0:
+            self._device_combo.addItem(saved_mac, saved_mac)
+            idx = self._device_combo.count() - 1
+            self._device_combo.setItemData(idx, saved_mac, Qt.ItemDataRole.AccessibleTextRole)
+            selected_idx = idx
+
         self._device_combo.setCurrentIndex(selected_idx)
         self._device_combo.blockSignals(False)
         self._device_combo.setEnabled(True)

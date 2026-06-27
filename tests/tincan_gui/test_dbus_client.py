@@ -279,3 +279,79 @@ class TestRefreshContacts:
             client.refresh_contacts()
 
         mock_iface.call.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# §6 get_hfp_devices — fallback + demarshalling (mirrors get_adapters) (tincan-d5yyu)
+# ---------------------------------------------------------------------------
+
+_ONE_HFP_DEVICE = {
+    "path": "/org/ofono/hfp/dev_D0_6B_78_33_46_20",
+    "mac": "D0:6B:78:33:46:20",
+    "name": "iPhone 15 Pro",
+}
+
+
+class TestGetHFPDevices:
+    """get_hfp_devices() returns [] when unreachable; demarshals both code paths."""
+
+    def test_returns_empty_when_bus_disconnected(self):
+        client = _make_disconnected_client()
+        assert client.get_hfp_devices() == []
+
+    def test_returns_empty_when_iface_invalid(self, _hermetic_dbus, monkeypatch):
+        # dbus-python path misses (_dbus_call → None), Qt iface invalid → [].
+        _hermetic_dbus.isConnected.return_value = True
+        monkeypatch.setattr(TincandClient, "_dbus_call", lambda self, *a: None)
+        mock_iface = MagicMock()
+        mock_iface.isValid.return_value = False
+        monkeypatch.setattr(
+            "tincan_gui.dbus_client.QDBusInterface", lambda *a: mock_iface
+        )
+        client = TincandClient()
+        assert client.get_hfp_devices() == []
+
+    def test_demarshals_dbus_python_result(self, _hermetic_dbus, monkeypatch):
+        # dbus-python path hit: _dbus_call returns a list of dict-like maps.
+        _hermetic_dbus.isConnected.return_value = True
+        monkeypatch.setattr(
+            TincandClient, "_dbus_call", lambda self, *a: [dict(_ONE_HFP_DEVICE)]
+        )
+        client = TincandClient()
+        result = client.get_hfp_devices()
+        assert result == [_ONE_HFP_DEVICE]
+        assert isinstance(result[0], dict)
+
+    def test_qt_fallback_demarshals_reply_value(self, _hermetic_dbus):
+        # dbus-python misses (_hermetic_dbus → _dbus_call None); Qt fallback used.
+        _hermetic_dbus.isConnected.return_value = True
+        client = TincandClient()
+
+        mock_iface = MagicMock()
+        mock_iface.isValid.return_value = True
+        mock_reply = MagicMock()  # non-QDBusMessage → passed through by _wrap_reply
+        mock_reply.isValid.return_value = True
+        mock_reply.value.return_value = [dict(_ONE_HFP_DEVICE)]
+        mock_iface.call.return_value = mock_reply
+
+        with patch("tincan_gui.dbus_client.QDBusInterface", return_value=mock_iface):
+            result = client.get_hfp_devices()
+
+        assert result == [_ONE_HFP_DEVICE]
+        mock_iface.call.assert_called_once_with("GetHFPDevices")
+
+    def test_qt_fallback_returns_empty_on_invalid_reply(self, _hermetic_dbus):
+        _hermetic_dbus.isConnected.return_value = True
+        client = TincandClient()
+
+        mock_iface = MagicMock()
+        mock_iface.isValid.return_value = True
+        mock_reply = MagicMock()
+        mock_reply.isValid.return_value = False
+        mock_reply.error.return_value.message.return_value = "NoReply"
+        mock_iface.call.return_value = mock_reply
+
+        with patch("tincan_gui.dbus_client.QDBusInterface", return_value=mock_iface):
+            result = client.get_hfp_devices()
+
+        assert result == []
