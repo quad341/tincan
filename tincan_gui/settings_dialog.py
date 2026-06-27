@@ -38,6 +38,9 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+_BT_COMBO_MIN_WIDTH = 360
+_BT_COMBO_MIN_CONTENTS = 42
+
 
 def _section_header(text: str) -> tuple[QLabel, QFrame]:
     """Return a (header QLabel, separator QFrame) pair styled per design spec."""
@@ -547,14 +550,16 @@ class SettingsDialog(QDialog):
                 Qt.TextInteractionFlag.NoTextInteraction
             )
             unavail_layout.addWidget(self._adapter_unavailable_label)
-            self._adapter_unavailable_frame.hide()
+            self._adapter_unavailable_frame.setAccessibleName("Bluetooth service unavailable")
+            self._adapter_unavailable_frame.show()
             bt_layout.addWidget(self._adapter_unavailable_frame)
 
-            # Adapter combo (populated async after show)
+            # Adapter combo (populated async after show; hidden until load completes)
             self._adapter_combo = QComboBox()
             self._adapter_combo.setPlaceholderText("Loading adapters…")
             self._adapter_combo.setEnabled(False)
             self._adapter_combo.setAccessibleName("Bluetooth Adapter")
+            self._adapter_combo.hide()
             bt_layout.addWidget(self._adapter_combo)
 
             # Capability badges (shown after load)
@@ -579,8 +584,21 @@ class SettingsDialog(QDialog):
             self._adapter_powered_off_badge.hide()
             bt_layout.addWidget(self._adapter_powered_off_badge)
 
+            self._adapter_mismatch_annotation = QLabel()
+            ann_font = QFont()
+            ann_font.setPointSize(10)
+            self._adapter_mismatch_annotation.setFont(ann_font)
+            self._adapter_mismatch_annotation.setWordWrap(True)
+            self._adapter_mismatch_annotation.setStyleSheet("QLabel { color: #fbbf24; }")
+            self._adapter_mismatch_annotation.setTextInteractionFlags(
+                Qt.TextInteractionFlag.NoTextInteraction
+            )
+            self._adapter_mismatch_annotation.hide()
+            bt_layout.addWidget(self._adapter_mismatch_annotation)
+
             # Apply rich two-line delegate (AC 4)
             self._adapter_combo.setItemDelegate(_AdapterItemDelegate(self._adapter_combo))
+            self._configure_bt_combo_width(self._adapter_combo)
 
             # Restart banner (shown after adapter selection change)
             self._adapter_restart_banner = _AdapterRestartBanner()
@@ -613,6 +631,7 @@ class SettingsDialog(QDialog):
             self._device_combo.setPlaceholderText("Loading devices…")
             self._device_combo.setEnabled(False)
             self._device_combo.setAccessibleName("Bluetooth device")
+            self._configure_bt_combo_width(self._device_combo)
             bt_layout.addWidget(self._device_combo)
             self._device_combo.currentIndexChanged.connect(self._on_device_changed)
             self._device_loader = _DeviceLoader()
@@ -801,6 +820,28 @@ class SettingsDialog(QDialog):
     # Adapter picker: load, populate, update badges
     # ------------------------------------------------------------------
 
+    def _configure_bt_combo_width(self, combo: QComboBox) -> None:
+        combo.setMinimumWidth(_BT_COMBO_MIN_WIDTH)
+        combo.setMinimumContentsLength(_BT_COMBO_MIN_CONTENTS)
+        combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+
+    def _refresh_adapter_mismatch_annotation(self) -> None:
+        if not self._adapters_list or not self._client:
+            self._adapter_mismatch_annotation.hide()
+            return
+        try:
+            status = self._client.get_status() or {}
+            warning = str(status.get("adapter_warning", ""))
+        except Exception:
+            warning = ""
+        if warning:
+            self._adapter_mismatch_annotation.setText(warning)
+            self._adapter_mismatch_annotation.show()
+        else:
+            self._adapter_mismatch_annotation.hide()
+
     def _load_adapters_sync(self) -> None:
         if not self._client:
             return
@@ -819,9 +860,15 @@ class SettingsDialog(QDialog):
         if not adapters:
             self._adapter_combo.hide()
             self._adapter_badge_row.hide()
+            self._adapter_powered_off_badge.hide()
+            self._adapter_restart_banner.hide()
+            self._adapter_mismatch_annotation.hide()
             self._adapter_unavailable_frame.show()
             self._refresh_btn.hide()  # AC 13: no Refresh link in BlueZ-unavailable state
             self._bt_section.setEnabled(False)
+            if hasattr(self, "_device_combo"):
+                self._device_combo.setEnabled(False)
+                self._device_combo.setPlaceholderText("No adapters available")
             self._adapter_combo.blockSignals(False)
             return
 
@@ -877,6 +924,7 @@ class SettingsDialog(QDialog):
 
         selected = adapters[selected_idx] if adapters else None
         self._update_adapter_badges(selected)
+        self._refresh_adapter_mismatch_annotation()
 
     def _update_adapter_badges(self, adapter: dict | None) -> None:
         if adapter is None:
@@ -923,6 +971,7 @@ class SettingsDialog(QDialog):
         self._adapter_restart_banner._restart_btn.setFocus()
         if index < len(self._adapters_list):
             self._update_adapter_badges(self._adapters_list[index])
+        self._refresh_adapter_mismatch_annotation()
 
     def _populate_device_combo(self, devices: list[dict]) -> None:
         self._device_combo.blockSignals(True)
