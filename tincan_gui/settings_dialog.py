@@ -851,6 +851,14 @@ class SettingsDialog(QDialog):
         self._adapter_combo.clear()
 
         if not adapters:
+            self._adapter_combo.setEnabled(False)
+            self._adapter_combo.addItem("No Bluetooth adapters found")
+            _placeholder = self._adapter_combo.model().item(0)
+            if _placeholder:
+                _placeholder.setFlags(_placeholder.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            self._adapter_combo.setAccessibleName(
+                "Bluetooth adapter — none found. Check that a Bluetooth adapter is connected."
+            )
             self._adapter_combo.hide()
             self._adapter_badge_row.hide()
             self._adapter_unavailable_frame.show()
@@ -874,7 +882,8 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
 
-        selected_idx = 0
+        saved_idx = -1
+        daemon_idx = -1
         for i, a in enumerate(adapters):
             path = str(a.get("path", ""))
             alias = str(a.get("alias", ""))
@@ -896,9 +905,13 @@ class SettingsDialog(QDialog):
                 f"{hci} — {alias}, HFP call audio {hfp_text}, LE advertising {le_text}"
             )
             self._adapter_combo.setItemData(i, a11y_text, Qt.ItemDataRole.AccessibleTextRole)
-            if a.get("is_selected") or (saved_path and path == saved_path):
-                selected_idx = i
+            # Two-pass: saved path wins over daemon is_selected (first match per pass)
+            if saved_path and path == saved_path and saved_idx == -1:
+                saved_idx = i
+            if a.get("is_selected") and daemon_idx == -1:
+                daemon_idx = i
 
+        selected_idx = saved_idx if saved_idx >= 0 else (daemon_idx if daemon_idx >= 0 else 0)
         self._adapter_combo.setCurrentIndex(selected_idx)
         self._adapter_combo.blockSignals(False)
 
@@ -1012,6 +1025,9 @@ class SettingsDialog(QDialog):
     def _refresh_adapter_mismatch_annotation(self, warning: str) -> None:
         """AC6: show/hide ⚠ annotation on the Adapter row when adapter_warning is set."""
         if not hasattr(self, "_adapter_mismatch_annotation"):
+            return
+        if not self._adapters_list:
+            self._adapter_mismatch_annotation.hide()
             return
         if not warning:
             self._adapter_mismatch_annotation.hide()

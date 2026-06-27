@@ -1,10 +1,10 @@
 """Capability degradation banners: State A (disconnected), B (Show Notifications off), C (push notifications), call setup required."""  # noqa: E501
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
-from PySide6.QtCore import QCoreApplication, Signal
-from PySide6.QtGui import QAccessible, QFont
+from PySide6.QtCore import QCoreApplication, QTimer, Signal
+from PySide6.QtGui import QAccessible, QAccessibleEvent, QFont
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAccessibleWidget,
@@ -28,59 +28,119 @@ class StateABanner(QWidget):
 
     reconnect_clicked = Signal()
 
-    def __init__(self, last_seen: str = "", parent: Optional[QWidget] = None) -> None:
+    _IDLE_STYLE = "background-color: #fee2e2; border: 2px solid #ef4444; color: #991b1b;"
+    _BUSY_STYLE = "background-color: #fecaca; border: 2px solid #ef4444; color: #991b1b;"
+    _BTN_STYLE = (
+        "QPushButton { color: #991b1b; background: #ffffff; font-size: 12pt;"
+        " border: 1px solid #ef4444; border-radius: 4px; padding: 2px 8px; }"
+        "QPushButton:hover { background: #fecaca; }"
+        "QPushButton:disabled { color: #c08080; }"
+        "QPushButton:focus { outline: 2px solid #ef4444; outline-offset: 2px; }"
+    )
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(56)
-        self.setStyleSheet(
-            "background-color: #fee2e2; border: 2px solid #ef4444; color: #991b1b;"
-        )
-
-        if not last_seen:
-            msg = QCoreApplication.translate(
-                "StateABanner",
-                "⊗ Connection lost — Bluetooth out of range"
-                " · Showing cached conversations · reconnecting…",
-            )
-        else:
-            msg = QCoreApplication.translate(
-                "StateABanner",
-                "⊗ Connection lost — last seen {last_seen}"
-                " · Bluetooth out of range · reconnecting…",
-            ).format(last_seen=last_seen)
-
-        accessible_name = QCoreApplication.translate(
-            "StateABanner",
-            "Connection lost. Activate Reconnect to retry immediately.",
-        )
-        self.setAccessibleName(accessible_name)
+        self._current_reason: str = "NEUTRAL"
+        self.setMinimumHeight(56)
+        self.setStyleSheet(self._IDLE_STYLE)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 8, 0)
+        layout.setContentsMargins(12, 4, 8, 4)
 
-        self._label = QLabel(msg)
+        text_col = QVBoxLayout()
+        text_col.setSpacing(1)
+
+        self._label = QLabel()
         label_font = QFont()
         label_font.setPointSize(12)
         label_font.setBold(True)
         self._label.setFont(label_font)
         self._label.setStyleSheet("color: #991b1b;")
         self._label.setWordWrap(True)
-        layout.addWidget(self._label, stretch=1)
+        text_col.addWidget(self._label)
 
-        reconnect_btn = QPushButton(
-            QCoreApplication.translate("StateABanner", "Reconnect")
+        self._sub_label = QLabel()
+        sub_font = QFont()
+        sub_font.setPointSize(10)
+        self._sub_label.setFont(sub_font)
+        self._sub_label.setStyleSheet("color: #991b1b;")
+        self._sub_label.setWordWrap(True)
+        text_col.addWidget(self._sub_label)
+
+        layout.addLayout(text_col, stretch=1)
+
+        self._reconnect_btn = QPushButton()
+        self._reconnect_btn.setMinimumWidth(110)
+        self._reconnect_btn.setStyleSheet(self._BTN_STYLE)
+        self._reconnect_btn.clicked.connect(self.reconnect_clicked)
+        layout.addWidget(self._reconnect_btn)
+
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setSingleShot(True)
+        self._reconnect_timer.setInterval(10_000)
+        self._reconnect_timer.timeout.connect(lambda: self.set_reconnecting(False))
+
+        self.set_reason("NEUTRAL")
+
+    def set_reason(self, reason: Literal["NEUTRAL", "OUT_OF_RANGE"]) -> None:
+        """Update banner copy for first-launch (NEUTRAL) vs post-connect disconnect (OUT_OF_RANGE)."""
+        self._current_reason = reason
+        self._reconnect_timer.stop()
+        self._reconnect_btn.setEnabled(True)
+        self.setStyleSheet(self._IDLE_STYLE)
+        if reason == "NEUTRAL":
+            self._label.setText(QCoreApplication.translate(
+                "StateABanner", "⊘ Not connected — showing cached conversations"
+            ))
+            self._sub_label.setText(QCoreApplication.translate(
+                "StateABanner", "Connect your iPhone in Settings to start messaging."
+            ))
+            self._reconnect_btn.setText(QCoreApplication.translate("StateABanner", "Connect device"))
+            self.setAccessibleName(QCoreApplication.translate(
+                "StateABanner", "Not connected. Open Settings to pair your iPhone."
+            ))
+            self._reconnect_btn.setAccessibleName(QCoreApplication.translate(
+                "StateABanner", "Open Settings to connect a device"
+            ))
+        else:
+            self._label.setText(QCoreApplication.translate(
+                "StateABanner", "⊗ Connection lost — Bluetooth out of range"
+            ))
+            self._sub_label.setText(QCoreApplication.translate(
+                "StateABanner", "Showing cached conversations · bring iPhone closer"
+            ))
+            self._reconnect_btn.setText(QCoreApplication.translate("StateABanner", "Reconnect"))
+            self.setAccessibleName(QCoreApplication.translate(
+                "StateABanner", "Connection lost. Activate Reconnect to retry immediately."
+            ))
+            self._reconnect_btn.setAccessibleName(QCoreApplication.translate(
+                "StateABanner", "Reconnect"
+            ))
+        QAccessible.updateAccessibility(
+            QAccessibleEvent(self, QAccessible.Event.NameChanged)
         )
-        reconnect_btn.setMinimumWidth(100)
-        reconnect_btn.setAccessibleName(
-            QCoreApplication.translate("StateABanner", "Reconnect")
-        )
-        reconnect_btn.setStyleSheet(
-            "QPushButton { color: #991b1b; background: #ffffff; font-size: 12pt;"
-            " border: 1px solid #ef4444; border-radius: 4px; padding: 2px 8px; }"
-            "QPushButton:hover { background: #fecaca; }"
-            "QPushButton:focus { outline: 2px solid #ef4444; outline-offset: 2px; }"
-        )
-        reconnect_btn.clicked.connect(self.reconnect_clicked)
-        layout.addWidget(reconnect_btn)
+
+    def set_reconnecting(self, reconnecting: bool) -> None:
+        """Switch between idle and busy (Reconnecting…) states."""
+        self._reconnect_timer.stop()
+        if reconnecting:
+            self._reconnect_btn.setText(
+                QCoreApplication.translate("StateABanner", "Reconnecting…")
+            )
+            self._reconnect_btn.setEnabled(False)
+            self._sub_label.setText(QCoreApplication.translate(
+                "StateABanner", "Showing cached conversations · please wait"
+            ))
+            self.setStyleSheet(self._BUSY_STYLE)
+            self.setAccessibleName(
+                QCoreApplication.translate("StateABanner", "Reconnecting, please wait")
+            )
+            QAccessible.updateAccessibility(
+                QAccessibleEvent(self, QAccessible.Event.NameChanged)
+            )
+            self._reconnect_timer.start()
+        else:
+            self.set_reason(self._current_reason)
 
 
 # ---------------------------------------------------------------------------

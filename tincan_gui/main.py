@@ -533,6 +533,7 @@ class MainWindow(QMainWindow):
         self._current_phone: str = ""     # phone for the open conversation
         self._current_phone_dialable: bool = True  # False when phone is unresolvable name
         self._connected_device: str = ""  # human-readable name or address of connected BT device
+        self._had_connection_this_session: bool = False
         self._daemon_spawn_attempted: bool = False
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
@@ -810,7 +811,7 @@ class MainWindow(QMainWindow):
         """Gate starting new conversations on an active device connection."""
         self._conv_list.set_compose_new_enabled(
             bool(self._connected_device),
-            "Connect to your iPhone to start a new conversation",
+            "Connect a device to start a new conversation",
         )
 
     def _apply_capabilities(self, caps: dict) -> None:
@@ -1003,8 +1004,10 @@ class MainWindow(QMainWindow):
             if cfg.device != device_address:
                 save_daemon_config(DaemonConfig(backend=cfg.backend, device=device_address))
 
+        self._had_connection_this_session = True
         self._connected_device = name
         self._title_bar.set_connected(name)
+        self._banner_a.set_reconnecting(False)
         self._banner_a.hide()
         self._apply_capabilities(caps)
         self._tray.set_connected(True)
@@ -1018,6 +1021,9 @@ class MainWindow(QMainWindow):
         self._sent_cache.clear()
         self._failed_sends.clear()
         self._title_bar.set_disconnected()
+        self._banner_a.set_reason(
+            "OUT_OF_RANGE" if self._had_connection_this_session else "NEUTRAL"
+        )
         self._banner_a.show()
         self._banner_b.hide()
         self._banner_ancs_repair.hide()
@@ -1029,6 +1035,7 @@ class MainWindow(QMainWindow):
         self._sync_compose_new_state()
 
     def _on_reconnect_clicked(self) -> None:
+        self._banner_a.set_reconnecting(True)
         self._dbus_client.request_reconnect()
 
     def _on_ancs_reconnect_clicked(self) -> None:

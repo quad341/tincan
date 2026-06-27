@@ -6,7 +6,7 @@ import html as _html
 import re as _re
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt
-from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetrics, QImage, QPainter
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QFontMetrics, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 _URL_RE = _re.compile(r"(https?://[^\s<>\"']+)")
@@ -103,6 +103,8 @@ def _emoji_to_img_tag(emoji: str, point_size: int) -> str:
     if key in _EMOJI_CACHE:
         return _EMOJI_CACHE[key]
 
+    _warn_if_no_emoji_font()
+
     font = QFont("Noto Color Emoji")
     font.setPointSize(point_size)
     fm = QFontMetrics(font)
@@ -165,11 +167,30 @@ def _emoji_font_families() -> list[str]:
     if primary:
         families.append(primary)
     families.extend([
-        "Noto Color Emoji",   # Linux (fonts-noto-color-emoji)
+        "Noto Color Emoji",   # Linux (fonts-noto-color-emoji / google-noto-emoji-color-fonts)
+        "Noto Emoji",         # Linux (google-noto-emoji-fonts, text variant — Fedora default)
+        "emoji",              # Qt 6.7+ generic family — zero-cost on older Qt
         "Segoe UI Emoji",     # Windows 8.1+
         "Apple Color Emoji",  # macOS / iOS
     ])
     return families
+
+
+_WARNED_EMOJI_FONT = False
+
+
+def _warn_if_no_emoji_font() -> None:
+    global _WARNED_EMOJI_FONT
+    if _WARNED_EMOJI_FONT:
+        return
+    _WARNED_EMOJI_FONT = True
+    if not any(QFontDatabase.hasFamily(f) for f in _emoji_font_families()):
+        import logging
+        logging.getLogger(__name__).warning(
+            "No emoji font found. Tried: %s. "
+            "Install google-noto-emoji-color-fonts or google-noto-emoji-fonts.",
+            ", ".join(_emoji_font_families()),
+        )
 
 
 _MAX_WORD_LEN = 30  # insert <wbr> after this many consecutive non-space chars

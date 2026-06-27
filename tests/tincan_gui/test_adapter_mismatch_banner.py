@@ -187,10 +187,15 @@ class TestPollAdapterMismatch:
 # ---------------------------------------------------------------------------
 
 def _make_dialog_with_annotation(qtbot):
-    """Create a SettingsDialog with a manually injected annotation label."""
+    """Create a SettingsDialog with a manually injected annotation label.
+
+    Sets _adapters_list to a non-empty stub so the FR-C3 guard in
+    _refresh_adapter_mismatch_annotation does not suppress the annotation.
+    """
     from tincan_gui.settings_dialog import SettingsDialog
     dlg = SettingsDialog()
     qtbot.addWidget(dlg)
+    dlg._adapters_list = [{"path": "/org/bluez/hci0", "alias": "test", "address": "AA:BB:CC:DD:EE:FF"}]
     label = QLabel()
     label.hide()
     dlg._adapter_mismatch_annotation = label

@@ -598,9 +598,8 @@ class ConversationListWidget(QWidget):
             self._compose_btn.setAccessibleName("New conversation")
             return
 
-        detail = reason or "unavailable"
-        self._compose_btn.setToolTip(detail)
-        self._compose_btn.setAccessibleName(f"New conversation unavailable — {detail}")
+        self._compose_btn.setToolTip(reason or "Connect a device to start a new conversation")
+        self._compose_btn.setAccessibleName("New conversation — connect a device first")
 
     def _on_filter_changed(self, text: str) -> None:
         query = text.strip().lower()

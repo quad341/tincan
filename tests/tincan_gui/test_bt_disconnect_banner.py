@@ -143,6 +143,9 @@ class TestBTDisconnectBannerPresentation:
         """Banner must communicate that the connection is lost."""
         label = self.window._banner_a._label
         text = label.text().lower()
-        assert "connection" in text or "reconnect" in text or "bluetooth" in text, (
+        assert (
+            "connection" in text or "connected" in text
+            or "reconnect" in text or "bluetooth" in text
+        ), (
             f"Banner text must reference the connection: got {label.text()!r}"
         )
