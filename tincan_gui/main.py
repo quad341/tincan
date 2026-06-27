@@ -783,6 +783,15 @@ class MainWindow(QMainWindow):
             btn.setToolTip(f"Sending unavailable — {reason}")
             btn.setAccessibleName(f"Send unavailable — {reason}")
 
+        self._sync_compose_new_state()
+
+    def _sync_compose_new_state(self) -> None:
+        """Gate starting new conversations on an active device connection."""
+        self._conv_list.set_compose_new_enabled(
+            bool(self._connected_device),
+            "Connect to your iPhone first",
+        )
+
     def _apply_capabilities(self, caps: dict) -> None:
         # tincan-40c/tincan-5mze: all keys always present; default False (not
         # capable) when a key is absent so degradation banners show conservatively.
@@ -966,7 +975,8 @@ class MainWindow(QMainWindow):
             caps = {"messages": True, "contacts": True, "ancs": True}
             name = str(device_address)
 
-        # Persist device address so next startup reads config instead of needing --device (tincan-oxthc).
+        # Persist device address so next startup reads config instead of needing
+        # --device (tincan-oxthc).
         if device_address:
             cfg = load_daemon_config()
             if cfg.device != device_address:
@@ -995,6 +1005,7 @@ class MainWindow(QMainWindow):
         self._title_bar.ancs_status_dot.hide()
         self._compose.set_compose_enabled(False, "not connected")
         self._tray.set_connected(False)
+        self._sync_compose_new_state()
 
     def _on_reconnect_clicked(self) -> None:
         self._dbus_client.request_reconnect()
@@ -1376,6 +1387,8 @@ class MainWindow(QMainWindow):
 
     def _on_compose_new(self) -> None:
         """Open the multi-chip New Conversation dialog."""
+        if not self._connected_device:
+            return
         contacts = self._gather_autocomplete_contacts()
         dlg = NewConversationDialog(contacts, parent=self)
         if dlg.exec() != QDialog.Accepted:
@@ -1672,6 +1685,8 @@ class MainWindow(QMainWindow):
         """Load conversation list from daemon; show empty state when unavailable."""
         self._conv_list.set_refresh_loading(True)
         raw = self._dbus_client.list_conversations()
+        if not raw:
+            raw = self._msg_cache.list_conversation_summaries()
         conversations = []
         self._conversations_by_id = {}
         for c in raw:

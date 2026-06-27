@@ -590,6 +590,18 @@ class ConversationListWidget(QWidget):
         if not self.parent():
             self.show()
 
+    def set_compose_new_enabled(self, enabled: bool, reason: str = "") -> None:
+        """Enable or disable starting a new conversation from the sidebar."""
+        self._compose_btn.setEnabled(enabled)
+        if enabled:
+            self._compose_btn.setToolTip("New conversation")
+            self._compose_btn.setAccessibleName("New conversation")
+            return
+
+        detail = reason or "unavailable"
+        self._compose_btn.setToolTip(detail)
+        self._compose_btn.setAccessibleName(f"New conversation unavailable — {detail}")
+
     def _on_filter_changed(self, text: str) -> None:
         query = text.strip().lower()
         query_digits = "".join(c for c in query if c.isdigit())

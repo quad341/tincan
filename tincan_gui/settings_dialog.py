@@ -38,6 +38,9 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+_BT_COMBO_MIN_WIDTH = 360
+_BT_COMBO_MIN_CONTENTS = 42
+
 
 def _section_header(text: str) -> tuple[QLabel, QFrame]:
     """Return a (header QLabel, separator QFrame) pair styled per design spec."""
@@ -58,6 +61,12 @@ def _section_header(text: str) -> tuple[QLabel, QFrame]:
     )
 
     return label, sep
+
+
+def _configure_bt_combo_width(combo: QComboBox) -> None:
+    combo.setMinimumWidth(_BT_COMBO_MIN_WIDTH)
+    combo.setMinimumContentsLength(_BT_COMBO_MIN_CONTENTS)
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
 
 
 class _AppRowWidget(QWidget):
@@ -556,6 +565,7 @@ class SettingsDialog(QDialog):
             self._adapter_combo.setPlaceholderText("Loading adapters…")
             self._adapter_combo.setEnabled(False)
             self._adapter_combo.setAccessibleName("Bluetooth Adapter")
+            _configure_bt_combo_width(self._adapter_combo)
             bt_layout.addWidget(self._adapter_combo)
 
             # Capability badges (shown after load)
@@ -627,6 +637,7 @@ class SettingsDialog(QDialog):
             self._device_combo.setPlaceholderText("Loading devices…")
             self._device_combo.setEnabled(False)
             self._device_combo.setAccessibleName("Bluetooth device")
+            _configure_bt_combo_width(self._device_combo)
             bt_layout.addWidget(self._device_combo)
             self._device_combo.currentIndexChanged.connect(self._on_device_changed)
             self._device_loader = _DeviceLoader()

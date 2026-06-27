@@ -48,6 +48,40 @@ class MessageCache:
             _trace.emit("cache_read", key=conv_id, hit=0, count=0)
             return []
 
+    def list_conversation_summaries(self) -> list[dict[str, Any]]:
+        """Return lightweight conversation rows derived from cached thread files."""
+        summaries: list[dict[str, Any]] = []
+        for path in self._dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            messages = data.get("messages", [])
+            if not messages:
+                continue
+            last = messages[-1]
+            conv_id = str(data.get("conv_id") or path.stem)
+            preview = str(last.get("body", ""))
+            timestamp = str(last.get("sort_key") or last.get("timestamp", ""))
+            direction = str(last.get("direction", ""))
+            sender = str(last.get("sender", ""))
+            display_name = sender if direction == "inbound" and sender else conv_id
+            summaries.append(
+                {
+                    "id": conv_id,
+                    "display_name": display_name,
+                    "send_target": conv_id,
+                    "last_message_preview": preview,
+                    "last_message_at": timestamp,
+                    "last_message_direction": direction,
+                    "unread_count": 0,
+                }
+            )
+
+        summaries.sort(key=lambda c: str(c.get("last_message_at", "")), reverse=True)
+        _trace.emit("cache_conversation_list", count=len(summaries))
+        return summaries
+
     def add_message(
         self,
         conv_id: str,
@@ -97,7 +131,9 @@ class MessageCache:
         if len(messages) > _MAX_MESSAGES:
             messages = messages[-_MAX_MESSAGES:]
         try:
-            self._path(conv_id).write_text(json.dumps({"messages": messages}, indent=None))
+            self._path(conv_id).write_text(
+                json.dumps({"conv_id": conv_id, "messages": messages}, indent=None)
+            )
             _trace.emit("cache_write", key=conv_id, direction=direction, count=len(messages))
         except OSError:
             pass

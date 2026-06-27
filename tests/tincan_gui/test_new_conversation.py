@@ -110,6 +110,7 @@ class TestOnComposeNewLoadsThread:
         win = MainWindow.__new__(MainWindow)
         win._conversations_by_id = {}
         win._messages_ok = True
+        win._connected_device = "AA:BB:CC:DD:EE:FF"
         win._current_phone = ""
         win._current_phone_dialable = False
         win._pending_sends = set()
@@ -170,6 +171,47 @@ class TestOnComposeNewLoadsThread:
             win._on_compose_new()
 
         assert win._current_phone == "+19995550000"
+
+    def test_disconnected_does_not_open_dialog(self):
+        win = self._make_main()
+        win._connected_device = ""
+
+        with patch("tincan_gui.main.NewConversationDialog") as MockDlg:
+            win._on_compose_new()
+
+        MockDlg.assert_not_called()
+
+    def test_main_window_disables_compose_new_until_connected(self, qtbot, monkeypatch):
+        from tincan_gui.dbus_client import TincandClient
+        from tincan_gui.main import MainWindow
+
+        monkeypatch.setattr(TincandClient, "get_status", lambda self: {"connected": False})
+        monkeypatch.setattr(TincandClient, "list_conversations", lambda self: [])
+
+        win = MainWindow()
+        qtbot.addWidget(win)
+        button = next(
+            b for b in win._conv_list.findChildren(QToolButton)
+            if b.text() == "+"
+        )
+
+        assert not button.isEnabled()
+        assert button.toolTip() == "Connect to your iPhone first"
+
+        monkeypatch.setattr(
+            TincandClient,
+            "get_status",
+            lambda self: {
+                "connected": True,
+                "device_name": "Malala",
+                "capabilities": {"messages": True, "contacts": True, "ancs": True},
+            },
+        )
+        win._on_daemon_connected("AA:BB:CC:DD:EE:FF")
+        assert button.isEnabled()
+
+        win._on_daemon_disconnected()
+        assert not button.isEnabled()
 
 
 # ---------------------------------------------------------------------------
