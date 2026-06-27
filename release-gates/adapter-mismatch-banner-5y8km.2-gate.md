@@ -51,3 +51,12 @@ main via PR #144 squash.)
 Prior gate (tincan-u1akq) PASSED when main was at `f1dd8ed` (pre-PR-#144). PR #145
 (feat/adapter-mismatch-banner-5y8km.2) was opened then closed when PR #144 merged first,
 pre-empting the merge. This gate reflects the post-PR-#144 state.
+
+## Resolution (2026-06-27, builder-1)
+
+Rebased `feat/adapter-mismatch-banner-5y8km.2` onto `origin/main` (9255fc6). Conflict
+resolved in `tincan_gui/settings_dialog.py` by keeping both sides: main's BT device picker
+code AND branch's AC6 `_adapter_mismatch_annotation` + `_refresh_adapter_mismatch_annotation()`.
+Tests: 2120 passed, 2 skipped, 10 xfailed. Lint: no new issues introduced by branch diff.
+Branch pushed: HEAD dfcb5f8 (AC6 commit, after rebase).
+Criterion 6 resolved — branch diverges cleanly from main.
