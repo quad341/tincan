@@ -83,7 +83,8 @@ class StateABanner(QWidget):
         self.set_reason("NEUTRAL")
 
     def set_reason(self, reason: Literal["NEUTRAL", "OUT_OF_RANGE"]) -> None:
-        """Update banner copy for first-launch (NEUTRAL) vs post-connect disconnect (OUT_OF_RANGE)."""
+        """Update banner copy for first-launch (NEUTRAL) vs post-connect disconnect (OUT_OF_RANGE).
+        """
         self._current_reason = reason
         self._reconnect_timer.stop()
         self._reconnect_btn.setEnabled(True)
@@ -95,7 +96,9 @@ class StateABanner(QWidget):
             self._sub_label.setText(QCoreApplication.translate(
                 "StateABanner", "Connect your iPhone in Settings to start messaging."
             ))
-            self._reconnect_btn.setText(QCoreApplication.translate("StateABanner", "Connect device"))
+            self._reconnect_btn.setText(QCoreApplication.translate(
+                "StateABanner", "Connect device"
+            ))
             self.setAccessibleName(QCoreApplication.translate(
                 "StateABanner", "Not connected. Open Settings to pair your iPhone."
             ))
