@@ -705,6 +705,8 @@ class SettingsDialog(QDialog):
         if hasattr(self, "_adapter_combo"):
             QWidget.setTabOrder(self._close_to_tray_cb, self._refresh_btn)
             QWidget.setTabOrder(self._refresh_btn, self._adapter_combo)
+            if hasattr(self, "_device_combo"):
+                QWidget.setTabOrder(self._adapter_combo, self._device_combo)
 
     # ------------------------------------------------------------------
     # Slots

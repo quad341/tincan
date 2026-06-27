@@ -318,15 +318,22 @@ class TincandClient(QObject):
     def get_status(self) -> dict:
         """Call GetStatus.  Returns {} when daemon is absent.
 
-        Always includes adapter_path_requested ('' if no mismatch or daemon absent).
+        Always includes adapter_path_requested ('' if no mismatch or daemon absent),
+        adapter_warning ('' if adapter correct or daemon absent),
+        and device_discovered (False if absent).
         """
+        def _set_defaults(d: dict) -> dict:
+            d.setdefault("adapter_path_requested", "")
+            d.setdefault("adapter_warning", "")
+            d.setdefault("device_discovered", False)
+            return d
+
         if not self._bus.isConnected():
             return {}
         result = self._dbus_call(_IFACE_DAEMON, "GetStatus")
         if result is not None:
             d = {str(k): v for k, v in result.items()} if hasattr(result, "items") else {}
-            d.setdefault("adapter_path_requested", "")
-            return d
+            return _set_defaults(d)
         # Qt fallback: used when dbus-python is unavailable (unit tests with mocks).
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
         if not iface.isValid():
@@ -338,15 +345,13 @@ class TincandClient(QObject):
                 return {}
             args = raw.arguments()
             d = _demarshal_map(args[0] if args else {})
-            d.setdefault("adapter_path_requested", "")
-            return d
+            return _set_defaults(d)
         reply = _wrap_reply(raw)
         if not reply.isValid():
             _log.debug("GetStatus failed: %s", reply.error().message())
             return {}
         d = _demarshal_map(reply.value())
-        d.setdefault("adapter_path_requested", "")
-        return d
+        return _set_defaults(d)
 
     def get_adapters(self) -> list[dict]:
         """Call GetAdapters. Returns [] when daemon is absent or BlueZ unavailable.
