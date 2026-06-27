@@ -1,0 +1,6 @@
+[Unit]
+Description=tincand watchdog — restart if unintentionally down
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'test -e /run/tincan/want-down && exit 0; systemctl --user is-active --quiet tincand.service && exit 0; systemctl --user start tincand.service; true'

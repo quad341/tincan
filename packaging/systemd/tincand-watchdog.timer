@@ -1,0 +1,10 @@
+[Unit]
+Description=tincand watchdog — fires every 60s
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+Unit=tincand-watchdog.service
+
+[Install]
+WantedBy=timers.target
