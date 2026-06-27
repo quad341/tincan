@@ -423,3 +423,53 @@ class AdapterUnavailableBanner(QFrame):
             f"⚠ Saved adapter {adapter_path_requested} was unavailable"
             f" — using {adapter_path} instead."
         )
+
+
+# ---------------------------------------------------------------------------
+# Adapter mismatch banner (tincan-5y8km.2)
+# ---------------------------------------------------------------------------
+
+class AdapterMismatchBanner(QFrame):
+    """Persistent amber banner shown when iPhone is on the wrong Bluetooth adapter.
+
+    Not dismissible — the mismatch is a hardware state that clears when the
+    operator reconnects the iPhone to the correct adapter.
+    Shown/hidden by MainWindow._refresh_adapter_mismatch_banner().
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(
+            "AdapterMismatchBanner { background: #fff3bf; border-bottom: 2px solid #f59f00; }"
+        )
+        self.setAccessibleName("adapter mismatch warning")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+
+        icon = QLabel("⚠")
+        icon.setAccessibleName("adapter mismatch warning")
+        icon.setStyleSheet("color: #7c4f00; font-size: 16pt;")
+        layout.addWidget(icon, alignment=Qt.AlignmentFlag.AlignTop)
+
+        self._label = QLabel()
+        lf = QFont()
+        lf.setPointSize(12)
+        self._label.setFont(lf)
+        self._label.setStyleSheet("color: #7c4f00;")
+        self._label.setWordWrap(True)
+        layout.addWidget(self._label, stretch=1)
+
+    def update_warning(self, text: str) -> None:
+        """Set the warning text verbatim (plain text from adapter_warning field)."""
+        self._label.setText(text)
+        self.setAccessibleDescription(text)
+
+
+def _adapter_mismatch_banner_factory(classname: str, obj) -> Optional[QAccessibleWidget]:
+    if isinstance(obj, AdapterMismatchBanner):
+        return QAccessibleWidget(obj, QAccessible.Role.AlertMessage)
+    return None
+
+
+QAccessible.installFactory(_adapter_mismatch_banner_factory)
