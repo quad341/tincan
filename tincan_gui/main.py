@@ -58,7 +58,7 @@ from tincan_gui.degradation_banners import (
 from tincan_gui.message_cache import MessageCache
 from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.theme import is_dark_theme
-from tincan_gui.thread_view import BubbleType, MessageData, ThreadView, _emoji_font_families
+from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
 
 _ASSETS = Path(__file__).parent / "assets"

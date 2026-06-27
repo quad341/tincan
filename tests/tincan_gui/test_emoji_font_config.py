@@ -21,8 +21,7 @@ _FAKE_EMOJI_FAMILIES = ["FakeEmoji", "NotoColorEmoji"]
 @pytest.fixture
 def _fake_emoji_families():
     """Patch _emoji_font_families() in every module that imports it directly."""
-    with patch("tincan_gui.main._emoji_font_families", return_value=_FAKE_EMOJI_FAMILIES), \
-         patch("tincan_gui.notification_center._emoji_font_families",
+    with patch("tincan_gui.notification_center._emoji_font_families",
                return_value=_FAKE_EMOJI_FAMILIES):
         yield _FAKE_EMOJI_FAMILIES
 
