@@ -46,6 +46,7 @@ from tincan_gui.daemon_config import DaemonConfig, load_daemon_config, save_daem
 from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
+    AdapterMismatchBanner,
     AdapterUnavailableBanner,
     ANCSRepairBanner,
     CallSetupRequiredBanner,
@@ -515,6 +516,7 @@ class MainWindow(QMainWindow):
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._adapter_unavailable_banner_dismissed: bool = False
+        self._adapter_mismatch_warning: str = ""
         self._conversations_by_id: dict[str, ConversationData] = {}
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
@@ -553,6 +555,11 @@ class MainWindow(QMainWindow):
         # Title bar
         self._title_bar = TitleBar()
         root_layout.addWidget(self._title_bar)
+
+        # Adapter mismatch banner (tincan-5y8km.2): persistent, non-dismissible
+        self._adapter_mismatch_banner = AdapterMismatchBanner()
+        self._adapter_mismatch_banner.hide()
+        root_layout.addWidget(self._adapter_mismatch_banner)
 
         # Adapter-unavailable banner (tincan-crfu9); hidden until mismatch detected
         self._adapter_unavailable_banner = AdapterUnavailableBanner()
@@ -673,6 +680,10 @@ class MainWindow(QMainWindow):
         c.call_active.connect(self._on_call_active_signal)
         c.call_held.connect(self._on_call_held_signal)
         c.call_removed.connect(self._on_call_removed_signal)
+        # Adapter mismatch polling (tincan-5y8km.2): ≤5s interval while banner visible
+        self._adapter_mismatch_timer = QTimer(self)
+        self._adapter_mismatch_timer.setInterval(5000)
+        self._adapter_mismatch_timer.timeout.connect(self._poll_adapter_mismatch)
 
     def _maybe_spawn_daemon(self) -> None:
         """Spawn tincand if config has a device and no spawn has been attempted yet."""
@@ -704,6 +715,7 @@ class MainWindow(QMainWindow):
             self._title_bar.set_disconnected()
             self._banner_a.show()
         self._refresh_adapter_unavailable_banner(status)
+        self._refresh_adapter_mismatch_banner(status)
 
     def _refresh_adapter_unavailable_banner(self, status: dict | None = None) -> None:
         """Show or hide the adapter-unavailable banner based on get_status() fields."""
@@ -719,6 +731,24 @@ class MainWindow(QMainWindow):
             self._adapter_unavailable_banner.show()
         else:
             self._adapter_unavailable_banner.hide()
+
+    def _refresh_adapter_mismatch_banner(self, status: dict | None = None) -> None:
+        """Show or hide the adapter-mismatch banner based on adapter_warning field."""
+        if status is None:
+            status = self._dbus_client.get_status()
+        warning = str(status.get("adapter_warning", ""))
+        if warning:
+            self._adapter_mismatch_banner.update_warning(warning)
+            self._adapter_mismatch_banner.show()
+            self._adapter_mismatch_timer.start()
+        else:
+            self._adapter_mismatch_banner.hide()
+            self._adapter_mismatch_timer.stop()
+        self._adapter_mismatch_warning = warning
+
+    def _poll_adapter_mismatch(self) -> None:
+        """Periodic GetStatus poll (≤5s) while adapter-mismatch banner is visible."""
+        self._refresh_adapter_mismatch_banner()
 
     def _on_adapter_banner_dismissed(self) -> None:
         """Hide adapter-unavailable banner; suppress for the rest of this session."""
