@@ -1,5 +1,5 @@
 """Tests: tincand/call_controller.py — CallController decision paths.
-Bead: tincan-z2l9w, tincan-aggkh, tincan-3e2ul
+Bead: tincan-z2l9w, tincan-aggkh, tincan-3e2ul, tincan-b0r2n
 
 Coverage:
   §1 __init__ — is_call_setup_ready()=False logs WARNING
@@ -21,6 +21,8 @@ Coverage:
   §11 T3/T4/FR6 additions (tincan-8gpmz):
       §D/§E via lambda capture, §I idempotent cancel, §J hci10 disambiguation, FR6 SetProperty
   §12 get_calls / swap_calls / hold_and_answer / release_and_answer (tincan-yeh0r / tincan-3e2ul)
+  §13 _adapter_hci_from_path — hci name extraction from modem path (tincan-b0r2n)
+  §14 _bind_modem adapter_warning — set_adapter_warning on verify_dongle_adapter result (tincan-b0r2n)
 """
 from __future__ import annotations
 
@@ -983,3 +985,97 @@ class TestMultiCallControlMethods:
         ctrl._vcm = None
         with pytest.raises(RuntimeError):
             ctrl.release_and_answer()
+
+
+# ---------------------------------------------------------------------------
+# §13 _adapter_hci_from_path — hci name extraction (tincan-b0r2n)
+# ---------------------------------------------------------------------------
+
+class TestAdapterHciFromPath:
+    """_adapter_hci_from_path extracts the hciN segment from a modem path."""
+
+    def _extract(self, path):
+        from tincand.call_controller import _adapter_hci_from_path
+        return _adapter_hci_from_path(path)
+
+    def test_extracts_hci0_from_hci0_path(self):
+        path = "/hfp/org/bluez/hci0/dev_d0_6b_78_33_46_20"
+        assert self._extract(path) == "hci0"
+
+    def test_extracts_hci1_from_hci1_path(self):
+        path = "/hfp/org/bluez/hci1/dev_d0_6b_78_33_46_20"
+        assert self._extract(path) == "hci1"
+
+    def test_extracts_hci10_from_double_digit_index(self):
+        path = "/hfp/org/bluez/hci10/dev_aa_bb_cc_dd_ee_ff"
+        assert self._extract(path) == "hci10"
+
+    def test_returns_empty_string_when_no_hci_segment(self):
+        path = "/org/ofono/modem/some_modem"
+        assert self._extract(path) == ""
+
+    def test_returns_empty_string_for_empty_path(self):
+        assert self._extract("") == ""
+
+
+# ---------------------------------------------------------------------------
+# §14 _bind_modem adapter_warning — set_adapter_warning on verify result (tincan-b0r2n)
+# ---------------------------------------------------------------------------
+
+_PREFERRED_BIND = "/hfp/org/bluez/hci1/dev_d0_6b_78_33_46_20"  # hci1 = preferred
+_FALLBACK_BIND  = "/hfp/org/bluez/hci0/dev_d0_6b_78_33_46_20"  # hci0 = non-preferred
+
+
+def _make_bind_ctrl(adapter_hci="hci1"):
+    """Controller ready for _bind_modem tests; call_audio is NOT patched here."""
+    ctrl, mock_mgr = _make_adapter_ctrl(
+        [(_PREFERRED_BIND, {"Type": "hfp", "Online": True})],
+        adapter_hci=adapter_hci,
+    )
+    return ctrl, mock_mgr
+
+
+class TestBindModemAdapterWarning:
+    """_bind_modem calls set_adapter_warning based on verify_dongle_adapter result."""
+
+    def _bind(self, ctrl, path, adapter_ok):
+        # Reset the service mock so constructor's set_adapter_warning call
+        # (from initial _discover_modem/_bind_modem) doesn't pollute call counts.
+        ctrl._service.set_adapter_warning.reset_mock()
+        mock_vcm = MagicMock()
+        mock_vcm.GetCalls.return_value = []
+        with (
+            patch("dbus.Interface", return_value=mock_vcm),
+            patch(
+                "tincand.call_controller.call_audio.verify_dongle_adapter",
+                return_value=adapter_ok,
+            ),
+            patch("tincand.call_controller.call_audio.verify_usb_autosuspend_off"),
+        ):
+            ctrl._bind_modem(path)
+
+    def test_set_adapter_warning_called_empty_when_adapter_ok(self):
+        ctrl, _ = _make_bind_ctrl()
+        self._bind(ctrl, _PREFERRED_BIND, adapter_ok=True)
+        ctrl._service.set_adapter_warning.assert_called_once_with("")
+
+    def test_set_adapter_warning_called_with_text_when_adapter_mismatch(self):
+        ctrl, _ = _make_bind_ctrl()
+        self._bind(ctrl, _FALLBACK_BIND, adapter_ok=False)
+        ctrl._service.set_adapter_warning.assert_called_once()
+        warn = ctrl._service.set_adapter_warning.call_args[0][0]
+        assert warn != ""
+
+    def test_warn_text_names_actual_hci_from_path(self):
+        """warn_text includes the actual hci extracted from the modem path."""
+        ctrl, _ = _make_bind_ctrl(adapter_hci="hci1")
+        self._bind(ctrl, _FALLBACK_BIND, adapter_ok=False)
+        warn = ctrl._service.set_adapter_warning.call_args[0][0]
+        assert "hci0" in warn  # _adapter_hci_from_path(_FALLBACK_BIND) == "hci0"
+
+    def test_warn_text_names_preferred_adapter_hci(self):
+        """warn_text includes self._adapter_hci (the configured preferred adapter)."""
+        ctrl, _ = _make_bind_ctrl(adapter_hci="hci1")
+        self._bind(ctrl, _FALLBACK_BIND, adapter_ok=False)
+        warn = ctrl._service.set_adapter_warning.call_args[0][0]
+        assert "hci1" in warn

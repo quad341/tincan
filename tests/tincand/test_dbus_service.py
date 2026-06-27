@@ -1,5 +1,6 @@
 """Tests: tincand D-Bus service state transitions and on_message_received coverage.
 Bead: tincan-f0e  (ref: review finding F1, tincan-mj3)
+Bead: tincan-b0r2n  (adapter_warning + device_discovered in GetStatus)
 
 Coverage:
   - GetStatus() returns all 3 capability keys (messages/contacts/ancs) defaulting False.
@@ -13,6 +14,10 @@ Coverage:
   - on_message_received: unknown conv_id → no ConversationUpdated emitted.
   - Conversation.to_dbus() always includes last_message_preview='' and unread_count=0 as defaults.
   - MarkConversationRead: resets unread_count and emits ConversationUpdated (tincan-fdvu).
+  §adapter_warning: GetStatus() returns empty adapter_warning by default; non-empty after set.
+  §device_discovered: GetStatus() returns device_discovered=False by default.
+  §set_adapter_warning: stores text; empty string clears; non-str coerced.
+  §set_device_discovered: stores bool; truthy values coerced.
 
 No D-Bus infrastructure needed — TincanService is instantiated with a mocked bus.
 """
@@ -510,3 +515,100 @@ class TestGetContacts:
         ))
         assert "grp-xyz" in service._group_participants
         assert set(service._group_participants["grp-xyz"]) == {"4155550001", "4155550002"}
+
+
+# ---------------------------------------------------------------------------
+# §adapter_warning — GetStatus() adapter_warning key (tincan-b0r2n)
+# ---------------------------------------------------------------------------
+
+class TestGetStatusAdapterWarning:
+    """GetStatus() includes adapter_warning key; empty by default."""
+
+    def test_adapter_warning_key_present_in_status(self, service):
+        status = service.GetStatus()
+        assert "adapter_warning" in status
+
+    def test_adapter_warning_empty_by_default(self, service):
+        status = service.GetStatus()
+        assert str(status["adapter_warning"]) == ""
+
+    def test_adapter_warning_non_empty_after_set_adapter_warning(self, service):
+        service.set_adapter_warning("iPhone on hci0, use hci1")
+        status = service.GetStatus()
+        assert str(status["adapter_warning"]) == "iPhone on hci0, use hci1"
+
+    def test_adapter_warning_returns_empty_after_clear(self, service):
+        service.set_adapter_warning("stale warning")
+        service.set_adapter_warning("")
+        status = service.GetStatus()
+        assert str(status["adapter_warning"]) == ""
+
+
+# ---------------------------------------------------------------------------
+# §device_discovered — GetStatus() device_discovered key (tincan-b0r2n)
+# ---------------------------------------------------------------------------
+
+class TestGetStatusDeviceDiscovered:
+    """GetStatus() includes device_discovered key; False by default."""
+
+    def test_device_discovered_key_present_in_status(self, service):
+        status = service.GetStatus()
+        assert "device_discovered" in status
+
+    def test_device_discovered_false_by_default(self, service):
+        status = service.GetStatus()
+        assert bool(status["device_discovered"]) is False
+
+    def test_device_discovered_true_after_set(self, service):
+        service.set_device_discovered(True)
+        status = service.GetStatus()
+        assert bool(status["device_discovered"]) is True
+
+
+# ---------------------------------------------------------------------------
+# §set_adapter_warning — mutator (tincan-b0r2n)
+# ---------------------------------------------------------------------------
+
+class TestSetAdapterWarning:
+    """set_adapter_warning() stores text and empty-string clears it."""
+
+    def test_set_non_empty_warning_updates_internal_state(self, service):
+        service.set_adapter_warning("use hci1")
+        assert service._adapter_warning == "use hci1"
+
+    def test_set_empty_string_clears_warning(self, service):
+        service._adapter_warning = "stale"
+        service.set_adapter_warning("")
+        assert service._adapter_warning == ""
+
+    def test_non_string_argument_coerced_to_str(self, service):
+        service.set_adapter_warning(42)
+        assert isinstance(service._adapter_warning, str)
+        assert service._adapter_warning == "42"
+
+
+# ---------------------------------------------------------------------------
+# §set_device_discovered — mutator (tincan-b0r2n)
+# ---------------------------------------------------------------------------
+
+class TestSetDeviceDiscovered:
+    """set_device_discovered() stores a bool; truthy values are coerced."""
+
+    def test_set_true_updates_internal_state(self, service):
+        service.set_device_discovered(True)
+        assert service._device_discovered is True
+
+    def test_set_false_clears_flag(self, service):
+        service._device_discovered = True
+        service.set_device_discovered(False)
+        assert service._device_discovered is False
+
+    def test_truthy_int_coerced_to_bool_true(self, service):
+        service.set_device_discovered(1)
+        assert service._device_discovered is True
+        assert isinstance(service._device_discovered, bool)
+
+    def test_falsy_int_coerced_to_bool_false(self, service):
+        service.set_device_discovered(0)
+        assert service._device_discovered is False
+        assert isinstance(service._device_discovered, bool)
