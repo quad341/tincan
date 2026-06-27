@@ -261,13 +261,14 @@ class _AdapterItemDelegate(QStyledItemDelegate):
             f1.setPointSize(12)
             painter.setFont(f1)
             painter.setPen(QColor("#f4f4f5"))
-            painter.drawText(x, r.y() + 4, w, 22, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, alias)
+            align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            painter.drawText(x, r.y() + 4, w, 22, align, alias)
 
             f2 = QFont()
             f2.setPointSize(10)
             painter.setFont(f2)
             painter.setPen(QColor("#a1a1aa"))
-            painter.drawText(x, r.y() + 26, w, 20, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, address)
+            painter.drawText(x, r.y() + 26, w, 20, align, address)
         finally:
             painter.restore()
 
@@ -738,7 +739,7 @@ class SettingsDialog(QDialog):
             action = self._filter_apps.get(app_id, "allow")
             row = _AppRowWidget(app_id, label_hint, action, self._client, self._dark)
             item = QListWidgetItem()
-            item.setSizeHint(QSize(1, row.sizeHint().height()))  # width=1: let view use viewport width
+            item.setSizeHint(QSize(1, row.sizeHint().height()))  # width=1: viewport width
             self._list_widget.addItem(item)
             self._list_widget.setItemWidget(item, row)
             self._row_widgets.append(row)
