@@ -137,7 +137,10 @@ def _resolve_device_address(args: argparse.Namespace) -> tuple[str, bool]:
                 candidates[0],
             )
         if candidates:
-            _log.info("tincand: device address from oFono discovery (source=ofono): %s", candidates[0])
+            _log.info(
+                "tincand: device address from oFono discovery (source=ofono): %s",
+                candidates[0],
+            )
             return candidates[0], True
     except Exception as exc:  # noqa: BLE001
         _log.debug("tincand: oFono auto-discovery unavailable (%s) — no device address", exc)
@@ -197,7 +200,9 @@ def _resolve_adapter_path(args: argparse.Namespace) -> tuple[str, str]:
     return "/org/bluez/hci1", qsettings_path or ""
 
 
-def _select_backend(args: argparse.Namespace, adapter_path: str = "", device_addr: str = "") -> object:
+def _select_backend(
+    args: argparse.Namespace, adapter_path: str = "", device_addr: str = ""
+) -> object:
     """Instantiate the backend named by args.backend or TINCAN_BACKEND env var."""
     name = args.backend or os.environ.get("TINCAN_BACKEND")
     if not name:
