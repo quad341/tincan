@@ -5,14 +5,15 @@ Coverage:
   §1 AdapterMismatchBanner — instantiation, accessible name, update_warning(), style, hide state
   §2 _refresh_adapter_mismatch_banner() — show/hide banner based on adapter_warning; timer control
   §3 _poll_adapter_mismatch() — delegates to _refresh_adapter_mismatch_banner(); returns None
-  §4 _refresh_adapter_mismatch_annotation() — AC6: label show/hide, (wanted: hciX) parse, accessible name
+  §4 _refresh_adapter_mismatch_annotation() — AC6: label show/hide, (wanted: hciX) parse,
+     accessible name
 
 All tests fail until feat/adapter-mismatch-banner-5y8km.2 is merged.
 Run with: python -m pytest tests/tincan_gui/test_adapter_mismatch_banner.py -v
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from PySide6.QtWidgets import QLabel, QSystemTrayIcon
@@ -90,7 +91,11 @@ class TestAdapterMismatchBanner:
         banner = AdapterMismatchBanner()
         qtbot.addWidget(banner)
         close_btns = [
-            b for b in list(banner.findChildren(QPushButton)) + list(banner.findChildren(QToolButton))
+            b
+            for b in (
+                list(banner.findChildren(QPushButton))
+                + list(banner.findChildren(QToolButton))
+            )
             if "dismiss" in (b.text() + b.accessibleName()).lower()
             or "✕" in b.text() or "×" in b.text()
         ]
@@ -168,7 +173,10 @@ class TestPollAdapterMismatch:
         window.show()
         called = []
         original = window._refresh_adapter_mismatch_banner
-        window._refresh_adapter_mismatch_banner = lambda *a, **k: called.append(True) or original(*a, **k)
+        def _spy(*a, **k):
+            called.append(True)
+            return original(*a, **k)
+        window._refresh_adapter_mismatch_banner = _spy
         window._poll_adapter_mismatch()
         assert called
 
@@ -195,7 +203,9 @@ def _make_dialog_with_annotation(qtbot):
     from tincan_gui.settings_dialog import SettingsDialog
     dlg = SettingsDialog()
     qtbot.addWidget(dlg)
-    dlg._adapters_list = [{"path": "/org/bluez/hci0", "alias": "test", "address": "AA:BB:CC:DD:EE:FF"}]
+    dlg._adapters_list = [
+        {"path": "/org/bluez/hci0", "alias": "test", "address": "AA:BB:CC:DD:EE:FF"}
+    ]
     label = QLabel()
     label.hide()
     dlg._adapter_mismatch_annotation = label
@@ -247,12 +257,9 @@ class TestRefreshAdapterMismatchAnnotation:
         dlg._refresh_adapter_mismatch_annotation("some warning")
 
     def test_annotation_accessible_name_is_wrong_adapter_detected(self, qtbot):
-        from tincan_gui.settings_dialog import SettingsDialog
-        dlg = SettingsDialog()
-        qtbot.addWidget(dlg)
-        label = QLabel()
+        dlg, label = _make_dialog_with_annotation(qtbot)
         label.setAccessibleName("wrong adapter detected")
-        label.hide()
-        dlg._adapter_mismatch_annotation = label
         dlg._refresh_adapter_mismatch_annotation("iPhone on hci0 (hci1) for call audio")
-        assert dlg._adapter_mismatch_annotation.accessibleName() == "wrong adapter detected"
+        assert label.text() == "⚠ (wanted: hci1)"
+        assert label.isVisible()
+        assert label.accessibleName() == "wrong adapter detected"

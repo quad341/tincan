@@ -516,6 +516,7 @@ class AdapterMismatchBanner(QFrame):
         layout.addWidget(icon, alignment=Qt.AlignmentFlag.AlignTop)
 
         self._label = QLabel()
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
         lf = QFont()
         lf.setPointSize(12)
         self._label.setFont(lf)

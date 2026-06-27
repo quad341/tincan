@@ -609,6 +609,7 @@ class SettingsDialog(QDialog):
             self._adapter_mismatch_annotation.setTextInteractionFlags(
                 Qt.TextInteractionFlag.NoTextInteraction
             )
+            self._adapter_mismatch_annotation.setTextFormat(Qt.TextFormat.PlainText)
             self._adapter_mismatch_annotation.hide()
             bt_layout.addWidget(self._adapter_mismatch_annotation)
 
