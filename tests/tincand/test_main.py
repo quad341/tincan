@@ -45,7 +45,7 @@ class TestSelectBackendFlag:
 
     def test_backend_ancs_passes_device_from_flag(self):
         from tincand.backends.ancs import ANCSBackend
-        result = _select_backend(_args(backend="ancs", device="AA:BB:CC:DD:EE:FF"))
+        result = _select_backend(_args(backend="ancs"), device_addr="AA:BB:CC:DD:EE:FF")
         assert isinstance(result, ANCSBackend)
         assert result._device_addr == "AA:BB:CC:DD:EE:FF"
 

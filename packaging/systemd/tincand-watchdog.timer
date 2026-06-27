@@ -1,0 +1,11 @@
+[Unit]
+Description=tincand watchdog — restart tincand if it stops unexpectedly
+After=bluetooth.target
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+Unit=tincand-watchdog.service
+
+[Install]
+WantedBy=timers.target
