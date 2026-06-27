@@ -34,6 +34,8 @@ IFACE_DAEMON = "im.tincan.Daemon"
 IFACE_MESSAGES = "im.tincan.Messages"
 IFACE_CALLS = "im.tincan.Calls"
 
+_DEV_RE = re.compile(r"dev_([0-9A-Fa-f]{2}(?:_[0-9A-Fa-f]{2}){5})")
+
 
 @dataclass
 class Conversation:
@@ -243,7 +245,6 @@ class TincanService(dbus.service.Object):
         Each dict: path(s), mac(s), name(s).
         Returns [] when oFono is unavailable or no HFP modems are registered.
         """
-        _DEV_RE = re.compile(r"dev_([0-9A-Fa-f]{2}(?:_[0-9A-Fa-f]{2}){5})")
         result = []
         try:
             system_bus = dbus.SystemBus()

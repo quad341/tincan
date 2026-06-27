@@ -949,17 +949,18 @@ class SettingsDialog(QDialog):
         self._device_combo.clear()
         self._device_combo.addItem("Auto-discover (recommended)", "")
 
-        saved_mac = None
+        saved_mac = ""
         try:
-            saved_mac = app_settings().value("bluetooth/device_address", default=None)
-        except Exception:
+            from tincand.config import DaemonSettings  # noqa: PLC0415
+            saved_mac = str(DaemonSettings().value("bluetooth/device_address", "") or "")
+        except Exception:  # noqa: BLE001
             pass
 
         selected_idx = 0
         for i, d in enumerate(devices, start=1):
             mac = str(d.get("mac", ""))
             name = str(d.get("name", ""))
-            label = f"{name} ({mac})" if name else mac
+            label = f"{mac} ({name})" if name else mac
             self._device_combo.addItem(label, mac)
             self._device_combo.setItemData(i, mac, Qt.ItemDataRole.AccessibleTextRole)
             if saved_mac and mac == saved_mac:
@@ -976,14 +977,12 @@ class SettingsDialog(QDialog):
         mac = self._device_combo.itemData(index, Qt.ItemDataRole.UserRole)
         if mac is None:
             return
-        s = app_settings()
         try:
-            if mac:
-                s.setValue("bluetooth/device_address", mac)
-            else:
-                s.remove("bluetooth/device_address")
+            from tincand.config import DaemonSettings  # noqa: PLC0415
+            s = DaemonSettings()
+            s.setValue("bluetooth/device_address", mac)
             s.sync()
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
     def _refresh_devices(self) -> None:
