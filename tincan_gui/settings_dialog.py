@@ -545,6 +545,19 @@ class SettingsDialog(QDialog):
             self._adapter_restart_banner.hide()
             bt_layout.addWidget(self._adapter_restart_banner)
 
+            # AC6: adapter-mismatch annotation (shown when adapter_warning is set)
+            self._adapter_mismatch_annotation = QLabel()
+            _ann_font = QFont()
+            _ann_font.setPointSize(10)
+            self._adapter_mismatch_annotation.setFont(_ann_font)
+            self._adapter_mismatch_annotation.setStyleSheet("color: #f59f00;")
+            self._adapter_mismatch_annotation.setAccessibleName("wrong adapter detected")
+            self._adapter_mismatch_annotation.setTextInteractionFlags(
+                Qt.TextInteractionFlag.NoTextInteraction
+            )
+            self._adapter_mismatch_annotation.hide()
+            bt_layout.addWidget(self._adapter_mismatch_annotation)
+
             # Wire BT picker
             self._adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
             self._refresh_btn.clicked.connect(self._refresh_adapters)
@@ -559,6 +572,14 @@ class SettingsDialog(QDialog):
             self._loader_thread.start()
             if self._loader_thread.wait(150):
                 QCoreApplication.processEvents()
+
+            # AC6: annotate adapter row when adapter_warning is set in daemon status
+            try:
+                _st = self._client.get_status()
+                _warn = str(_st.get("adapter_warning", ""))
+            except Exception:
+                _warn = ""
+            self._refresh_adapter_mismatch_annotation(_warn)
         else:
             # Read-only fallback when no daemon client (legacy / no-D-Bus mode)
             import os as _os  # noqa: PLC0415
@@ -860,6 +881,19 @@ class SettingsDialog(QDialog):
         self._adapter_restart_banner._restart_btn.setFocus()
         if index < len(self._adapters_list):
             self._update_adapter_badges(self._adapters_list[index])
+
+    def _refresh_adapter_mismatch_annotation(self, warning: str) -> None:
+        """AC6: show/hide ⚠ annotation on the Adapter row when adapter_warning is set."""
+        if not hasattr(self, "_adapter_mismatch_annotation"):
+            return
+        if not warning:
+            self._adapter_mismatch_annotation.hide()
+            return
+        import re  # noqa: PLC0415
+        m = re.search(r"\(([^)]+)\) for call audio", warning)
+        wanted = m.group(1) if m else "see warning above"
+        self._adapter_mismatch_annotation.setText(f"⚠ (wanted: {wanted})")
+        self._adapter_mismatch_annotation.show()
 
     def _refresh_adapters(self) -> None:
         self._adapter_combo.setEnabled(False)
