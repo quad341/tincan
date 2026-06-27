@@ -386,6 +386,37 @@ class TincandClient(QObject):
             return []
         return _demarshal_list_of_maps(reply.value())
 
+    def get_hfp_devices(self) -> list[dict]:
+        """Call GetHFPDevices. Returns [] when daemon is absent or oFono unavailable.
+
+        Each dict: path, mac, name.
+        """
+        if not self._bus.isConnected():
+            return []
+        result = self._dbus_call(_IFACE_DAEMON, "GetHFPDevices")
+        if result is not None:
+            return [
+                {str(k): v for k, v in d.items()}
+                for d in result
+                if hasattr(d, "items")
+            ]
+        # Qt fallback
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+        if not iface.isValid():
+            return []
+        raw = iface.call("GetHFPDevices")
+        if isinstance(raw, QDBusMessage):
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.debug("GetHFPDevices failed: %s", raw.errorMessage())
+                return []
+            args = raw.arguments()
+            return _demarshal_list_of_maps(args[0] if args else [])
+        reply = _wrap_reply(raw)
+        if not reply.isValid():
+            _log.debug("GetHFPDevices failed: %s", reply.error().message())
+            return []
+        return _demarshal_list_of_maps(reply.value())
+
     def list_conversations(self) -> list[dict]:
         """Call ListConversations.  Returns [] when daemon is absent.
 

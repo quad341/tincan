@@ -236,6 +236,42 @@ class TincanService(dbus.service.Object):
             ))
         return result
 
+    @dbus.service.method(IFACE_DAEMON, in_signature="", out_signature="aa{sv}")
+    def GetHFPDevices(self) -> list:
+        """Return HFP-type oFono modems as selectable devices.
+
+        Each dict: path(s), mac(s), name(s).
+        Returns [] when oFono is unavailable or no HFP modems are registered.
+        """
+        _DEV_RE = re.compile(r"dev_([0-9A-Fa-f]{2}(?:_[0-9A-Fa-f]{2}){5})")
+        result = []
+        try:
+            system_bus = dbus.SystemBus()
+            manager = dbus.Interface(
+                system_bus.get_object("org.ofono", "/"), "org.ofono.Manager"
+            )
+            modems = manager.GetModems()
+        except Exception as exc:
+            _log.debug("GetHFPDevices: oFono unavailable: %s", exc)
+            return result
+        for path, props in modems:
+            path = str(path)
+            props = dict(props)
+            if props.get("Type") != "hfp":
+                continue
+            m = _DEV_RE.search(path)
+            if not m:
+                continue
+            result.append(dbus.Dictionary(
+                {
+                    "path": dbus.String(path),
+                    "mac": dbus.String(m.group(1).replace("_", ":")),
+                    "name": dbus.String(str(props.get("Name", ""))),
+                },
+                signature="sv",
+            ))
+        return result
+
     @dbus.service.signal(IFACE_DAEMON, signature="s")
     def Connected(self, device_address: str) -> None:  # noqa: N802
         pass

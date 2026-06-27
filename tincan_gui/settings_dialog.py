@@ -203,9 +203,13 @@ class _AdapterLoader(QThread):
 
 
 class _DeviceLoader(QThread):
-    """Background thread that discovers oFono HFP modems for the device picker."""
+    """Background thread that calls client.get_hfp_devices() and emits results."""
 
     loaded: Signal = Signal(list)
+
+    def __init__(self, client: object) -> None:
+        super().__init__()
+        self._client = client
 
     def start(self, priority=QThread.Priority.InheritPriority) -> None:
         _active_loaders.append(self)
@@ -220,27 +224,10 @@ class _DeviceLoader(QThread):
             pass
 
     def run(self) -> None:
-        import re as _re  # noqa: PLC0415
-
-        devices: list[dict] = []
         try:
-            import dbus  # noqa: PLC0415
-
-            bus = dbus.SystemBus()
-            obj = bus.get_object("org.ofono", "/")
-            iface = dbus.Interface(obj, "org.ofono.Manager")
-            for path, props in iface.GetModems():
-                props = dict(props)
-                if str(props.get("Type", "")) != "hfp":
-                    continue
-                m = _re.search(r"/dev_([0-9A-Fa-f_]{17})$", str(path))
-                if not m:
-                    continue
-                mac = m.group(1).replace("_", ":")
-                name = str(props.get("Name", "") or "")
-                devices.append({"mac": mac, "name": name})
-        except Exception:  # noqa: BLE001
-            pass
+            devices = self._client.get_hfp_devices()
+        except Exception:
+            devices = []
         self.loaded.emit(devices)
 
 
@@ -356,6 +343,7 @@ class SettingsDialog(QDialog):
         self._dark = is_dark_theme()
         self._row_widgets: list[_AppRowWidget] = []
         self._adapters_list: list[dict] = []
+        self._devices_list: list[dict] = []
 
         self.setWindowTitle("Settings")
         self.setMinimumSize(400, 300)
@@ -602,20 +590,36 @@ class SettingsDialog(QDialog):
             if self._loader_thread.wait(150):
                 QCoreApplication.processEvents()
 
-            # ── Bluetooth Device row ──────────────────────────────────
-            bt_layout.addSpacing(4)
-            bt_dev_label = QLabel("Bluetooth Device")
-            bt_dev_label.setFont(cb_font)
-            bt_dev_label.setStyleSheet("color: #a1a1aa;" if self._dark else "color: #6b7280;")
-            bt_dev_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            bt_layout.addWidget(bt_dev_label)
+            # ── Bluetooth Device picker ─────────────────────────────────────
+            bt_layout.addSpacing(12)
+            bt_device_label_row = QHBoxLayout()
+            bt_device_label = QLabel("Bluetooth Device")
+            bt_device_label.setFont(cb_font)
+            bt_device_label.setStyleSheet(
+                "color: #a1a1aa;" if self._dark else "color: #6b7280;"
+            )
+            bt_device_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            bt_device_label_row.addWidget(bt_device_label)
+            bt_device_label_row.addStretch()
+            self._device_refresh_btn = QPushButton("↺ Refresh")
+            self._device_refresh_btn.setFont(rf)
+            self._device_refresh_btn.setStyleSheet(
+                "QPushButton { color: #6366f1; background: transparent; border: none; }"
+                "QPushButton:hover { text-decoration: underline; }"
+            )
+            bt_device_label_row.addWidget(self._device_refresh_btn)
+            bt_layout.addLayout(bt_device_label_row)
+
             self._device_combo = QComboBox()
             self._device_combo.setPlaceholderText("Loading devices…")
             self._device_combo.setEnabled(False)
-            self._device_combo.setAccessibleName("Bluetooth device")
+            self._device_combo.setAccessibleName("Bluetooth Device")
             bt_layout.addWidget(self._device_combo)
+
             self._device_combo.currentIndexChanged.connect(self._on_device_changed)
-            self._device_loader = _DeviceLoader()
+            self._device_refresh_btn.clicked.connect(self._refresh_devices)
+
+            self._device_loader = _DeviceLoader(self._client)
             self._device_loader.loaded.connect(self._populate_device_combo)
             self._device_loader.start()
             if self._device_loader.wait(150):
@@ -766,8 +770,10 @@ class SettingsDialog(QDialog):
         if hasattr(self, "_adapter_combo"):
             QWidget.setTabOrder(self._close_to_tray_cb, self._refresh_btn)
             QWidget.setTabOrder(self._refresh_btn, self._adapter_combo)
-            if hasattr(self, "_device_combo"):
-                QWidget.setTabOrder(self._adapter_combo, self._device_combo)
+        if hasattr(self, "_device_combo"):
+            _bt_prev = getattr(self, "_adapter_combo", self._close_to_tray_cb)
+            QWidget.setTabOrder(_bt_prev, self._device_refresh_btn)
+            QWidget.setTabOrder(self._device_refresh_btn, self._device_combo)
 
     # ------------------------------------------------------------------
     # Slots
@@ -924,52 +930,6 @@ class SettingsDialog(QDialog):
         if index < len(self._adapters_list):
             self._update_adapter_badges(self._adapters_list[index])
 
-    def _populate_device_combo(self, devices: list[dict]) -> None:
-        self._device_combo.blockSignals(True)
-        self._device_combo.clear()
-        self._device_combo.addItem("Auto-discover (recommended)", "")
-        self._device_combo.setItemData(
-            0, "Auto-discover Bluetooth device (recommended)", Qt.ItemDataRole.AccessibleTextRole
-        )
-        for i, d in enumerate(devices, 1):
-            mac = d.get("mac", "")
-            name = d.get("name", "")
-            label = f"{mac} ({name})" if name else mac
-            self._device_combo.addItem(label, mac)
-        saved_mac = ""
-        try:
-            from tincand.config import DaemonSettings  # noqa: PLC0415
-
-            saved_mac = str(DaemonSettings().value("bluetooth/device_address", "") or "")
-        except Exception:  # noqa: BLE001
-            pass
-        selected_idx = 0
-        if saved_mac:
-            for i in range(self._device_combo.count()):
-                if self._device_combo.itemData(i, Qt.ItemDataRole.UserRole) == saved_mac:
-                    selected_idx = i
-                    break
-            else:
-                self._device_combo.addItem(saved_mac, saved_mac)
-                selected_idx = self._device_combo.count() - 1
-        self._device_combo.setCurrentIndex(selected_idx)
-        self._device_combo.setEnabled(True)
-        self._device_combo.blockSignals(False)
-
-    @Slot(int)
-    def _on_device_changed(self, index: int) -> None:
-        if index < 0:
-            return
-        mac = self._device_combo.itemData(index, Qt.ItemDataRole.UserRole) or ""
-        try:
-            from tincand.config import DaemonSettings  # noqa: PLC0415
-
-            s = DaemonSettings()
-            s.setValue("bluetooth/device_address", mac)
-            s.sync()
-        except Exception:  # noqa: BLE001
-            pass
-
     def _refresh_adapters(self) -> None:
         self._adapter_combo.setEnabled(False)
         self._adapter_combo.setPlaceholderText("Loading adapters…")
@@ -977,6 +937,61 @@ class SettingsDialog(QDialog):
             self._loader_thread = _AdapterLoader(self._client)
             self._loader_thread.loaded.connect(self._populate_adapter_combo)
             self._loader_thread.start()
+
+    # ------------------------------------------------------------------
+    # Device picker: load, populate, save
+    # ------------------------------------------------------------------
+
+    def _populate_device_combo(self, devices: list[dict]) -> None:
+        self._devices_list = devices
+        self._device_combo.blockSignals(True)
+        self._device_combo.clear()
+        self._device_combo.addItem("Auto-discover (recommended)", "")
+
+        saved_mac = None
+        try:
+            saved_mac = app_settings().value("bluetooth/device_address", default=None)
+        except Exception:
+            pass
+
+        selected_idx = 0
+        for i, d in enumerate(devices, start=1):
+            mac = str(d.get("mac", ""))
+            name = str(d.get("name", ""))
+            label = f"{name} ({mac})" if name else mac
+            self._device_combo.addItem(label, mac)
+            self._device_combo.setItemData(i, mac, Qt.ItemDataRole.AccessibleTextRole)
+            if saved_mac and mac == saved_mac:
+                selected_idx = i
+
+        self._device_combo.setCurrentIndex(selected_idx)
+        self._device_combo.blockSignals(False)
+        self._device_combo.setEnabled(True)
+
+    @Slot(int)
+    def _on_device_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        mac = self._device_combo.itemData(index, Qt.ItemDataRole.UserRole)
+        if mac is None:
+            return
+        s = app_settings()
+        try:
+            if mac:
+                s.setValue("bluetooth/device_address", mac)
+            else:
+                s.remove("bluetooth/device_address")
+            s.sync()
+        except Exception:
+            pass
+
+    def _refresh_devices(self) -> None:
+        self._device_combo.setEnabled(False)
+        if not self._client:
+            return
+        self._device_loader = _DeviceLoader(self._client)
+        self._device_loader.loaded.connect(self._populate_device_combo)
+        self._device_loader.start()
 
     def _on_adapter_restart_now(self) -> None:
         backend = ""
