@@ -458,6 +458,7 @@ class AdapterMismatchBanner(QFrame):
         self._label.setFont(lf)
         self._label.setStyleSheet("color: #7c4f00;")
         self._label.setWordWrap(True)
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self._label, stretch=1)
 
     def update_warning(self, text: str) -> None:
