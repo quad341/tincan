@@ -19,8 +19,8 @@ from unittest.mock import patch
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from tincan_gui.degradation_banners import StateABanner
 from tincan_gui.dbus_client import TincandClient
+from tincan_gui.degradation_banners import StateABanner
 from tincan_gui.main import MainWindow
 
 
