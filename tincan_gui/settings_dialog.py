@@ -557,6 +557,7 @@ class SettingsDialog(QDialog):
                 Qt.TextInteractionFlag.NoTextInteraction
             )
             unavail_layout.addWidget(self._adapter_unavailable_label)
+            self._adapter_unavailable_frame.setAccessibleName("Bluetooth service unavailable")
             self._adapter_unavailable_frame.hide()
             bt_layout.addWidget(self._adapter_unavailable_frame)
 
@@ -854,6 +855,11 @@ class SettingsDialog(QDialog):
             self._adapter_badge_row.hide()
             self._adapter_unavailable_frame.show()
             self._refresh_btn.hide()  # AC 13: no Refresh link in BlueZ-unavailable state
+            self._adapter_mismatch_annotation.hide()
+            self._adapter_powered_off_badge.hide()
+            self._adapter_restart_banner.hide()
+            if hasattr(self, "_device_combo"):
+                self._device_combo.setPlaceholderText("No adapters available")
             self._bt_section.setEnabled(False)
             self._adapter_combo.blockSignals(False)
             return

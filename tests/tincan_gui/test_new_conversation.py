@@ -196,7 +196,7 @@ class TestOnComposeNewLoadsThread:
         )
 
         assert not button.isEnabled()
-        assert button.toolTip() == "Connect to your iPhone first"
+        assert button.toolTip() == "Connect to your iPhone to start a new conversation"
 
         monkeypatch.setattr(
             TincandClient,

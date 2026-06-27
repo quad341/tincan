@@ -11,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QIcon, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -128,6 +128,14 @@ def _collapse_outbound_echoes(messages: list, window_s: int = 300) -> list:
     return kept
 
 
+def _first_valid_icon(*names: str) -> QIcon:
+    for name in names:
+        icon = QIcon.fromTheme(name)
+        if not icon.isNull():
+            return icon
+    return QIcon()
+
+
 class TitleBar(QWidget):
     """Title bar (h=48, forest teal): wordmark + gear + bug-report button + connection status."""
 
@@ -165,12 +173,7 @@ class TitleBar(QWidget):
         layout.addStretch()
 
         self._gear_btn = QToolButton()
-        self._gear_btn.setText("⚙")
         self._gear_btn.setFixedSize(32, 32)
-        _gear_font = QFont()
-        _gear_font.setFamilies(_emoji_font_families())
-        _gear_font.setPointSize(16)
-        self._gear_btn.setFont(_gear_font)
         self._gear_btn.setToolTip("Settings")
         self._gear_btn.setAccessibleName("Settings")
         self._gear_btn.setStyleSheet(
@@ -178,17 +181,19 @@ class TitleBar(QWidget):
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
+        _gear_icon = _first_valid_icon("configure", "preferences-system", "emblem-system")
+        if not _gear_icon.isNull():
+            self._gear_btn.setIcon(_gear_icon)
+            self._gear_btn.setIconSize(QSize(18, 18))
+            self._gear_btn.setText("")
+        else:
+            self._gear_btn.setText("⚙")
         layout.addWidget(self._gear_btn)
 
         layout.addSpacing(4)
 
         self._bug_btn = QToolButton()
-        self._bug_btn.setText("🐞")
         self._bug_btn.setFixedSize(32, 32)
-        _emoji_btn_font = QFont()
-        _emoji_btn_font.setFamilies(_emoji_font_families())
-        _emoji_btn_font.setPointSize(13)
-        self._bug_btn.setFont(_emoji_btn_font)
         self._bug_btn.setToolTip("File a bug report")
         self._bug_btn.setAccessibleName("File a bug report")
         self._bug_btn.setStyleSheet(
@@ -196,14 +201,19 @@ class TitleBar(QWidget):
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
+        _bug_icon = _first_valid_icon("tools-report-bug", "dialog-warning", "emblem-important")
+        if not _bug_icon.isNull():
+            self._bug_btn.setIcon(_bug_icon)
+            self._bug_btn.setIconSize(QSize(18, 18))
+            self._bug_btn.setText("")
+        else:
+            self._bug_btn.setText("⚠")
         layout.addWidget(self._bug_btn)
 
         layout.addSpacing(4)
 
         self._bell_btn = QToolButton()
-        self._bell_btn.setText("🔔")
         self._bell_btn.setFixedSize(32, 32)
-        self._bell_btn.setFont(_emoji_btn_font)
         self._bell_btn.setToolTip("Notification center")
         self._bell_btn.setAccessibleName("Notification center")
         self._bell_btn.setStyleSheet(
@@ -211,6 +221,17 @@ class TitleBar(QWidget):
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
+        _bell_icon = _first_valid_icon(
+            "preferences-system-notifications",
+            "notification",
+            "preferences-desktop-notification",
+        )
+        if not _bell_icon.isNull():
+            self._bell_btn.setIcon(_bell_icon)
+            self._bell_btn.setIconSize(QSize(18, 18))
+            self._bell_btn.setText("")
+        else:
+            self._bell_btn.setText("☆")
         layout.addWidget(self._bell_btn)
 
         layout.addSpacing(8)
@@ -789,7 +810,7 @@ class MainWindow(QMainWindow):
         """Gate starting new conversations on an active device connection."""
         self._conv_list.set_compose_new_enabled(
             bool(self._connected_device),
-            "Connect to your iPhone first",
+            "Connect to your iPhone to start a new conversation",
         )
 
     def _apply_capabilities(self, caps: dict) -> None:

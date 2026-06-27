@@ -1,10 +1,10 @@
-"""Tests: emoji font families wired on TitleBar buttons and _NotifRow badge (tincan-3so6e).
+"""Tests: toolbar button rendering + _NotifRow badge emoji font (tincan-3so6e / tincan-0oxkd).
 
 Coverage:
-  §1 TitleBar — three emoji-text buttons
-     - gear (⚙) button font includes emoji families
-     - bug (🐞) button font includes emoji families
-     - bell (🔔) button font includes emoji families
+  §1 TitleBar — three toolbar buttons use QIcon.fromTheme + BMP Unicode fallback
+     - gear button has non-null icon OR non-empty fallback text
+     - bug button has non-null icon OR non-empty fallback text
+     - bell button has non-null icon OR non-empty fallback text
   §2 _NotifRow badge
      - SMS kind badge font includes emoji families
      - app kind badge font includes emoji families
@@ -28,41 +28,38 @@ def _fake_emoji_families():
 
 
 # ---------------------------------------------------------------------------
-# §1 TitleBar button fonts
+# §1 TitleBar button rendering (QIcon.fromTheme + BMP fallback, tincan-0oxkd)
 # ---------------------------------------------------------------------------
 
-class TestTitleBarEmojiFontConfig:
-    """TitleBar emoji-text buttons (⚙ 🐞 🔔) receive emoji families via setFont()."""
+class TestTitleBarButtonRendering:
+    """TitleBar toolbar buttons display either a theme icon or a BMP Unicode fallback."""
 
-    def test_gear_button_font_includes_emoji_families(self, qtbot, _fake_emoji_families):
+    def test_gear_button_has_icon_or_fallback_text(self, qtbot):
         from tincan_gui.main import TitleBar
         tb = TitleBar()
         qtbot.addWidget(tb)
+        btn = tb.gear_button
+        assert not btn.icon().isNull() or btn.text() != "", (
+            "gear button must show either a theme icon or fallback text '⚙'"
+        )
 
-        families = tb.gear_button.font().families()
-        for fam in _FAKE_EMOJI_FAMILIES:
-            assert fam in families, \
-                f"'{fam}' missing from gear button font families: {families}"
-
-    def test_bug_button_font_includes_emoji_families(self, qtbot, _fake_emoji_families):
+    def test_bug_button_has_icon_or_fallback_text(self, qtbot):
         from tincan_gui.main import TitleBar
         tb = TitleBar()
         qtbot.addWidget(tb)
+        btn = tb.bug_button
+        assert not btn.icon().isNull() or btn.text() != "", (
+            "bug button must show either a theme icon or fallback text '⚠'"
+        )
 
-        families = tb.bug_button.font().families()
-        for fam in _FAKE_EMOJI_FAMILIES:
-            assert fam in families, \
-                f"'{fam}' missing from bug button font families: {families}"
-
-    def test_bell_button_font_includes_emoji_families(self, qtbot, _fake_emoji_families):
+    def test_bell_button_has_icon_or_fallback_text(self, qtbot):
         from tincan_gui.main import TitleBar
         tb = TitleBar()
         qtbot.addWidget(tb)
-
-        families = tb.bell_button.font().families()
-        for fam in _FAKE_EMOJI_FAMILIES:
-            assert fam in families, \
-                f"'{fam}' missing from bell button font families: {families}"
+        btn = tb.bell_button
+        assert not btn.icon().isNull() or btn.text() != "", (
+            "bell button must show either a theme icon or fallback text '☆'"
+        )
 
 
 # ---------------------------------------------------------------------------
