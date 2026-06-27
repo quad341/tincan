@@ -158,7 +158,8 @@ class TestSetReconnectingTrue:
     def test_button_text_indicates_progress(self):
         text = self.banner._reconnect_btn.text().lower()
         assert "reconnecting" in text, (
-            f"Button must say 'Reconnecting…' while busy; got {self.banner._reconnect_btn.text()!r}"
+            f"Button must say 'Reconnecting…' while busy;"
+            f" got {self.banner._reconnect_btn.text()!r}"
         )
 
     def test_sub_label_indicates_please_wait(self):
