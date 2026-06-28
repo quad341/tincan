@@ -53,17 +53,27 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-ancs",
         action="store_true",
+        default=None,
         dest="with_ancs",
-        help=(
-            "Run the ANCS backend concurrently with the primary backend "
-            "(MAP + ANCS in one process)."
-        ),
+        help="Deprecated — ANCS is now on by default with --backend map. No-op.",
+    )
+    parser.add_argument(
+        "--no-ancs",
+        action="store_true",
+        dest="no_ancs",
+        help="Disable the ANCS secondary backend (overrides the default-on setting).",
     )
     args = parser.parse_args()
     if args.mock:
         if args.backend and args.backend != "mock":
             parser.error("--mock cannot be combined with --backend ancs")
         args.backend = "mock"
+    # ANCS is on by default with map; --no-ancs or ancs/enabled=false in tincan.ini opts out.
+    if not args.no_ancs:
+        from tincand.config import DaemonSettings  # noqa: PLC0415
+        if not DaemonSettings().value("ancs/enabled", True, type=bool):
+            args.no_ancs = True
+    args.with_ancs = not args.no_ancs
     return args
 
 

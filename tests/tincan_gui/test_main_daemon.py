@@ -239,11 +239,23 @@ class TestCapabilityChanged:
     # --- ancs capability ---
 
     def test_ancs_false_shows_banner_c(self, qtbot):
+        """CapabilityChanged("ancs", False) alone does not show StateCBanner.
+        StateCBanner now requires ancs_status="healing" from ANCSStatusChanged.
+        """
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
 
         window._on_capability_changed("ancs", False)
+
+        assert not window._banner_c.isVisible()  # healing signal not received yet
+
+    def test_ancs_status_healing_shows_banner_c(self, qtbot):
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+
+        window._on_ancs_status_changed("healing")
 
         assert window._banner_c.isVisible()
 
@@ -483,12 +495,22 @@ class TestDBusWiring:
 
         assert window._banner_b.isVisible()
 
-    def test_capability_changed_ancs_false_shows_banner_c(self, qtbot):
+    def test_capability_changed_ancs_false_does_not_show_banner_c(self, qtbot):
+        """CapabilityChanged alone cannot show StateCBanner; ANCSStatusChanged("healing") needed."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
 
         window._dbus_client.capability_changed.emit("ancs", False)
+
+        assert not window._banner_c.isVisible()
+
+    def test_ancs_status_changed_healing_shows_banner_c(self, qtbot):
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+
+        window._dbus_client.ancs_status_changed.emit("healing")
 
         assert window._banner_c.isVisible()
 

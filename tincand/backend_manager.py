@@ -80,3 +80,9 @@ class BackendManager(BackendInterface):
 
     def schedule_reconnect(self) -> None:
         self._primary.schedule_reconnect()
+
+    def request_heal(self) -> None:
+        """Delegate ANCS heal request to any secondary that supports it."""
+        for s in self._secondaries:
+            if hasattr(s, "request_heal"):
+                s.request_heal()

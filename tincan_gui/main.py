@@ -514,6 +514,7 @@ class MainWindow(QMainWindow):
         self._connected_device: str = ""  # human-readable name or address of connected BT device
         self._daemon_spawn_attempted: bool = False
         self._messages_ok: bool = False   # True when daemon reports messages capability
+        self._ancs_status: str = "disabled"  # tincan-nbjrp: rich ANCS state string
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._adapter_unavailable_banner_dismissed: bool = False
         self._adapter_mismatch_warning: str = ""
@@ -583,7 +584,7 @@ class MainWindow(QMainWindow):
 
         self._banner_c = StateCBanner()
         self._banner_c.hide()
-        self._banner_c.refresh_clicked.connect(self.refresh_requested.emit)
+        self._banner_c.heal_clicked.connect(self._on_ancs_heal_requested)
         root_layout.addWidget(self._banner_c)
 
         # Contacts-empty hint (tincan-d3xw)
@@ -661,6 +662,7 @@ class MainWindow(QMainWindow):
         c.connected.connect(self._on_daemon_connected)
         c.disconnected.connect(self._on_daemon_disconnected)
         c.capability_changed.connect(self._on_capability_changed)
+        c.ancs_status_changed.connect(self._on_ancs_status_changed)
         c.message_received.connect(self._on_message_received)
         c.app_notification_received.connect(self._notifier.dispatch_app_notification)
         c.conversation_updated.connect(self._on_conversation_updated)
@@ -709,6 +711,7 @@ class MainWindow(QMainWindow):
             self._banner_a.hide()
             caps = status.get("capabilities") or {}
             self._apply_capabilities(caps)
+            self._apply_ancs_status(str(status.get("ancs_status", "disabled")))
             self._tray.set_connected(True)
             self._load_conversations()
         else:
@@ -790,11 +793,12 @@ class MainWindow(QMainWindow):
         self._messages_ok = messages_ok
         self._banner_b.setVisible(not messages_ok)
         self._sync_compose_state()
-        ancs_ok = bool(caps.get("ancs", False))
-        ancs_needs_repair = bool(caps.get("ancs_needs_repair", False))
-        self._update_ancs_repair_banner(ancs_needs_repair)
-        self._update_state_c_banner(ancs_ok, ancs_needs_repair)
-        self._title_bar.ancs_status_dot.update_state(ancs_ok, ancs_needs_repair)
+        # Chip reflects messaging capability; update when connected.
+        if self._connected_device:
+            if messages_ok:
+                self._title_bar.set_connected(self._connected_device)
+            else:
+                self._title_bar.set_connected_limited(self._connected_device)
         # Contacts-empty hint (tincan-d3xw)
         contacts_empty = bool(caps.get("contacts_empty", False))
         self._banner_contacts_empty.setVisible(contacts_empty)
@@ -803,6 +807,29 @@ class MainWindow(QMainWindow):
         call_setup_ready = bool(caps.get("call_setup_ready", True))
         self._call_setup_ready = call_setup_ready
         self._banner_call_setup.setVisible(not call_setup_ready)
+
+    def _apply_ancs_status(self, ancs_status: str) -> None:
+        """Update ANCS banners and dot from the richer ancs_status string (tincan-nbjrp).
+
+        Hides State C and Repair banners when ANCS is disabled (user opted out)
+        to avoid nags about a feature the user intentionally turned off.
+        """
+        self._ancs_status = ancs_status
+        ancs_enabled = self._ancs_enabled()
+        if not ancs_enabled:
+            # User disabled ANCS — suppress all ANCS banners and dot
+            self._banner_ancs_repair.setVisible(False)
+            self._banner_c.setVisible(False)
+            self._title_bar.ancs_status_dot.hide()
+            return
+        self._update_ancs_repair_banner(ancs_status == "fallback")
+        self._update_state_c_banner(ancs_status)
+        self._title_bar.ancs_status_dot.update_state(ancs_status)
+
+    @staticmethod
+    def _ancs_enabled() -> bool:
+        from tincan_gui._settings import app_settings, bool_value  # noqa: PLC0415
+        return bool_value(app_settings(), "ancs/enabled", True)
 
     def _update_ancs_repair_banner(self, needs_repair: bool) -> None:
         """Show/hide ANCSRepairBanner; fire FALLBACK notification on first entry."""
@@ -819,22 +846,13 @@ class MainWindow(QMainWindow):
                 self._tray.set_repair_needed(False)
             self._repair_notified = False
 
-    def _update_state_c_banner(self, ancs_ok: bool, ancs_needs_repair: bool = False) -> None:
-        """Show/hide State C banner; update chip to amber when ANCS limited (tincan-om9).
+    def _update_state_c_banner(self, ancs_status: str) -> None:
+        """Show/hide State C (healing) banner (tincan-nbjrp).
 
-        State C is hidden when ancs_needs_repair=True — ANCSRepairBanner takes precedence.
-        Co-exists with State B — messages gate takes priority for compose state.
-        Chip color only changes when the device is actually connected.
+        State C shows only during HEALING — not during armed/active/fallback/disabled.
+        ANCSRepairBanner takes over for fallback; armed/disabled don't warrant a nag.
         """
-        show_c = not ancs_ok and not ancs_needs_repair
-        self._banner_c.setVisible(show_c)
-        if self._connected_device:
-            # Chip reflects messaging capability (primary), not ANCS notifications
-            # (secondary). ANCS unavailability is surfaced via the State C banner.
-            if self._messages_ok:
-                self._title_bar.set_connected(self._connected_device)
-            else:
-                self._title_bar.set_connected_limited(self._connected_device)
+        self._banner_c.setVisible(ancs_status == "healing")
 
     @property
     def conversation_list(self) -> ConversationListWidget:
@@ -960,11 +978,13 @@ class MainWindow(QMainWindow):
         if status:
             caps = status.get("capabilities") or {}
             name = str(status.get("device_name") or device_address)
+            ancs_status = str(status.get("ancs_status", "disabled"))
         else:
             # Daemon just connected but GetStatus() is transiently unavailable;
             # assume all capabilities OK rather than showing degradation banners.
             caps = {"messages": True, "contacts": True, "ancs": True}
             name = str(device_address)
+            ancs_status = "armed"
 
         # Persist device address so next startup reads config instead of needing --device (tincan-oxthc).
         if device_address:
@@ -976,6 +996,7 @@ class MainWindow(QMainWindow):
         self._title_bar.set_connected(name)
         self._banner_a.hide()
         self._apply_capabilities(caps)
+        self._apply_ancs_status(ancs_status)
         self._tray.set_connected(True)
         self._load_conversations()
 
@@ -989,6 +1010,7 @@ class MainWindow(QMainWindow):
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
+        self._ancs_status = "disabled"
         self._banner_ancs_repair.hide()
         self._banner_c.hide()
         self._banner_contacts_empty.hide()
@@ -1015,12 +1037,23 @@ class MainWindow(QMainWindow):
         status = self._dbus_client.get_status()
         if status:
             caps = status.get("capabilities") or {}
+            ancs_status = str(status.get("ancs_status", self._ancs_status))
         else:
             caps = {"messages": True, "contacts": True, "ancs": True}
             caps[feature] = available
+            ancs_status = self._ancs_status
         self._apply_capabilities(caps)
+        self._apply_ancs_status(ancs_status)
         if feature == "contacts" and available:
             self._load_conversations()
+
+    def _on_ancs_status_changed(self, ancs_status: str) -> None:
+        """Handle ANCSStatusChanged signal — update banners/dot without full re-fetch."""
+        self._apply_ancs_status(ancs_status)
+
+    def _on_ancs_heal_requested(self) -> None:
+        """StateCBanner Reconnect button — request ANCS heal from daemon."""
+        self._dbus_client.request_ancs_heal()
 
     def _on_message_received(self, message: dict) -> None:
         self._notifier.dispatch(message)
