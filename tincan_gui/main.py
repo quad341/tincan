@@ -986,6 +986,7 @@ class MainWindow(QMainWindow):
         self._self_echo_guard.clear()
         self._sent_cache.clear()
         self._failed_sends.clear()
+        self._pending_sends.clear()
         self._title_bar.set_disconnected()
         self._banner_a.show()
         self._banner_b.hide()
@@ -1180,73 +1181,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(prompt)
 
         note_edit = QTextEdit()
-        note_edit.setPlaceholderText("e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'")
+        note_edit.setPlaceholderText(
+            "e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'"
+        )
         note_edit.setFixedHeight(80)
         note_edit.setStyleSheet(
             "QTextEdit { background: #27272a; border: 1px solid #3f3f46;"
             " border-radius: 4px; color: #f4f4f5; padding: 4px; }"
         )
-        layout.addWidget(note_edit)
-
-        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btn_box.button(QDialogButtonBox.Ok).setText("Submit Report")
-        btn_box.accepted.connect(dlg.accept)
-        btn_box.rejected.connect(dlg.reject)
-        layout.addWidget(btn_box)
-
-        if dlg.exec() != QDialog.Accepted:
-            return
-
-        note = note_edit.toPlainText().strip()
-        if not note:
-            return
-
-        app_state = {
-            "current_phone": self._current_phone,
-            "connected_device": self._connected_device,
-            "messages_ok": self._messages_ok,
-            "pending_sends": len(self._pending_sends),
-            "conversations_loaded": len(self._conversations_by_id),
-            "trace_enabled": _trace._ENABLED,
-            "trace_cid": _trace.current_cid(),
-        }
-        report_path = _write_bug_report(note, app_state, _trace.recent_events(100))
-        _trace.emit("bug_report_filed", path=str(report_path), note_len=len(note))
-
-        QMessageBox.information(
-            self,
-            "Bug Report Saved",
-            f"Report saved to:\n{report_path}\n\nThank you — hand the path to the mayor.",
-        )
-
-    def _open_pairing_wizard(self) -> None:
-        from tincan_gui.pairing_wizard import PairingWizard
-        from tincand.pairing import PairingOrchestrator
-        orch = PairingOrchestrator(on_state_change=lambda state, reason=None: None)
-        wizard = PairingWizard(orchestrator=orch, parent=self)
-        wizard.exec()
-
-    def _on_file_bug(self) -> None:
-        """Show the File-a-Bug dialog and write a local structured report."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("File a Bug Report")
-        dlg.setMinimumWidth(440)
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
-
-        prompt = QLabel("Describe what looks wrong:")
-        prompt_font = QFont()
-        prompt_font.setPointSize(12)
-        prompt.setFont(prompt_font)
-        layout.addWidget(prompt)
-
-        note_edit = QTextEdit()
-        note_edit.setPlaceholderText(
-            "e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'"
-        )
-        note_edit.setFixedHeight(80)
         layout.addWidget(note_edit)
 
         btn_box = QDialogButtonBox(
@@ -1281,6 +1223,13 @@ class MainWindow(QMainWindow):
             "Bug Report Saved",
             f"Report saved to:\n{report_path}\n\nHand the path to the mayor.",
         )
+
+    def _open_pairing_wizard(self) -> None:
+        from tincan_gui.pairing_wizard import PairingWizard
+        from tincand.pairing import PairingOrchestrator
+        orch = PairingOrchestrator(on_state_change=lambda state, reason=None: None)
+        wizard = PairingWizard(orchestrator=orch, parent=self)
+        wizard.exec()
 
     def _on_open_notif_center(self) -> None:
         from tincan_gui.notification_center import NotificationCenterDialog
@@ -1585,6 +1534,9 @@ class MainWindow(QMainWindow):
 
     def _exit_call(self) -> None:
         """Remove pages 1-3 and restore ComposePanel (page 0)."""
+        if self._incall_dialog is not None:
+            self._incall_dialog.close()
+            self._incall_dialog = None
         self._compose_stack.setCurrentIndex(self._PAGE_COMPOSE)
         for attr in ("_dtmf_page", "_audio_err_panel", "_incall_panel"):
             w = getattr(self, attr)
