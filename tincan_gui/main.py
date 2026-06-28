@@ -962,7 +962,8 @@ class MainWindow(QMainWindow):
 
     def _on_messages_loaded(self, conv_id: str, raw_msgs: list) -> None:
         """Handle async GetMessages reply: seed cache, then render if still the active conv."""
-        cache_key = self._current_phone or conv_id
+        _conv = self._conversations_by_id.get(conv_id)
+        cache_key = (_conv.phone if _conv and _conv.phone else "") or conv_id
         if conv_id and conv_id != cache_key:
             self._msg_cache.merge_into(cache_key, conv_id)
 
