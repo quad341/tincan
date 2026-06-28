@@ -207,8 +207,17 @@ class ANCSRepairBanner(QWidget):
         self._reconnect_btn.clicked.connect(self.reconnect_clicked)
         outer.addWidget(self._reconnect_btn)
 
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setSingleShot(True)
+        self._reconnect_timer.setInterval(10_000)
+        self._reconnect_timer.timeout.connect(lambda: self.set_reconnecting(False))
+
     def set_reconnecting(self, reconnecting: bool) -> None:
         """Switch button between idle and busy states."""
+        if reconnecting:
+            self._reconnect_timer.start()
+        else:
+            self._reconnect_timer.stop()
         self._reconnect_btn.setText(
             self.tr(self._BTN_BUSY if reconnecting else self._BTN_IDLE)
         )

@@ -1026,6 +1026,11 @@ class SettingsDialog(QDialog):
         self._adapter_combo.setEnabled(False)
         self._adapter_combo.setPlaceholderText("Loading adapters…")
         if self._client:
+            if hasattr(self, "_loader_thread"):
+                try:
+                    self._loader_thread.loaded.disconnect(self._populate_adapter_combo)
+                except RuntimeError:
+                    pass
             self._loader_thread = _AdapterLoader(self._client)
             self._loader_thread.loaded.connect(self._populate_adapter_combo)
             self._loader_thread.start()
@@ -1040,6 +1045,7 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
         self._sigterm_daemon()
+        self._wait_for_daemon_name_free()
         spawn_daemon(backend, device)
         self.close()
 
@@ -1057,6 +1063,24 @@ class SettingsDialog(QDialog):
             os.kill(pid, _signal.SIGTERM)
         except Exception:
             pass
+
+    def _wait_for_daemon_name_free(self, timeout_ms: int = 1000) -> None:
+        """Poll until im.tincan.Daemon is off the session bus or timeout expires."""
+        import time as _time  # noqa: PLC0415
+        try:
+            import dbus as _dbus  # noqa: PLC0415
+            _bus = _dbus.SessionBus()
+            proxy = _dbus.Interface(
+                _bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus"),
+                "org.freedesktop.DBus",
+            )
+            deadline = _time.monotonic() + timeout_ms / 1000.0
+            while _time.monotonic() < deadline:
+                if "im.tincan.Daemon" not in proxy.ListNames():
+                    return
+                _time.sleep(0.05)
+        except Exception:
+            _time.sleep(0.1)
 
     # ------------------------------------------------------------------
     # Properties / helpers used by tests

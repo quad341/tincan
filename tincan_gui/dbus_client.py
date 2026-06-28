@@ -725,6 +725,7 @@ class TincandClient(QObject):
             if iface.isValid():
                 iface.call("SetAppFilter", str(app_id), str(action))
 
+    @Slot(str, "QByteArray")
     def _on_contact_photo_received(self, conv_id, photo) -> None:
         _log.debug("tincand: ContactPhotoReceived(%s)", conv_id)
         try:
@@ -809,7 +810,11 @@ class TincandClient(QObject):
         """Return the list of active calls as (call_id, number, state, direction) tuples."""
         try:
             result = self._dbus_call(_IFACE_CALLS, "GetCalls")
-            return [(str(c[0]), str(c[1]), str(c[2]), str(c[3])) for c in (result or [])]
+            return [
+                (str(c[0]), str(c[1]), str(c[2]), str(c[3]))
+                for c in (result or [])
+                if len(c) >= 4
+            ]
         except Exception as exc:
             _log.debug("get_calls() failed: %s", exc)
             return []

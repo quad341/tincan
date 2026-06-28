@@ -1078,6 +1078,8 @@ class MainWindow(QMainWindow):
         self._tray.set_connected(True)
         self._load_conversations()
         QTimer.singleShot(500, self._prefetch_recent_threads)
+        self._refresh_adapter_unavailable_banner()
+        self._refresh_adapter_mismatch_banner()
 
     def _on_daemon_disconnected(self) -> None:
         self._connected_device = ""

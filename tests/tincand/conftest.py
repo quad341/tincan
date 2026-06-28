@@ -46,12 +46,9 @@ def _block_real_map_sends(monkeypatch):
 # until the entry is removed here, so the contract guard can never silently rot.
 # ---------------------------------------------------------------------------
 _KNOWN_BROKEN_CONTRACT = {
-    "test_handler_has_slot_decorator[_on_contact_photo_received]": (
-        "tincan-3vakg: ContactPhotoReceived handler missing @Slot(str, QByteArray) "
-        "— avatars do not update live (caught at 2026-06-06 deploy, 7/8 signals)."
-    ),
     # RequestReconnect xfail removed: the daemon now exports it (tincan-s7569,
     # landed in this PR) so the contract case passes for real.
+    # _on_contact_photo_received xfail removed: @Slot added (tincan-zk8jp).
 }
 
 
