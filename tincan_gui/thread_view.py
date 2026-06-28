@@ -794,6 +794,13 @@ class ThreadView(QWidget):
 
         sb.rangeChanged.connect(_on_range_changed)
 
+    def set_loading(self, loading: bool) -> None:
+        """Switch the empty-state label between 'loading' and 'no selection' text."""
+        if loading:
+            self._empty_label.setText(self.tr("Loading messages…"))
+        else:
+            self._empty_label.setText(self.tr("Select a conversation to read messages"))
+
     def append_message(self, msg: MessageData) -> None:
         """Append a single bubble to the live thread and scroll to bottom.
 
