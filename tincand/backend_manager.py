@@ -40,6 +40,10 @@ class BackendManager(BackendInterface):
     # BackendInterface
     # ------------------------------------------------------------------
 
+    @property
+    def is_connected(self) -> bool:
+        return getattr(self._primary, "is_connected", False)
+
     def register_service(self, service: object) -> None:
         self._service = service  # type: ignore[attr-defined]
         self._primary.register_service(service)

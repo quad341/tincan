@@ -233,6 +233,88 @@ def _select_backend(
     sys.exit(f"Unknown backend {name!r}. Must be one of: {choices}")
 
 
+_MAX_AUTO_RECONNECTS = 5
+
+
+def _arm_device_watcher(backend: object, call_controller: object) -> None:
+    """Subscribe to oFono ModemAdded and trigger backend.connect() when the
+    target HFP device appears.
+
+    Handles the case where the phone was offline at daemon start (so
+    _device_addr resolved to "" and schedule_reconnect() is a no-op).
+    When a new HFP modem is announced, extract the MAC and connect.
+
+    Guards:
+    - Skip if the backend already has an active MAP session (is_connected).
+    - Skip if there are active calls (disruptive to reconnect mid-call).
+    - Bounded by _MAX_AUTO_RECONNECTS across the daemon lifetime.
+    """
+    try:
+        import dbus  # noqa: PLC0415
+
+        sys_bus = dbus.SystemBus()
+        manager_obj = sys_bus.get_object("org.ofono", "/")
+        manager = dbus.Interface(manager_obj, "org.ofono.Manager")
+    except Exception as exc:
+        _log.debug("_arm_device_watcher: oFono unavailable (%s) — not watching", exc)
+        return
+
+    reconnect_count: list[int] = [0]  # mutable counter captured by closure
+
+    def _on_modem_added(path: str, props: dict) -> None:
+        path = str(path)
+        props = dict(props)
+        if str(props.get("Type", "")) != "hfp":
+            return
+        mac = _mac_from_ofono_path(path)
+        if not mac:
+            return
+        if getattr(backend, "is_connected", False):
+            _log.debug("_arm_device_watcher: %s appeared but MAP session already up", mac)
+            return
+        if reconnect_count[0] >= _MAX_AUTO_RECONNECTS:
+            _log.info(
+                "_arm_device_watcher: %s appeared but auto-reconnect limit (%d) reached",
+                mac,
+                _MAX_AUTO_RECONNECTS,
+            )
+            return
+        active_calls = getattr(call_controller, "_calls", {})
+        if active_calls:
+            _log.info(
+                "_arm_device_watcher: %s online but %d active call(s) — skipping reconnect",
+                mac,
+                len(active_calls),
+            )
+            return
+        reconnect_count[0] += 1
+        _log.info(
+            "_arm_device_watcher: HFP modem %s appeared — connecting backend "
+            "(attempt %d/%d)",
+            mac,
+            reconnect_count[0],
+            _MAX_AUTO_RECONNECTS,
+        )
+
+        def _connect_idle() -> bool:
+            try:
+                backend.connect(mac)
+            except Exception as exc2:
+                _log.warning(
+                    "_arm_device_watcher: connect(%s) failed: %s — retry via schedule_reconnect",
+                    mac,
+                    exc2,
+                )
+                if hasattr(backend, "schedule_reconnect"):
+                    backend.schedule_reconnect()
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(_connect_idle)
+
+    manager.connect_to_signal("ModemAdded", _on_modem_added)
+    _log.info("_arm_device_watcher: watching oFono for HFP modem appearance")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
@@ -295,6 +377,11 @@ def main() -> None:
 
     backend.register_service(service)
     service.register_backend(backend)
+
+    # Watch for HFP modem appearance so the daemon can reconnect when the
+    # phone returns after being offline at startup (device_addr empty → normal
+    # retry loop is a no-op; this watcher fills the gap).
+    _arm_device_watcher(backend, call_controller)
 
     loop = GLib.MainLoop()
 
