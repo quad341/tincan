@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QCoreApplication, Signal
+from PySide6.QtCore import QCoreApplication, QTimer, Signal
 from PySide6.QtGui import QAccessible, QFont
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
