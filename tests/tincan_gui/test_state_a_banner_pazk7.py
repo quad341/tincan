@@ -341,3 +341,31 @@ class TestHadConnectionThisSession:
         assert "connection lost" in text, (
             f"Second disconnect must still show OUT_OF_RANGE; got {text!r}"
         )
+
+    def test_connected_at_startup_then_disconnect_shows_out_of_range(
+        self, qtbot, monkeypatch
+    ):
+        """Already-connected-at-startup must set the flag so a later disconnect is OUT_OF_RANGE."""
+        monkeypatch.setattr(
+            TincandClient,
+            "get_status",
+            lambda self: {
+                "connected": True,
+                "device_name": "iPhone",
+                "capabilities": {},
+            },
+        )
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+
+        window._sync_daemon_state()
+        assert window._had_connection_this_session, (
+            "_sync_daemon_state must set _had_connection_this_session when connected at startup"
+        )
+
+        window._on_daemon_disconnected()
+        text = window._banner_a._label.text().lower()
+        assert "connection lost" in text, (
+            f"Disconnect after startup-connection must show OUT_OF_RANGE; got {text!r}"
+        )

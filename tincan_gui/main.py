@@ -727,6 +727,7 @@ class MainWindow(QMainWindow):
         if status.get("connected"):
             addr = str(status.get("device_name") or status.get("device_address") or "")
             self._connected_device = addr
+            self._had_connection_this_session = True
             self._title_bar.set_connected(addr)
             self._banner_a.hide()
             caps = status.get("capabilities") or {}
