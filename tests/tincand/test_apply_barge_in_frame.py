@@ -17,10 +17,7 @@ from __future__ import annotations
 
 from unittest.mock import call, patch
 
-import pytest
-
 from tincand.call_audio import BargeInController, UplinkMixerCtx, apply_barge_in_frame
-
 
 # ---------------------------------------------------------------------------
 # Helpers
