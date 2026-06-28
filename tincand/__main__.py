@@ -279,7 +279,8 @@ def _arm_device_watcher(backend: object, call_controller: object) -> None:
                 _MAX_AUTO_RECONNECTS,
             )
             return
-        active_calls = getattr(call_controller, "_calls", {})
+        _get_calls = getattr(call_controller, "get_calls", None)
+        active_calls = _get_calls() if _get_calls is not None else []
         if active_calls:
             _log.info(
                 "_arm_device_watcher: %s online but %d active call(s) — skipping reconnect",
