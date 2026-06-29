@@ -12,7 +12,9 @@ from tincand.adapter_check import check_adapter_le_capable
 _log = logging.getLogger(__name__)
 
 _BLUEZ_SERVICE = "org.bluez"
+_ADAPTER_IFACE = "org.bluez.Adapter1"
 _LE_ADV_MGR_IFACE = "org.bluez.LEAdvertisingManager1"
+_PROPS_IFACE = "org.freedesktop.DBus.Properties"
 _ADV_PATH = "/uk/tincanapp/pairing/advertisement0"
 
 
@@ -78,6 +80,7 @@ class PairingOrchestrator:
         self._adapter_path = adapter_path
         self._pair_timeout = pair_timeout
         self._ancs_timeout = ancs_timeout
+        self.computer_name: str = "your computer"
         self._lock = threading.Lock()
         self._pair_timer: threading.Timer | None = None
         self._ancs_timer: threading.Timer | None = None
@@ -112,6 +115,13 @@ class PairingOrchestrator:
 
         bus = dbus.SystemBus()
         adapter_obj = bus.get_object(_BLUEZ_SERVICE, self._adapter_path)
+        try:
+            props_iface = dbus.Interface(adapter_obj, _PROPS_IFACE)
+            alias = str(props_iface.Get(_ADAPTER_IFACE, "Alias"))
+            if alias:
+                self.computer_name = alias
+        except dbus.DBusException:
+            pass
         le_adv_mgr = dbus.Interface(adapter_obj, _LE_ADV_MGR_IFACE)
         le_adv_mgr.RegisterAdvertisement(
             _ADV_PATH,

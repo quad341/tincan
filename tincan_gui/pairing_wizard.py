@@ -564,7 +564,11 @@ class PairingWizard(QWizard):
 
     def _on_orchestrator_state_change(self, state: str, reason: str | None = None) -> None:
         if state == PairingState.FAILED:
-            self.failure_page.configure(reason)
+            name = getattr(self._orchestrator, "computer_name", "your computer")
+            self.failure_page.configure(
+                reason,
+                computer_name=name if isinstance(name, str) else "your computer",
+            )
             self.setCurrentId(self._page_ids[self.failure_page])
         elif state in self._state_page:
             self.setCurrentId(self._page_ids[self._state_page[state]])
