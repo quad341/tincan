@@ -26,7 +26,6 @@ import dbus
 from gi.repository import GLib
 
 from tincand.backends.base import BackendInterface
-from tincand.contact_store import normalize_phone
 from tincand.dbus_service import Conversation
 from tincand.message_store import MessageStore
 

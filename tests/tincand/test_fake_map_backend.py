@@ -45,7 +45,7 @@ class TestInboxMessageShapes:
         b.add_inbound("+15550001", "Hey!", conv_id="5550001")
         msg = b.poll_inbox()[0]
         for field in ("sender", "body", "direction", "msg_type", "read",
-                      "timestamp", "conv_id", "attachments"):
+                      "timestamp", "conv_id", "attachments"):  # no 'participants' — group surface removed
             assert field in msg, f"Missing field: {field}"
 
     def test_sms_message_has_correct_defaults(self):
