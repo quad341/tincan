@@ -32,6 +32,8 @@ class PairingState:
 class FailureReason:
     ADAPTER_NOT_CAPABLE = "adapter_not_capable"
     ADVERTISING_FAILED = "advertising_failed"
+    ANCS_EXT_ADV_BUG = "ancs_ext_adv_bug"          # BlueZ HCI 0x0d: LE ext-adv not supported by this controller
+    ANCS_EXPERIMENTAL_REQUIRED = "ancs_experimental_required"  # bluetoothd --experimental required for SolicitUUIDs
     PAIR_TIMEOUT = "pair_timeout"
     ANCS_NOT_EXPOSED = "ancs_not_exposed"
     MAP_CONSENT_DENIED = "map_consent_denied"
@@ -131,7 +133,15 @@ class PairingOrchestrator:
 
     def _on_adv_error(self, error: object) -> None:
         _log.warning("PairingOrchestrator: RegisterAdvertisement failed: %s", error)
-        self._fail(FailureReason.ADVERTISING_FAILED)
+        exc_name = getattr(error, "get_dbus_name", lambda: "")()
+        exc_str = str(error)
+        if "0x0d" in exc_str or "Invalid Parameters" in exc_str:
+            reason = FailureReason.ANCS_EXT_ADV_BUG
+        elif "NotSupported" in exc_name:
+            reason = FailureReason.ANCS_EXPERIMENTAL_REQUIRED
+        else:
+            reason = FailureReason.ADVERTISING_FAILED
+        self._fail(reason)
 
     def _on_pair_timeout(self) -> None:
         _log.warning("PairingOrchestrator: pair timeout (%ss)", self._pair_timeout)
