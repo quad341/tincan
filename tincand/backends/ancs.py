@@ -216,9 +216,6 @@ class ANCSBackend(BackendInterface):
     def send_message(self, to: str, body: str) -> str:
         raise NotImplementedError("ANCS is receive-only; use MapBackend for sending")
 
-    def send_group_message(self, participants: list[str], body: str) -> str:
-        raise NotImplementedError("ANCS is receive-only; use MapBackend for sending")
-
     # ------------------------------------------------------------------
     # GATT consumer lifecycle
     # ------------------------------------------------------------------

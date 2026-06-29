@@ -342,7 +342,7 @@ class _ChipWidget(QWidget):
 
 
 class NewConversationDialog(QDialog):
-    """Multi-chip compose dialog for starting a new 1:1 or group conversation."""
+    """Compose dialog for starting a new 1:1 conversation."""
 
     def __init__(
         self,
@@ -518,12 +518,8 @@ class NewConversationDialog(QDialog):
                 self._text_input.clear()
 
     def _update_ok_button(self) -> None:
-        n = len(self._chips)
-        self._ok_btn.setEnabled(n >= 1)
-        if n >= 2:
-            self._ok_btn.setText("Start Group")
-        else:
-            self._ok_btn.setText("Start")
+        self._ok_btn.setEnabled(len(self._chips) >= 1)
+        self._ok_btn.setText("Start")
 
     def selected_phones(self) -> list[str]:
         return [c.phone for c in self._chips]
@@ -1126,16 +1122,6 @@ class MainWindow(QMainWindow):
             self._current_phone_dialable = True
         name = conv_data.name if conv_data else conv_id
 
-        # Set group mode on thread + compose before loading messages.
-        is_group = bool(conv_data and conv_data.is_group)
-        self._current_is_group = is_group
-        self._current_contact_name = name
-        participants: list[str] = (
-            list(conv_data.participants) if conv_data and conv_data.is_group else []
-        )
-        self._thread_view.set_group_mode(is_group, participants)
-        self._compose.set_group_mode(is_group)
-
         # Show cached messages immediately (no empty-thread flash), then merge
         # MAP results in the next event-loop tick once the D-Bus round trip completes.
         cache_key = self._current_phone or conv_id
@@ -1463,10 +1449,6 @@ class MainWindow(QMainWindow):
         else:
             bubble_type = BubbleType.OUTBOUND
 
-        group_hint = bool(message.get("group_hint", False))
-        if group_hint and bubble_type == BubbleType.INBOUND:
-            bubble_type = BubbleType.GROUP_UNKNOWN_SENDER
-
         _trace.emit("msg_received", direction=direction, bubble=bubble_type.name,
                     conv_id=conv_id, body_hash=_trace.body_hash(body), body_len=len(body))
         self._thread_view.append_message(
@@ -1702,32 +1684,12 @@ class MainWindow(QMainWindow):
         phones = dlg.selected_phones()
         if not phones:
             return
-        if len(phones) == 1:
-            phone = phones[0]
-            self._current_phone = phone
-            self._current_phone_dialable = _is_dialable(phone)
-            self._current_is_group = False
-            self._current_contact_name = ""
-            self._thread_view.set_group_mode(False)
-            self._compose.set_group_mode(False)
-            self._thread_view.load_thread(phone, phone, [], "SMS")
-            self._sync_compose_state()
-            self._sync_call_state()
-            self._compose._input.setFocus()
-        else:
-            conv_id = self._dbus_client.send_message_to_recipients(phones, "")
-            if not conv_id:
-                conv_id = phones[0]
-            self._current_phone = conv_id
-            self._current_phone_dialable = True
-            self._current_is_group = True
-            self._current_contact_name = ""
-            self._thread_view.set_group_mode(True, phones)
-            self._compose.set_group_mode(True)
-            self._thread_view.load_thread(conv_id, conv_id, [], "MMS")
-            self._sync_compose_state()
-            self._sync_call_state()
-            self._compose._input.setFocus()
+        phone = phones[0]
+        self._current_phone = phone
+        self._current_phone_dialable = _is_dialable(phone)
+        self._thread_view.load_thread(phone, phone, [], "SMS")
+        self._sync_compose_state()
+        self._compose._input.setFocus()
 
     def _gather_autocomplete_contacts(self) -> list[dict]:
         """Build autocomplete list from PBAP contacts + conversation history."""

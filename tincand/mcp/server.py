@@ -110,8 +110,6 @@ def list_conversations() -> list[dict]:
       last_message_direction (str): "inbound" or "outbound" or "".
       unread_count (int): Number of unread messages in this conversation.
       send_target (str): Canonical phone number to use when replying.
-      is_group (bool): True for group conversations.
-      group_name (str): Group display name, or "" for 1-on-1 conversations.
 
     Raises NotConnected if the daemon is not connected to a device.
     Returns [] if no conversations have been synced yet.
@@ -305,35 +303,6 @@ def send_message(to: str, body: str) -> dict:
     try:
         message_id = _bridge.send_message(to, body)
         return {"message_id": message_id, "status": "sent"}
-    except (TincandNotRunning, TincandNotConnected, TincandInvalidArgument, TincandError) as e:
-        _mcp_error(e)
-
-
-@mcp.tool()
-def send_group_message(recipients: list[str], body: str) -> dict:
-    """Start a group conversation and send an opening message.
-
-    ⚠️  SIDE EFFECT: Creates a new group thread and sends a real message
-    to all recipients via the paired iPhone. This action cannot be undone.
-
-    Confirm all recipients and message content with the user before calling
-    this tool.
-
-    Args:
-      recipients: List of at least 2 phone numbers.
-                  International format recommended (e.g. "+14155550123").
-      body: Opening message text. Must be non-empty.
-
-    Returns:
-      {"conversation_id": str, "status": "sent"} on success.
-
-    Raises:
-      NotConnected — daemon is not connected to a Bluetooth device.
-      InvalidArgument — fewer than 2 recipients, or body is empty.
-    """
-    try:
-        conv_id = _bridge.send_group_message(recipients, body)
-        return {"conversation_id": conv_id, "status": "sent"}
     except (TincandNotRunning, TincandNotConnected, TincandInvalidArgument, TincandError) as e:
         _mcp_error(e)
 

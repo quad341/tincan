@@ -36,11 +36,6 @@ class TestSentFolderAlwaysEmpty:
         b.send_message("+15550001", "Hello")
         assert b.poll_inbox() == []
 
-    def test_send_group_message_does_not_pollute_inbox(self):
-        b = FakeMapBackend()
-        b.send_group_message(["+15550001", "+15550002"], "Hello group")
-        assert b.poll_inbox() == []
-
 
 class TestInboxMessageShapes:
     """iOS MAP quirk (b): inbox messages must carry all required fields."""
@@ -50,7 +45,7 @@ class TestInboxMessageShapes:
         b.add_inbound("+15550001", "Hey!", conv_id="5550001")
         msg = b.poll_inbox()[0]
         for field in ("sender", "body", "direction", "msg_type", "read",
-                      "timestamp", "conv_id", "participants", "attachments"):
+                      "timestamp", "conv_id", "attachments"):  # no 'participants' — group surface removed
             assert field in msg, f"Missing field: {field}"
 
     def test_sms_message_has_correct_defaults(self):
@@ -126,29 +121,6 @@ class TestLazyPBAPContactResolution:
                 assert msg["display_name"] == "+15550002"
 
 
-class TestGroupSend:
-    """iOS MAP quirk (d): group MMS send with multiple participants."""
-
-    def test_send_group_message_returns_handle(self):
-        b = FakeMapBackend()
-        handle = b.send_group_message(["+15550001", "+15550002"], "Hi group")
-        assert handle and isinstance(handle, str)
-
-    def test_send_group_message_handle_is_retrievable(self):
-        b = FakeMapBackend()
-        handle = b.send_group_message(["+15550001", "+15550002"], "Hi group")
-        msg = b.get_message(handle)
-        assert msg is not None
-        assert msg["body"] == "Hi group"
-
-    def test_send_group_message_stores_participants(self):
-        b = FakeMapBackend()
-        participants = ["+15550001", "+15550002"]
-        handle = b.send_group_message(participants, "Hi")
-        msg = b.get_message(handle)
-        assert sorted(msg["participants"]) == sorted(participants)
-
-
 class TestSendFailures:
     """iOS MAP quirk (e): send_message can raise on MAP error."""
 
@@ -168,13 +140,6 @@ class TestSendFailures:
         b.set_send_failure("+15550001", RuntimeError("fail"))
         handle = b.send_message("+15550002", "Hi")
         assert handle and isinstance(handle, str)
-
-    def test_set_group_send_failure(self):
-        b = FakeMapBackend()
-        participants = ["+15550001", "+15550002"]
-        b.set_group_send_failure(participants, ValueError("Group send failed"))
-        with pytest.raises(ValueError, match="Group send failed"):
-            b.send_group_message(participants, "Hi")
 
 
 class TestHandleTracking:

@@ -21,7 +21,6 @@ Tools available:
   list_conversations       List message threads
   get_messages             Read messages in a thread
   send_message             Send an SMS or iMessage (⚠ real-world side effect)
-  send_group_message       Start a group thread (⚠ real-world side effect)
   get_contacts             List PBAP-synced contacts
   mark_conversation_read   Clear unread count
   get_notification_filter  Read ANCS filter config

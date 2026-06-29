@@ -8,8 +8,8 @@ Coverage:
     compose disabled.
   - _on_capability_changed('messages', False/True): banner_b visibility + compose state.
   - _on_capability_changed('ancs', False/True): banner_c visibility.
-  - _on_message_received: correct BubbleType dispatch (INBOUND / GROUP_UNKNOWN_SENDER /
-    BODY_UNAVAILABLE / OUTBOUND), timestamp truncated to 5 chars.
+  - _on_message_received: correct BubbleType dispatch (INBOUND / BODY_UNAVAILABLE / OUTBOUND),
+    timestamp truncated to 5 chars.
   - ThreadView.append_message: clears empty-state placeholder, adds bubble, preserves prior
     bubbles on subsequent calls.
   - Integration (_wire_dbus): TincandClient signals trigger correct MainWindow handlers.
@@ -316,21 +316,6 @@ class TestMessageReceived:
         assert len(appended) == 1
         assert appended[0].bubble_type == BubbleType.INBOUND
 
-    def test_inbound_with_group_hint_produces_group_unknown_sender(self, qtbot):
-        window = MainWindow()
-        qtbot.addWidget(window)
-        appended = self._capture_appended(window)
-
-        window._on_message_received({
-            "direction": "inbound",
-            "body": "Anyone free?",
-            "sender": "?",
-            "timestamp": "2024-01-01T10:35:00",
-            "group_hint": True,
-        })
-
-        assert appended[0].bubble_type == BubbleType.GROUP_UNKNOWN_SENDER
-
     def test_empty_body_produces_body_unavailable(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
@@ -358,21 +343,6 @@ class TestMessageReceived:
         })
 
         assert appended[0].bubble_type == BubbleType.OUTBOUND
-
-    def test_group_hint_false_does_not_upgrade_to_group_bubble(self, qtbot):
-        window = MainWindow()
-        qtbot.addWidget(window)
-        appended = self._capture_appended(window)
-
-        window._on_message_received({
-            "direction": "inbound",
-            "body": "Normal message",
-            "sender": "Bob",
-            "timestamp": "2024-01-01T10:00:00",
-            "group_hint": False,
-        })
-
-        assert appended[0].bubble_type == BubbleType.INBOUND
 
     def test_timestamp_display_is_hhmm_from_map_format(self, qtbot):
         window = MainWindow()

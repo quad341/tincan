@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from tincan_gui import trace as _trace
-from tincan_gui.avatar import AvatarWidget, _color_for_name
+from tincan_gui.avatar import AvatarWidget
 from tincan_gui.text_render import (
     _BARE_URL_RE,
     _URL_RE,
@@ -130,7 +130,6 @@ class BubbleType(Enum):
     INBOUND = auto()
     OUTBOUND = auto()
     BODY_UNAVAILABLE = auto()
-    GROUP_UNKNOWN_SENDER = auto()
 
 
 @dataclass
@@ -139,7 +138,6 @@ class MessageData:
     body: str
     sender: str
     timestamp: str
-    show_attribution: bool = False  # show sender name above inbound bubble in group mode
     sort_key: str = ""  # full YYYYMMDDTHHMMSS for date+second ordering (tincan-93fha)
     attachments: list[dict] = field(default_factory=list)
 
@@ -169,13 +167,6 @@ class MessageBubble(QWidget):
             "margin_left": 20,
             "margin_right": 80,
         },
-        BubbleType.GROUP_UNKNOWN_SENDER: {
-            "bg": "#f3f4f6", "bg_dark": "#3f3f46",
-            "fg": "#111827", "fg_dark": "#f4f4f5",
-            "align": Qt.AlignLeft,
-            "margin_left": 20,
-            "margin_right": 80,
-        },
     }
 
     def __init__(self, data: MessageData, parent: Optional[QWidget] = None) -> None:
@@ -197,34 +188,13 @@ class MessageBubble(QWidget):
         if style["align"] == Qt.AlignRight:
             outer.addStretch()
 
-        # Sender attribution label above inbound bubble in group mode
         col = QVBoxLayout()
         col.setSpacing(0)
-        if self._data.show_attribution and self._data.sender:
-            attr_label = QLabel(self._data.sender)
-            attr_font = QFont()
-            attr_font.setPointSize(10)
-            attr_font.setBold(True)
-            attr_label.setFont(attr_font)
-            color = _color_for_name(self._data.sender)
-            attr_label.setStyleSheet(f"color: {color};")
-            attr_label.setContentsMargins(style["margin_left"] + 12, 0, 0, 4)
-            col.addWidget(attr_label)
 
         bubble = QWidget()
         bubble_layout = QVBoxLayout(bubble)
         bubble_layout.setContentsMargins(12, 8, 12, 8)
         bubble_layout.setSpacing(4)
-
-        # Group unknown sender warning sub-label
-        if self._data.bubble_type == BubbleType.GROUP_UNKNOWN_SENDER:
-            warn = QLabel("⚠ sender unknown (group text attribution)")
-            warn_font = QFont()
-            warn_font.setPointSize(11)
-            warn.setFont(warn_font)
-            warn.setStyleSheet("color: #fbbf24;" if dark else "color: #92400e;")
-            warn.setWordWrap(True)
-            bubble_layout.addWidget(warn)
 
         # Body unavailable uses canonical plain-language strings (tincan-063z)
         body_label = QLabel()
@@ -350,12 +320,6 @@ class MessageBubble(QWidget):
             self.setAccessibleName(
                 self.tr("Inbound: content unavailable — from {sender} at {time}").format(
                     sender=self._data.sender, time=self._data.timestamp
-                )
-            )
-        elif btype == BubbleType.GROUP_UNKNOWN_SENDER:
-            self.setAccessibleName(
-                self.tr("Inbound: {body} — from {sender} at {time}").format(
-                    body=self._data.body, sender=self._data.sender, time=self._data.timestamp
                 )
             )
         else:  # INBOUND
@@ -572,27 +536,6 @@ class ThreadHeader(QWidget):
             self._phone_label.setVisible(False)
         self.setAccessibleName(f"{name}, {phone}")
 
-    def set_group_info(self, participants: list[str]) -> None:
-        """Update header for a group conversation."""
-        title = ", ".join(participants)
-        if len(title) > 60:
-            title = title[:57] + "..."
-        n = len(participants)
-        first = participants[0] if participants else ""
-        self._avatar.update_for_name(first)
-        self._name_label.setText(title)
-        name_font = self._name_label.font()
-        name_font.setPointSize(13)
-        self._name_label.setFont(name_font)
-        self._name_label.setStyleSheet("color: #f4f4f5;")
-        self._phone_label.setText(f"Group · {n} participants")
-        phone_font = self._phone_label.font()
-        phone_font.setPointSize(11)
-        self._phone_label.setFont(phone_font)
-        self._phone_label.setStyleSheet("color: #71717a;")
-        self.setAccessibleName(f"Group conversation with {n} participants")
-
-
 class _ThreadSearchBar(QWidget):
     """Compact Ctrl+F search bar for thread view. Hidden until activated."""
 
@@ -702,19 +645,10 @@ class ThreadView(QWidget):
         super().__init__(parent)
         self._last_outbound: Optional[MessageBubble] = None
         self._last_date_key: str = ""  # YYYYMMDD of the most recently rendered message
-        self._is_group = False
-        self._participants: list[str] = []
         self._match_bubbles: list[MessageBubble] = []
         self._match_index: int = 0
         self._bubble_count: int = 0  # number of bubbles in current thread (for trace)
         self._build()
-
-    def set_group_mode(self, is_group: bool, participants: list[str] | None = None) -> None:
-        """Toggle group-thread rendering for the current conversation."""
-        self._is_group = is_group
-        self._participants = list(participants or [])
-        if is_group and self._participants:
-            self._header.set_group_info(self._participants)
 
     def set_header_photo(self, data: bytes) -> None:
         """Update the header avatar with a PBAP photo for the current contact."""

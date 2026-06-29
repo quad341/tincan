@@ -175,14 +175,6 @@ class TincandDBusBridge:
         except dbus.exceptions.DBusException as e:
             _translate(e)
 
-    def send_group_message(self, recipients: list[str], body: str) -> str:
-        """Send *body* to all *recipients*. Returns conversation_id."""
-        try:
-            raw = self._iface(self.IFACE_MESSAGES).SendMessageToRecipients(recipients, body)
-            return _strip_dbus(raw)
-        except dbus.exceptions.DBusException as e:
-            _translate(e)
-
     def mark_conversation_read(self, conv_id: str) -> None:
         """Mark all messages in *conv_id* as read."""
         try:

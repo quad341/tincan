@@ -429,11 +429,7 @@ class TincandClient(QObject):
         return _demarshal_list_of_maps(reply.value())
 
     def list_conversations(self) -> list[dict]:
-        """Call ListConversations.  Returns [] when daemon is absent.
-
-        Each dict includes is_group (bool) and group_name (str, equals
-        display_name for group conversations).
-        """
+        """Call ListConversations.  Returns [] when daemon is absent."""
         if not self._bus.isConnected():
             return []
         result = self._dbus_call(_IFACE_MESSAGES, "ListConversations")
@@ -458,47 +454,7 @@ class TincandClient(QObject):
         if not reply.isValid():
             _log.debug("ListConversations failed: %s", reply.error().message())
             return []
-        raw = _demarshal_list_of_maps(reply.value())
-        result = []
-        for d in raw:
-            is_group = bool(d.get("is_group", False))
-            d["is_group"] = is_group
-            d["group_name"] = str(d.get("display_name", "")) if is_group else ""
-            result.append(d)
-        return result
-
-    def send_message_to_recipients(self, recipients: list[str], body: str) -> str:
-        """Call SendMessageToRecipients.  Returns conv_id or '' on error."""
-        if not self._bus.isConnected():
-            _log.warning("send_message_to_recipients: no D-Bus session bus")
-            return ""
-        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
-        if not iface.isValid():
-            _log.warning("send_message_to_recipients: tincand not running")
-            return ""
-        reply = _wrap_reply(iface.call("SendMessageToRecipients", recipients, body))
-        if not reply.isValid():
-            _log.warning("SendMessageToRecipients failed: %s", reply.error().message())
-            return ""
-        return str(reply.value() or "")
-
-    def get_conversation_participants(self, conv_id: str) -> list[str]:
-        """Call GetConversationParticipants.  Returns [] on error."""
-        if not self._bus.isConnected():
-            return []
-        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
-        if not iface.isValid():
-            return []
-        reply = _wrap_reply(iface.call("GetConversationParticipants", conv_id))
-        if not reply.isValid():
-            _log.debug(
-                "GetConversationParticipants failed: %s", reply.error().message()
-            )
-            return []
-        value = reply.value()
-        if isinstance(value, list):
-            return [str(v) for v in value]
-        return []
+        return _demarshal_list_of_maps(reply.value())
 
     def get_messages(self, conv_id: str) -> list[dict]:
         """Call GetMessages(conv_id).  Returns [] when daemon is absent."""

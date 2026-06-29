@@ -15,7 +15,6 @@ from __future__ import annotations
 import base64
 import email
 import email.policy
-import hashlib
 import json
 import logging
 import os
@@ -27,7 +26,6 @@ import dbus
 from gi.repository import GLib
 
 from tincand.backends.base import BackendInterface
-from tincand.contact_store import normalize_phone
 from tincand.dbus_service import Conversation
 from tincand.message_store import MessageStore
 
@@ -121,60 +119,6 @@ def build_bmsg(to_number: str, body: str) -> str:
         "END:BENV\r\n"
         "END:BMSG\r\n"
     )
-
-
-def build_bmsg_multi(to_numbers: list[str], body: str, msg_type: str = "MMS") -> str:
-    """Return a bMessage with one VCARD per recipient in BENV (for group MMS).
-
-    Keeps build_bmsg() unchanged — 1:1 SMS uses TYPE:SMS_GSM via that function.
-    """
-    msg_block = f"BEGIN:MSG\r\n{body}\r\nEND:MSG\r\n"
-    length = len(msg_block.encode("utf-8"))
-    vcards = "".join(
-        "BEGIN:VCARD\r\n"
-        "VERSION:3.0\r\n"
-        "FN:\r\n"
-        f"TEL:{number}\r\n"
-        "END:VCARD\r\n"
-        for number in to_numbers
-    )
-    return (
-        "BEGIN:BMSG\r\n"
-        "VERSION:1.0\r\n"
-        "STATUS:UNREAD\r\n"
-        f"TYPE:{msg_type}\r\n"
-        "FOLDER:telecom/msg/outbox\r\n"
-        "BEGIN:BENV\r\n"
-        + vcards
-        + "BEGIN:BBODY\r\n"
-        "CHARSET:UTF-8\r\n"
-        f"LENGTH:{length}\r\n"
-        f"{msg_block}"
-        "END:BBODY\r\n"
-        "END:BENV\r\n"
-        "END:BMSG\r\n"
-    )
-
-
-def _parse_participants_from_bmsg(bmsg: str) -> list[str]:
-    """Extract and normalize TEL: values from the BENV section of a bMessage.
-
-    Returns [] if BENV is absent or malformed; never raises.
-    """
-    in_benv = False
-    tels: list[str] = []
-    for line in bmsg.splitlines():
-        stripped = line.strip()
-        if stripped == "BEGIN:BENV":
-            in_benv = True
-        elif stripped == "END:BENV":
-            break
-        elif in_benv and (":" in stripped):
-            key, _, value = stripped.partition(":")
-            key_base = key.split(";")[0].upper()
-            if key_base == "TEL":
-                tels.append(normalize_phone(value))
-    return tels
 
 
 def _parse_bmsg_body(bmsg: str) -> str:
@@ -453,14 +397,12 @@ class MapBackend(BackendInterface):
                     or str(props.get("Subject", "")).strip()
                     or "New message"
                 )
-                participants = _parse_participants_from_bmsg(raw_bmsg)
             else:
                 body = (
                     self._fetch_full_body(str(msg_path))
                     or str(props.get("Subject", "")).strip()
                     or "New message"
                 )
-                participants = []
             phone = str(props.get("SenderAddressing", props.get("Sender", "")))
             display_name = str(props.get("Sender", phone))
             raw_dt = _get_map_datetime(props)
@@ -474,7 +416,6 @@ class MapBackend(BackendInterface):
                 "direction": "inbound",
                 "msg_type": msg_type,
                 "conv_id": conv_id,
-                "participants": participants,
                 "attachments": json.dumps(attachments),
             })
 
@@ -565,44 +506,6 @@ class MapBackend(BackendInterface):
     def get_message(self, handle: str) -> object:
         """Fetch a MAP message by handle — returns parsed body string or None."""
         return self._fetch_full_body(handle)
-
-    def send_group_message(self, participants: list[str], body: str) -> str:
-        """Send *body* as MMS to all *participants*, gated by TINCAN_GROUP_SEND_ENABLED."""
-        if not os.environ.get("TINCAN_GROUP_SEND_ENABLED"):
-            raise RuntimeError(
-                "Group MMS send is not enabled — set TINCAN_GROUP_SEND_ENABLED"
-            )
-        if len(participants) < 2:
-            raise ValueError("send_group_message requires at least 2 participants")
-        if self._msg_access is None:
-            raise RuntimeError("Not connected — call connect() first")
-
-        _log.warning("Group MMS send to %d recipients", len(participants))
-
-        bmsg_content = build_bmsg_multi(participants, body)
-        tmp_path: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".bmsg", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(bmsg_content)
-                tmp_path = f.name
-
-            self._retry(self._msg_access.SetFolder, "telecom")
-            self._retry(self._msg_access.SetFolder, "msg")
-            result = self._retry(
-                self._msg_access.PushMessage, tmp_path, {}
-            )
-            transfer_path = result[0] if isinstance(result, (tuple, list)) else result
-            self._wait_transfer_send(str(transfer_path))
-            _log.info("Group MAP send complete: %d recipients", len(participants))
-            return str(transfer_path)
-        finally:
-            if tmp_path is not None:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
 
     def send_message(self, to: str, body: str) -> str:
         """Build a bMessage, push via PushMessage, and watch the transfer.
@@ -921,10 +824,14 @@ class MapBackend(BackendInterface):
         raise SendFailed(f"PushMessage transfer timed out: {transfer_path}")
 
     def _emit_messages(self, messages: list[dict], *, notify: bool = True) -> None:
-        """Group messages by conv_id (group MMS) or sender (1:1) and drive TincanService.
+        """Group messages by conv_id or sender phone and drive TincanService.
 
-        When notify=False (initial-poll baseline), messages are stored and conversations
-        upserted but status is forced to 'read' so no unread count increment fires.
+        Multi-recipient inbound MMS messages thread by sender as ordinary 1:1
+        conversations — group concepts are not surfaced.
+
+        When notify=False (initial-poll baseline), messages are stored and
+        conversations upserted but status is forced to 'read' so no unread
+        count increment fires.
         """
         svc = self._service
         if svc is None:
@@ -933,33 +840,22 @@ class MapBackend(BackendInterface):
         by_conv: dict[str, list[dict]] = {}
         for msg in messages:
             conv_id = msg.get("conv_id", "")
-            participants = msg.get("participants", [])
-            if conv_id:
-                key = conv_id
-            elif len(participants) > 1:
-                normalized = sorted(normalize_phone(p) for p in participants)
-                key = hashlib.sha1("|".join(normalized).encode()).hexdigest()[:8]
-                _log.debug("ConvID absent; sha1 fallback key=%s for %s", key, normalized)
-            else:
-                key = _norm_phone(msg["sender"])
+            key = conv_id if conv_id else _norm_phone(msg["sender"])
             by_conv.setdefault(key, []).append(msg)
 
-        # For 1:1 messages: build phone→display_name for name-keyed resolution.
+        # Build phone→display_name mapping for name-keyed resolution.
         phone_by_display: dict[str, str] = {}
         for key, msgs in by_conv.items():
-            _participants = msgs[-1].get("participants", [])
-            if len(_participants) <= 1 and len(_NON_DIGIT_RE.sub("", key)) >= 7:
+            if len(_NON_DIGIT_RE.sub("", key)) >= 7:
                 latest_dn = (max(msgs, key=lambda m: m["timestamp"] or "")
                              .get("display_name", key) or key)
                 phone_by_display[latest_dn.lower()] = key
                 self._name_to_phone[latest_dn.lower()] = key
 
-        # Re-key non-group name-keyed groups to canonical phone where resolvable.
+        # Re-key name-keyed conversations to canonical phone where resolvable.
         canonical: dict[str, list[dict]] = {}
         for key, msgs in by_conv.items():
-            _participants = msgs[-1].get("participants", [])
-            is_group = len(_participants) > 1
-            if is_group or len(_NON_DIGIT_RE.sub("", key)) >= 7:
+            if len(_NON_DIGIT_RE.sub("", key)) >= 7:
                 canonical.setdefault(key, []).extend(msgs)
             else:
                 dn = (max(msgs, key=lambda m: m["timestamp"] or "")
@@ -981,41 +877,26 @@ class MapBackend(BackendInterface):
         for key, msgs in by_conv.items():
             unread = sum(1 for m in msgs if not m["read"]) if notify else 0
             latest = max(msgs, key=lambda m: m["timestamp"] or "")
-            participants = latest.get("participants", [])
-            is_group = len(participants) > 1
             sender = latest["sender"]
-            if is_group:
-                if len(participants) >= 3:
-                    display_name = (
-                        f"{participants[0]}, {participants[1]}"
-                        f" & {len(participants) - 2} more"
-                    )
-                elif len(participants) == 2:
-                    display_name = f"{participants[0]}, {participants[1]}"
-                else:
-                    display_name = participants[0] if participants else key
-            else:
-                display_name = latest.get("display_name", sender) or sender
+            display_name = latest.get("display_name", sender) or sender
             is_phone_key = len(_NON_DIGIT_RE.sub("", key)) >= 7
-            # Prefer PBAP-resolved name over MAP Sender when contact store is populated
-            if is_phone_key and not is_group:
+            if is_phone_key:
                 cs = getattr(svc, "_contact_store", None)
                 pbap_name = cs.resolve_name(sender) if cs else None
                 if pbap_name:
                     display_name = pbap_name
-            send_target = key if (is_group or is_phone_key) else (
+            send_target = key if is_phone_key else (
                 phone_by_display.get(display_name.lower())
                 or self._name_to_phone.get(display_name.lower(), "")
             )
             conv = Conversation(
                 id=key,
                 display_name=display_name,
-                participants=participants if is_group else [sender],
+                participants=[sender],
                 last_message_at=latest["timestamp"],
                 last_message_preview=latest["body"],
                 unread_count=unread,
                 send_target=send_target,
-                is_group=is_group,
             )
             svc.upsert_conversation(conv)  # type: ignore[attr-defined]
             for msg in msgs:
@@ -1030,7 +911,4 @@ class MapBackend(BackendInterface):
                     "attachments": msg.get("attachments", "[]"),
                     "is_new": notify and direction == "inbound",
                 }
-                if is_group:
-                    msg_dict["group_hint"] = True
-                    msg_dict["conv_participants"] = participants
                 svc.on_message_received(msg_dict)  # type: ignore[attr-defined]
