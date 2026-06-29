@@ -301,6 +301,10 @@ class MapBackend(BackendInterface):
     # BackendInterface
     # ------------------------------------------------------------------
 
+    @property
+    def is_connected(self) -> bool:
+        return self._session_path is not None
+
     def connect(self, device_addr: str) -> None:
         """Create an obexd MAP session to *device_addr*.
 
@@ -315,6 +319,13 @@ class MapBackend(BackendInterface):
             GLib.source_remove(self._reconnect_source_id)
             self._reconnect_source_id = None
         self._reconnect_attempt = 0
+        # Proactively bring up the BT Classic ACL link so the user need not
+        # manually initiate connect on the iPhone. Silently suppressed if the
+        # link is already up or the device is not in range.
+        try:
+            self._bt_connect(device_addr)
+        except Exception as exc:
+            _log.debug("connect: _bt_connect(%s) suppressed: %s", device_addr, exc)
         bus = dbus.SessionBus()
         client = dbus.Interface(
             bus.get_object(_OBEX_CLIENT, _OBEX_CLIENT_PATH),
