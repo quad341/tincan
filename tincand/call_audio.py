@@ -312,6 +312,12 @@ def setup_uplink_mixer(
 
     Returns None if required ports are not found or the null-sink cannot be created.
     """
+    if not device_mac_fragment:
+        _log.warning(
+            "setup_uplink_mixer called with empty MAC address — "
+            "skipping uplink mixer setup"
+        )
+        return None
     mac = device_mac_fragment.lower().replace(":", "_")
     sink_name = _UPLINK_MIXER_SINK
 

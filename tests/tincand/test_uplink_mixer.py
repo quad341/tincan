@@ -248,6 +248,14 @@ class TestSetupUplinkMixer:
     def test_returns_none_when_pactl_fails(self, pactl_fail_subproc):
         assert setup_uplink_mixer(_MAC) is None
 
+    def test_returns_none_on_empty_mac_without_loading_module(self, mock_subproc):
+        assert setup_uplink_mixer("") is None
+        pactl_loads = [
+            c for c in mock_subproc
+            if c and c[0] == "pactl" and "load-module" in c
+        ]
+        assert not pactl_loads, "must not load null-sink on empty MAC"
+
     def test_returns_uplink_mixer_ctx_on_success(self, mock_subproc):
         ctx = setup_uplink_mixer(_MAC)
         assert isinstance(ctx, UplinkMixerCtx)
