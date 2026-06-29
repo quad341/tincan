@@ -348,6 +348,15 @@ class SuccessPage(_WizardPage):
             "font-size: 14pt; min-height: 44px; border-radius: 4px; }"
         )
         layout.addWidget(start_btn)
+        self.setup_calls_btn = QPushButton("Set up phone calls (optional)")
+        self.setup_calls_btn.setStyleSheet(
+            "QPushButton { background-color: #27272a; color: #a1a1aa; "
+            "border: 1px solid #3f3f46; font-size: 14px; min-height: 40px; border-radius: 4px; }"
+        )
+        self.setup_calls_btn.setAccessibleName(
+            "Set up phone calls — optional additional setup"
+        )
+        layout.addWidget(self.setup_calls_btn)
         layout.addStretch()
 
     def set_partial(self, *, ancs: bool) -> None:
@@ -486,9 +495,10 @@ class PairingWizard(QWizard):
     orchestrator emits state changes. No pairing logic lives here.
     """
 
-    def __init__(self, orchestrator, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, orchestrator, dbus_client=None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._orchestrator = orchestrator
+        self._dbus_client = dbus_client
         self.setWindowTitle("Set up your iPhone")
         self.setWizardStyle(QWizard.ModernStyle)
         self.resize(600, 480)
@@ -534,6 +544,14 @@ class PairingWizard(QWizard):
         self.failure_page.continue_partial.clicked.connect(
             lambda: self.accept_partial(ancs=False)
         )
+        self.success_page.setup_calls_btn.clicked.connect(self._open_calls_setup)
+
+    def _open_calls_setup(self) -> None:
+        if self._dbus_client is None:
+            return
+        from tincan_gui.calls_setup_panel import CallsSetupPanel  # noqa: PLC0415
+        panel = CallsSetupPanel(self._dbus_client, parent=self)
+        panel.exec()
 
     def accept_partial(self, *, ancs: bool) -> None:
         """Close the wizard and signal partial success (e.g. messaging-only, no notifications)."""

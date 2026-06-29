@@ -812,6 +812,7 @@ class MainWindow(QMainWindow):
         self._adapter_unavailable_banner._dismiss_btn.clicked.connect(
             self._on_adapter_banner_dismissed
         )
+        self._banner_call_setup.setup_calls_clicked.connect(self._open_calls_setup_panel)
 
     def _wire_dbus(self) -> None:
         c = self._dbus_client
@@ -1574,11 +1575,19 @@ class MainWindow(QMainWindow):
             f"Report saved to:\n{report_path}\n\nHand the path to the mayor.",
         )
 
+    def _open_calls_setup_panel(self) -> None:
+        from tincan_gui.calls_setup_panel import CallsSetupPanel  # noqa: PLC0415
+        panel = CallsSetupPanel(self._dbus_client, parent=self)
+        panel.exec()
+        status = self._dbus_client.get_status()
+        if status:
+            self._apply_capabilities(status.get("capabilities") or {})
+
     def _open_pairing_wizard(self) -> None:
         from tincan_gui.pairing_wizard import PairingWizard
         from tincand.pairing import PairingOrchestrator
         orch = PairingOrchestrator(on_state_change=lambda state, reason=None: None)
-        wizard = PairingWizard(orchestrator=orch, parent=self)
+        wizard = PairingWizard(orchestrator=orch, dbus_client=self._dbus_client, parent=self)
         wizard.exec()
 
     def _on_open_notif_center(self) -> None:
