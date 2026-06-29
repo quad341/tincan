@@ -31,7 +31,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Backend to use (default: TINCAN_BACKEND env var). "
-            "Choices: mock, ancs."
+            f"Choices: {', '.join(sorted(_BACKENDS))}."
         ),
     )
     parser.add_argument(
@@ -65,6 +65,89 @@ def _parse_args() -> argparse.Namespace:
             parser.error("--mock cannot be combined with --backend ancs")
         args.backend = "mock"
     return args
+
+
+_DEV_MAC_RE = re.compile(r"/dev_([0-9A-Fa-f_]{17})$")
+
+
+def _mac_from_ofono_path(path: str) -> str:
+    """Extract a Bluetooth MAC from an oFono modem path.
+
+    /hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20 → D0:6B:78:33:46:20
+    """
+    m = _DEV_MAC_RE.search(str(path))
+    if not m:
+        return ""
+    return m.group(1).replace("_", ":").upper()
+
+
+def _resolve_device_address(args: argparse.Namespace) -> tuple[str, bool]:
+    """Return (device_address, device_discovered).
+
+    Priority chain:
+      1. args.device (--device CLI flag)
+      2. TINCAN_DEVICE env var
+      3. DaemonSettings bluetooth/device_address (tincan.ini)
+      4. oFono auto-discovery — Online HFP modems → extract MAC
+      5. '' (waiting/retry mode)
+
+    device_discovered is True only when the address comes from Step 4.
+    """
+    # Step 1: --device CLI flag
+    if getattr(args, "device", None):
+        _log.info("tincand: device address from --device flag (source=cli): %s", args.device)
+        return str(args.device), False
+
+    # Step 2: env var
+    env_device = os.environ.get("TINCAN_DEVICE")
+    if env_device:
+        _log.info("tincand: device address from TINCAN_DEVICE env (source=env): %s", env_device)
+        return env_device, False
+
+    # Step 3: DaemonSettings bluetooth/device_address
+    from tincand.config import DaemonSettings  # noqa: PLC0415
+
+    ini_device = DaemonSettings().value("bluetooth/device_address", "").strip()
+    if ini_device:
+        _log.info("tincand: device address from tincan.ini (source=config): %s", ini_device)
+        return ini_device, False
+
+    # Step 4: oFono auto-discovery
+    try:
+        import dbus  # noqa: PLC0415
+
+        bus = dbus.SystemBus()
+        manager_obj = bus.get_object("org.ofono", "/")
+        manager = dbus.Interface(manager_obj, "org.ofono.Manager")
+        modems = manager.GetModems()
+
+        candidates = []
+        for path, props in modems:
+            props = dict(props)
+            if str(props.get("Type", "")) == "hfp" and bool(props.get("Online", False)):
+                mac = _mac_from_ofono_path(str(path))
+                if mac:
+                    candidates.append(mac)
+
+        if len(candidates) > 1:
+            _log.warning(
+                "tincand: multiple Online HFP modems found %s — using %s. "
+                "Pin a device with bluetooth/device_address in tincan.ini.",
+                candidates,
+                candidates[0],
+            )
+        if candidates:
+            _log.info(
+                "tincand: device address from oFono discovery (source=ofono): %s",
+                candidates[0],
+            )
+            return candidates[0], True
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("tincand: oFono auto-discovery unavailable (%s) — no device address", exc)
+
+    # Step 5: waiting/retry mode
+    _log.info("tincand: no device address resolved — will retry")
+    return "", False
 
 
 def _resolve_adapter_path(args: argparse.Namespace) -> tuple[str, str]:
@@ -117,7 +200,9 @@ def _resolve_adapter_path(args: argparse.Namespace) -> tuple[str, str]:
     return "/org/bluez/hci1", qsettings_path or ""
 
 
-def _select_backend(args: argparse.Namespace, adapter_path: str = "") -> object:
+def _select_backend(
+    args: argparse.Namespace, adapter_path: str = "", device_addr: str = ""
+) -> object:
     """Instantiate the backend named by args.backend or TINCAN_BACKEND env var."""
     name = args.backend or os.environ.get("TINCAN_BACKEND")
     if not name:
@@ -133,7 +218,6 @@ def _select_backend(args: argparse.Namespace, adapter_path: str = "") -> object:
     if name == "ancs":
         from tincand.backends.ancs import ANCSBackend
 
-        device_addr = args.device or os.environ.get("TINCAN_DEVICE")
         return ANCSBackend(device_addr=device_addr, adapter_path=adapter_path)
     if name == "map":
         from tincand.backends.bluez_map import MapBackend
@@ -166,7 +250,8 @@ def main() -> None:
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
     adapter_path, adapter_path_requested = _resolve_adapter_path(args)
-    backend = _select_backend(args, adapter_path)
+    _device_addr, _device_discovered = _resolve_device_address(args)
+    backend = _select_backend(args, adapter_path, device_addr=_device_addr)
 
     from tincand.dbus_service import TincanService
 
@@ -187,8 +272,9 @@ def main() -> None:
     from tincand.hfp_capability import is_call_setup_ready
     service.set_capability("call_setup_ready", is_call_setup_ready())
 
+    service.set_device_discovered(_device_discovered)
+
     from tincand.call_controller import CallController
-    _device_addr = args.device or os.environ.get("TINCAN_DEVICE", "")
     call_controller = CallController(
         service,
         service._contact_store,
@@ -201,8 +287,7 @@ def main() -> None:
         from tincand.backend_manager import BackendManager
         from tincand.backends.ancs import ANCSBackend
 
-        device_addr = args.device or os.environ.get("TINCAN_DEVICE", "")
-        ancs = ANCSBackend(device_addr=device_addr, adapter_path=adapter_path)
+        ancs = ANCSBackend(device_addr=_device_addr, adapter_path=adapter_path)
         backend = BackendManager(primary=backend, secondaries=[ancs])
         _log.info("tincand: multi-backend mode — MAP (primary) + ANCS (secondary)")
     elif args.with_ancs:
@@ -222,27 +307,26 @@ def main() -> None:
     # SIGINT, so the daemon runs backend.disconnect() instead of dying abruptly.
     signal.signal(signal.SIGTERM, _on_signal)
 
-    device = args.device or os.environ.get("TINCAN_DEVICE", "")
     backend_name = args.backend or os.environ.get("TINCAN_BACKEND", "")
-    _log.info("tincand starting with backend=%s device=%s", backend_name, device)
+    _log.info("tincand starting with backend=%s device=%s", backend_name, _device_addr)
     try:
-        backend.connect(device)
+        backend.connect(_device_addr)
     except Exception as exc:
         _log.warning(
             "tincand: initial connection to %s failed (%s) — "
             "daemon running, will retry every %ds",
-            device,
+            _device_addr,
             exc,
             10,
         )
         if hasattr(backend, "schedule_reconnect"):
             backend.schedule_reconnect()
 
-    if backend_name == "map" and device:
+    if backend_name == "map" and _device_addr:
         from tincand.backends.pbap import PBAPContactSync
         pbap = PBAPContactSync(service)
         service._pbap = pbap
-        GLib.idle_add(lambda: pbap.connect(device) or False)
+        GLib.idle_add(lambda: pbap.connect(_device_addr) or False)
 
     _log.info("tincand started")
     try:

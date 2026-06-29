@@ -17,8 +17,6 @@ from dataclasses import dataclass, field
 
 _log = logging.getLogger(__name__)
 
-# RTL8761B (ASUS USB-BT500) adapter MAC in oFono path format (a0:ad:9f:7a:15:8e → underscores)
-_DONGLE_ADAPTER_FRAGMENT = "a0_ad_9f_7a_15_8e"
 # USB vendor:product for ASUS USB-BT500 (RTL8761B)
 _DONGLE_USB_VENDOR = "0b05"
 _DONGLE_USB_PRODUCT = "1bf6"
@@ -29,26 +27,27 @@ _IFACE_CALL_VOLUME = "org.ofono.CallVolume"
 
 
 def verify_dongle_adapter(modem_path: str, adapter_hci: str = "") -> bool:
-    """Return True if modem_path routes through the RTL8761B dongle (hci1).
+    """Return True if modem_path routes through the RTL8761B dongle.
 
-    Logs a warning if the path suggests the MT7925 built-in adapter, since
-    SCO audio only works reliably on the dongle (validated 2026-06-11).
+    Checks by adapter index (e.g. ``hci1``) — not by MAC — since BlueZ HFP
+    modem paths use the adapter index, not the adapter MAC address.
 
-    ``adapter_hci`` is the configured adapter token (e.g. ``hci1``) and, when
-    provided, names the adapter the iPhone should be connected to in the
-    warning message.
+    Returns True without warning when ``adapter_hci`` is empty (verification
+    skipped; caller has not configured a preferred adapter).
     """
-    ok = _DONGLE_ADAPTER_FRAGMENT in str(modem_path).lower()
+    if not adapter_hci:
+        _log.debug("call_audio: verify_dongle_adapter skipped — no adapter_hci configured")
+        return True
+    ok = f"/{adapter_hci}/" in str(modem_path)
     if ok:
-        _log.info("call_audio: modem %s on RTL8761B dongle (hci1) ✓", modem_path)
+        _log.info("call_audio: modem %s on expected adapter %s ✓", modem_path, adapter_hci)
     else:
         _log.warning(
-            "call_audio: modem %s not on RTL8761B dongle (fragment %r absent) — "
-            "HFP SCO audio likely broken. Connect iPhone to the configured "
-            "adapter %s (ASUS USB-BT500).",
+            "call_audio: modem %s not on configured adapter %s — "
+            "HFP SCO audio likely broken. Connect iPhone to the ASUS USB-BT500 (%s).",
             modem_path,
-            _DONGLE_ADAPTER_FRAGMENT,
-            adapter_hci or "hci1",
+            adapter_hci,
+            adapter_hci,
         )
     return ok
 

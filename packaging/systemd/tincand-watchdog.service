@@ -1,0 +1,7 @@
+[Unit]
+Description=tincand watchdog check — start tincand if want-down sentinel absent
+After=bluetooth.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'test -f /run/tincan/want-down && exit 0; systemctl --user is-active --quiet tincand.service && exit 0; systemctl --user start tincand.service'

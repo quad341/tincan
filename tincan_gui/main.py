@@ -46,6 +46,7 @@ from tincan_gui.daemon_config import DaemonConfig, load_daemon_config, save_daem
 from tincan_gui.daemon_launcher import spawn_daemon
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.degradation_banners import (
+    AdapterMismatchBanner,
     AdapterUnavailableBanner,
     ANCSRepairBanner,
     CallSetupRequiredBanner,
@@ -515,7 +516,9 @@ class MainWindow(QMainWindow):
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._adapter_unavailable_banner_dismissed: bool = False
+        self._adapter_mismatch_warning: str = ""
         self._conversations_by_id: dict[str, ConversationData] = {}
+        self._pending_load_conv: str = ""   # conv_id of the outstanding async GetMessages
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
         self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP echo of self-sends
@@ -553,6 +556,11 @@ class MainWindow(QMainWindow):
         # Title bar
         self._title_bar = TitleBar()
         root_layout.addWidget(self._title_bar)
+
+        # Adapter mismatch banner (tincan-5y8km.2): persistent, non-dismissible
+        self._adapter_mismatch_banner = AdapterMismatchBanner()
+        self._adapter_mismatch_banner.hide()
+        root_layout.addWidget(self._adapter_mismatch_banner)
 
         # Adapter-unavailable banner (tincan-crfu9); hidden until mismatch detected
         self._adapter_unavailable_banner = AdapterUnavailableBanner()
@@ -660,6 +668,7 @@ class MainWindow(QMainWindow):
         c.contact_photo_received.connect(self._on_contact_photo_received)
         c.message_send_accepted.connect(self._on_send_accepted)
         c.message_send_failed.connect(self._on_send_failed)
+        c.messages_loaded.connect(self._on_messages_loaded)
         self.refresh_requested.connect(self._load_conversations)
         self.refresh_requested.connect(self._dbus_client.refresh_contacts)
         # HFP call signals (tincan-fx79v.2)
@@ -673,6 +682,10 @@ class MainWindow(QMainWindow):
         c.call_active.connect(self._on_call_active_signal)
         c.call_held.connect(self._on_call_held_signal)
         c.call_removed.connect(self._on_call_removed_signal)
+        # Adapter mismatch polling (tincan-5y8km.2): ≤5s interval while banner visible
+        self._adapter_mismatch_timer = QTimer(self)
+        self._adapter_mismatch_timer.setInterval(5000)
+        self._adapter_mismatch_timer.timeout.connect(self._poll_adapter_mismatch)
 
     def _maybe_spawn_daemon(self) -> None:
         """Spawn tincand if config has a device and no spawn has been attempted yet."""
@@ -704,6 +717,7 @@ class MainWindow(QMainWindow):
             self._title_bar.set_disconnected()
             self._banner_a.show()
         self._refresh_adapter_unavailable_banner(status)
+        self._refresh_adapter_mismatch_banner(status)
 
     def _refresh_adapter_unavailable_banner(self, status: dict | None = None) -> None:
         """Show or hide the adapter-unavailable banner based on get_status() fields."""
@@ -719,6 +733,24 @@ class MainWindow(QMainWindow):
             self._adapter_unavailable_banner.show()
         else:
             self._adapter_unavailable_banner.hide()
+
+    def _refresh_adapter_mismatch_banner(self, status: dict | None = None) -> None:
+        """Show or hide the adapter-mismatch banner based on adapter_warning field."""
+        if status is None:
+            status = self._dbus_client.get_status()
+        warning = str(status.get("adapter_warning", ""))
+        if warning:
+            self._adapter_mismatch_banner.update_warning(warning)
+            self._adapter_mismatch_banner.show()
+            self._adapter_mismatch_timer.start()
+        else:
+            self._adapter_mismatch_banner.hide()
+            self._adapter_mismatch_timer.stop()
+        self._adapter_mismatch_warning = warning
+
+    def _poll_adapter_mismatch(self) -> None:
+        """Periodic GetStatus poll (≤5s) while adapter-mismatch banner is visible."""
+        self._refresh_adapter_mismatch_banner()
 
     def _on_adapter_banner_dismissed(self) -> None:
         """Hide adapter-unavailable banner; suppress for the rest of this session."""
@@ -858,11 +890,14 @@ class MainWindow(QMainWindow):
             name, conv_id, cached, "SMS",
             failures=self._failed_sends.get(cache_key, set()),
         )
+        if not cached:
+            self._thread_view.set_loading(True)
         self._sync_compose_state()
         self._tray.reset_unread()
         self._dbus_client.mark_conversation_read(conv_id)
         self._dbus_client.fetch_contact_photo(conv_id)
-        QTimer.singleShot(0, lambda: self._load_thread_messages(conv_id, name))
+        self._pending_load_conv = conv_id
+        self._dbus_client.get_messages_async(conv_id)
 
     def _load_thread_messages(self, conv_id: str, name: str) -> None:
         """Populate the thread view with messages (deferred from _on_conversation_selected)."""
@@ -925,6 +960,74 @@ class MainWindow(QMainWindow):
             failures=self._failed_sends.get(cache_key, set()),
         )
 
+    def _on_messages_loaded(self, conv_id: str, raw_msgs: list) -> None:
+        """Handle async GetMessages reply: seed cache, then render if still the active conv."""
+        _conv = self._conversations_by_id.get(conv_id)
+        cache_key = (_conv.phone if _conv and _conv.phone else "") or conv_id
+        if conv_id and conv_id != cache_key:
+            self._msg_cache.merge_into(cache_key, conv_id)
+
+        # Seed persistent cache so future opens show cached messages immediately.
+        for m in raw_msgs:
+            direction = str(m.get("direction", "inbound"))
+            body = str(m.get("body", ""))
+            sender = str(m.get("from", ""))
+            raw_ts = str(m.get("timestamp", ""))
+            sort_key = str(m.get("sort_key") or raw_ts)
+            self._msg_cache.add_message(cache_key, direction, body, sender, raw_ts, sort_key)
+
+        # Stale reply (user switched to another conversation) — cache was seeded, skip render.
+        if conv_id != self._pending_load_conv:
+            return
+        if self._current_phone and not _same_conv(conv_id, self._current_phone):
+            return
+
+        conv_data = self._conversations_by_id.get(conv_id)
+        name = conv_data.name if conv_data else conv_id
+        messages: list[MessageData] = [self._msg_dict_to_data(m) for m in raw_msgs]
+
+        def _dk(m: MessageData) -> tuple:
+            return (m.bubble_type, m.sort_key) if m.sort_key else (m.bubble_type, m.body)
+
+        _outbound_by_dk: dict[tuple, int] = {
+            _dk(m): i
+            for i, m in enumerate(messages)
+            if m.bubble_type == BubbleType.OUTBOUND and m.sort_key
+        }
+        seen: set[tuple] = {_dk(m) for m in messages}
+        extras: list[MessageData] = []
+
+        for m in (self._cache_msg_to_data(c) for c in self._msg_cache.get_messages(cache_key)):
+            k = _dk(m)
+            if k not in seen:
+                extras.append(m)
+                seen.add(k)
+            elif k in _outbound_by_dk:
+                idx = _outbound_by_dk[k]
+                if len(m.body or "") > len(messages[idx].body or ""):
+                    messages[idx] = m
+
+        for m in self._sent_cache.get(cache_key, []):
+            k = _dk(m)
+            if k not in seen:
+                extras.append(m)
+                seen.add(k)
+            elif k in _outbound_by_dk:
+                idx = _outbound_by_dk[k]
+                if len(m.body or "") > len(messages[idx].body or ""):
+                    messages[idx] = m
+
+        if extras:
+            messages = sorted(messages + extras, key=lambda m: m.sort_key or m.timestamp)
+        messages = _collapse_outbound_echoes(messages)
+        _trace.emit("thread_load", conv_id=conv_id, live=len(raw_msgs),
+                    extras=len(extras), total=len(messages))
+        self._thread_view.set_loading(False)
+        self._thread_view.load_thread(
+            name, conv_id, messages, "SMS",
+            failures=self._failed_sends.get(cache_key, set()),
+        )
+
     def _on_daemon_connected(self, device_address: str) -> None:
         status = self._dbus_client.get_status()
         if status:
@@ -948,6 +1051,7 @@ class MainWindow(QMainWindow):
         self._apply_capabilities(caps)
         self._tray.set_connected(True)
         self._load_conversations()
+        QTimer.singleShot(500, self._prefetch_recent_threads)
 
     def _on_daemon_disconnected(self) -> None:
         self._connected_device = ""
@@ -1664,6 +1768,11 @@ class MainWindow(QMainWindow):
         if conversations and not self._current_phone:
             first_id = conversations[0].id
             QTimer.singleShot(0, lambda: self._conv_list.select_conversation(first_id))
+
+    def _prefetch_recent_threads(self) -> None:
+        """Eagerly load messages for the first 5 conversations to seed the cache."""
+        for conv in list(self._conversations_by_id.values())[:5]:
+            self._dbus_client.get_messages_async(conv.id)
 
     def _cache_msg_to_data(self, m: dict) -> MessageData:
         direction = m.get("direction", "inbound")
