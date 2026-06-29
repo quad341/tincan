@@ -146,6 +146,7 @@ class _AdapterCard(QWidget):
         hfp_sco_capable: bool,
         recommended: bool = False,
     ) -> None:
+        self.show()
         self._retry_button.setVisible(False)
         if not le_capable:
             self._alias_label.setText("")
