@@ -1,38 +1,33 @@
-# PRD: Calls UI — Arbitrary Dialpad + Per-Thread Dial Button (tincan-8dehj)
+# PRD: Remove Group-Message Surface (tincan-w621v)
 
 **Status:** Draft
 **Author:** tincan/planner
 **Date:** 2026-06-29
-**Source bead:** tincan-8dehj
-**Type:** Feature (UI — calls)
+**Source bead:** tincan-w621v
+**Type:** Cleanup / Feature removal
 **Priority:** P2
 
 ---
 
 ## Problem Statement
 
-Tincan supports outbound HFP calls at the daemon level (`im.tincan.Calls.Dial` over
-D-Bus; `dbus_client.dial()` at `dbus_client.py:771`) but the GUI has no way to
-initiate one. The in-call panel (`InCallPanel`, `IncomingCallDialog`) is incoming-only.
-The existing `DTMFKeypad` widget (`call_panel.py:600`) appends tones mid-call; its
-display is `setReadOnly(True)` — it is not a pre-dial number-entry UI.
+Tincan exposes a group-messaging surface (send + receive) that does not work
+over the iPhone's MAP (Message Access Profile). Live testing verified in June
+2026 (PR #156, `docs/LIMITATIONS.md`, `spikes/FINDINGS.md` OQ-6):
 
-Two distinct gaps exist:
+- **Send:** iOS accepts a multi-recipient MMS push but delivers only to the
+  first recipient and creates no group thread on the phone.
+- **Receive/reply:** there is no working return path to a group thread.
 
-1. **No arbitrary dialer.** There is no way to type a phone number and place an
-   outbound call from the desktop — equivalent to opening the Phone app and dialling
-   manually.
+A group conversation in the UI is therefore a silent dead end: a reply reaches
+at most one person, with no warning. Fixing the send-side obexd call signature
+bug (2-arg call vs. the required `ssa{sv}` signature) revealed this iOS-level
+platform limitation — the feature cannot be made to work without violating
+tincan's Bluetooth-profiles-only constraint.
 
-2. **No per-thread Dial action.** When a 1:1 conversation is open, there is no direct
-   "call this contact" affordance. The user must know the phone number and enter it
-   manually elsewhere.
-
-A group SMS thread has no single dialable number, so any Dial action must be absent
-or disabled there.
-
-**Who is affected:** All tincan desktop users who want to place outbound calls via
-their paired iPhone, whether to an existing contact in a thread or to an arbitrary
-number.
+**Who is affected:** All tincan users who encounter multi-recipient inbound
+messages. The current experience is misleading; removal improves honesty and
+eliminates a crash-prone code path.
 
 ---
 
@@ -40,23 +35,22 @@ number.
 
 | # | Goal | Measurable Outcome |
 |---|------|--------------------|
-| G1 | User can place a call to any arbitrary phone number from the GUI | A number-entry dialpad is reachable from the main window and successfully calls `dbus_client.dial()` on accept |
-| G2 | User can call a thread's contact in one action from a 1:1 conversation | A visible "Dial" button in the 1:1 thread view calls `dbus_client.dial(_current_phone)` when tapped |
-| G3 | Group threads present no confusing or broken Dial affordance | Dial button is hidden (preferred) or disabled with tooltip on group threads (`is_group=True`) |
-| G4 | Call flow transitions seamlessly into `_enter_call()` | After `dial()` returns a call_id, the GUI transitions to the `InCallPanel` without requiring a manual trigger |
-| G5 | Dialpad is inert when calls capability is unavailable | Button and dialpad are disabled when `_call_setup_ready=False` (SELinux module absent) with an explanatory tooltip |
+| G1 | Eliminate every group-send/receive API surface | `grep -rE 'send_group_message\|SendMessageToRecipients\|build_bmsg_multi\|_group_participants'` over `tincand/` + `tincan_gui/` returns zero live references |
+| G2 | Inbound multi-recipient messages are rendered usefully, not silently dropped | A multi-recipient inbound message creates a 1:1 thread keyed by sender phone, visible in the GUI, with working reply |
+| G3 | 1:1 SMS send + receive is completely unaffected | Existing 1:1 messaging tests pass unchanged |
+| G4 | Codebase quality maintained | ruff clean + full pytest suite green after removal |
 
 ## Non-Goals
 
-- Changes to `tincand` or the D-Bus API (daemon-side `Calls.Dial` already works)
-- Mid-call DTMF changes — `DTMFKeypad` is in scope only as a reference; do not
-  modify it for this feature
-- Voicemail dialling, extension codes, or SIP/VoIP (HFP-only scope)
-- A full contacts browser inside the dialpad (arbitrary number entry is sufficient)
-- Implementing the outbound-call-answered flow (the existing `_enter_call` path
-  handles it; this feature only adds the trigger)
-- Internationalisation / number formatting (E.164 normalisation is not in scope for
-  this iteration)
+- Fixing group messaging to work — iOS MAP does not support it and fixing it
+  is out of scope per the Bluetooth-profiles-only constraint.
+- Removing the inbound MMS image-attachment parse path (`_parse_mms_content` /
+  the `Type=="MMS"` attachment fetch). That is a distinct dead-code cleanup
+  (FINDINGS OQ-5); keep it for a separate change unless its removal is
+  trivially entangled with this work.
+- Any changes to docs (already updated in PR #156; verify they match final
+  behavior but no further doc edits expected from this change).
+- iMessage support, RCS, or any other messaging mode.
 
 ---
 
@@ -64,108 +58,100 @@ number.
 
 | ID | Story |
 |----|-------|
-| US1 | As a user, I want to open a dialpad from the main window and enter any phone number so that I can place a call to a number not in my conversation list. |
-| US2 | As a user reading a 1:1 message thread, I want a single tap to call that contact so that I don't have to manually copy and enter their number elsewhere. |
-| US3 | As a user in a group thread, I want the UI to be clear that I cannot call "the group" so that I don't waste time looking for a broken Dial button. |
-| US4 | As a user whose HFP setup is not complete (SELinux module not loaded), I want a clear explanation of why calling is unavailable so I know what to fix. |
-| US5 | As a user who initiates a call, I want the in-call panel to appear automatically so I'm not left staring at the compose view after dialling. |
+| US1 | As a user who receives an iMessage or group SMS addressed to multiple people, I want the message to appear in a normal 1:1 thread from the sender, so that I can reply to that sender and have the reply actually reach them. |
+| US2 | As a user, I want the GUI to show me only conversation types that work end-to-end, so that I am not misled into a thread where my reply silently fails. |
+| US3 | As a developer or MCP agent, I want the D-Bus and MCP APIs to omit group-send methods so that I cannot accidentally invoke a dead code path. |
 
 ---
 
 ## Functional Requirements
 
-### FR1 — Arbitrary Dialpad
+### FR1 — Remove group-send surface (D-Bus, MCP, daemon)
 
-**FR1.1 — Dialpad entry point.**
-A dialpad button or action must be accessible from the main window's toolbar or
-conversation-list header area. It is always available (subject to FR1.5), regardless
-of which conversation is open.
+**FR1.1 — BackendInterface ABC.**
+`send_group_message` must be removed from `tincand/backends/base.py`.
 
-**FR1.2 — Dialpad UI.**
-The dialpad must provide:
-- A phone-number input field (editable; not `setReadOnly(True)`)
-- `0–9`, `*`, `#` keys (12-key numeric grid — designer specifies exact layout)
-- A "Call" / "Dial" confirm action that calls `dbus_client.dial(entered_number)`
-- A cancel / dismiss action
-- A backspace key or gesture to delete the last character
+**FR1.2 — Backend implementations.**
+`send_group_message` (and `build_bmsg_multi`) must be removed from:
+- `tincand/backends/bluez_map.py`
+- `tincand/backends/ancs.py`
+- `tincand/backends/fake_map.py`
+- `tincand/backends/mock.py`
 
-**FR1.3 — Number validation.**
-The "Call" action must be disabled (greyed) if the entered string does not satisfy
-`_is_dialable()` (`main.py:69` — ≥4 contiguous digits after stripping non-digit
-characters). No error dialog needed; disabling the button is sufficient.
+**FR1.3 — BackendManager.**
+`send_group_message` delegate must be removed from `tincand/backend_manager.py`.
 
-**FR1.4 — Keyboard input.**
-The number input field must accept direct keyboard digit input without requiring
-on-screen key taps. `Return` / `Enter` must trigger "Call" when the field is dialable.
+**FR1.4 — D-Bus service.**
+From `tincand/dbus_service.py`, remove:
+- `SendMessageToRecipients` method
+- `_group_participants` dict and its population in `upsert_conversation`
+- The `SendMessage → send_group_message` routing branch (`to in self._group_participants`)
+- `GetConversationParticipants` (if only used for the group surface — verify before removing)
+- `is_group` on the `Conversation` dataclass and its D-Bus exposure (if only used for groups — verify before removing)
 
-**FR1.5 — Capability gate.**
-When `_call_setup_ready=False` (daemon reported `call_setup_ready=False` in
-capabilities), the dialpad entry point must be disabled with a tooltip:
-`"Call setup incomplete — load the tincan HFP SELinux module to enable calls."` or
-equivalent. The designer may choose to show a banner instead of a tooltip.
+**FR1.5 — MCP server.**
+Remove `send_group_message` from:
+- `tincand/mcp/server.py` (tool definition)
+- `tincand/mcp/dbus_bridge.py` (bridge method)
+- `tincand/mcp/__main__.py` (help line)
 
-**FR1.6 — Post-dial transition.**
-After `dbus_client.dial()` returns a non-empty call_id, the dialpad must close and
-`_enter_call()` (`main.py:1564`) must be invoked to show the in-call panel. Error
-handling: if `dial()` returns empty string (daemon-side failure), the dialpad stays
-open and shows an inline error (designer decides exact copy/position).
+**FR1.6 — GUI client.**
+From `tincan_gui/dbus_client.py`, remove `send_message_to_recipients` and
+`get_conversation_participants` client wrappers.
 
 ---
 
-### FR2 — Per-Thread Dial Button on 1:1 Conversations
+### FR2 — Remove group-receive / group UI surface (GUI)
 
-**FR2.1 — Dial button placement.**
-A "Dial" (phone) button must appear within the active conversation area when a 1:1
-thread is open (`is_group=False`). Designer specifies exact placement — candidate
-locations: thread header bar, compose bar alongside the Send button, or a dedicated
-action row above the compose widget.
+**FR2.1 — ConversationData model.**
+Remove `is_group` from `ConversationData` (and any associated `group_name`
+field) in `tincan_gui/` only if it is not also used outside group contexts.
+If it is used outside group contexts, keep it and only remove its group-specific
+consumers.
 
-**FR2.2 — 1:1-only visibility.**
-The Dial button must be:
-- **Visible** when `is_group=False`
-- **Hidden** (strongly preferred) when `is_group=True`
+**FR2.2 — Group conversation card / GroupAvatarWidget.**
+Remove `GroupAvatarWidget` and its rendering from `tincan_gui/main.py`.
+Remove the group conversation card path entirely.
 
-If hidden-vs-disabled is a non-obvious choice in context, designer may prefer
-disabled-with-tooltip (`"Can't call a group thread"`), but hidden is the preferred
-default to avoid clutter.
+**FR2.3 — Thread view group mode.**
+Remove `BubbleType.GROUP_UNKNOWN_SENDER`, `set_group_mode`, and the group
+rendering branch from the `ThreadView` widget.
 
-**FR2.3 — Dialable guard.**
-When `_current_phone_dialable=False` (the thread's phone string is a raw name
-unresolvable to a number), the Dial button must be disabled with a tooltip:
-`"Phone number unavailable for this contact"` or equivalent. This mirrors the
-existing compose-guard at `main.py:773-779`.
-
-**FR2.4 — Call setup guard.**
-When `_call_setup_ready=False`, the Dial button must be disabled (same gate as
-FR1.5). Tooltip: same wording as FR1.5.
-
-**FR2.5 — Action: dial thread contact.**
-On click (when all guards pass), the button must call `dbus_client.dial(_current_phone)`
-and then follow the same post-dial transition as FR1.6.
-
-**FR2.6 — State synchronisation.**
-The button's enabled/disabled/hidden state must update immediately when:
-- A conversation is opened or closed (selected_phone changes)
-- The daemon reports a new capabilities dict (call_setup_ready changes)
-- The daemon connects or disconnects
+**FR2.4 — Compose/new-convo group path.**
+Remove the group-mode path from the new-conversation flow and from the compose
+widget, including `group_hint` handling.
 
 ---
 
-### FR3 — Outbound Call Transition
+### FR3 — Inbound multi-recipient messages treated as 1:1
 
-**FR3.1 — `_enter_call()` wiring for outbound.**
-The existing `_enter_call(caller_name)` method (`main.py:1564`) must be callable for
-outbound calls. Currently it is only triggered from incoming-call signals. The
-builder must wire the outbound path so that after `dial()` succeeds, `_enter_call()`
-is invoked with the callee's resolved name (from `_conversations_by_id` if available,
-otherwise the raw number).
+**FR3.1 — poll_inbox / `_emit_messages` grouping branch.**
+In `tincand/backends/bluez_map.py`, the branch that sets `is_group`, assigns a
+SHA1-of-participants conversation key, or tags the message with `group_hint`
+must be removed. A multi-recipient inbound message must key its conversation by
+**sender phone** (the `Sender` / `SenderAddressing` MAP field) exactly as a 1:1
+message does. The resulting thread is indistinguishable from a normal 1:1 thread.
 
-**FR3.2 — In-call panel shows outbound direction.**
-The in-call panel must correctly show the call as outbound (not display it as an
-unknown incoming call). The existing `add_call(call_id, number, direction, state)`
-on `InCallPanel` accepts a `direction` parameter; the builder must pass `"outbound"`.
-This is a builder concern, but the PRD flags it to prevent the designer
-from designing an "incoming" variant for outbound.
+**FR3.2 — Reply path.**
+A reply to a thread created from a multi-recipient inbound message must use
+`send_message` (1:1) to the sender phone. No group-send call is invoked.
+
+---
+
+### FR4 — Test cleanup
+
+**FR4.1 — Delete test files.**
+- `tests/tincand/test_map_group_send.py` — delete entirely
+- `tests/tincand/test_dbus_service_group.py` — delete entirely
+
+**FR4.2 — Strip group-specific tests from existing files.**
+- `tests/tincand/test_bluez_map_multi.py` — remove `build_bmsg_multi` section; keep `normalize_phone` tests; drop `_parse_participants` tests only if the helper is removed
+- `tests/tincand/test_backend_manager.py` — remove `send_group_message` delegation test
+- `tests/tincand/test_fake_map_backend.py` — remove group-send tests
+- `tests/tincand/test_mcp_server.py` — remove `send_group_message` tests
+- `tests/tincand/test_reply_routing.py` — remove group-routing tests; keep 1:1 routing tests
+- `tests/tincand/test_dbus_service.py` — remove `_group_participants` population test
+- `tests/tincand/test_dbus_contract.py` — remove `SendMessageToRecipients` contract entry
 
 ---
 
@@ -173,11 +159,11 @@ from designing an "incoming" variant for outbound.
 
 | ID | Requirement | Metric |
 |----|-------------|--------|
-| NFR1 | Dialpad opens in < 200 ms from button click | Measured from click to dialog/panel fully painted |
-| NFR2 | No new pip dependencies | PySide6 + stdlib only |
-| NFR3 | All new buttons have `setAccessibleName()` | Screenreader accessible; checked in tests |
-| NFR4 | No regressions in existing call panel tests | All tests in `tests/tincan_gui/` touching `call_panel` pass |
-| NFR5 | Dial button state is covered by a pytest-qt behavioural test | Test invokes state change + asserts enabled/visible, not just widget existence |
+| NFR1 | ruff + black clean | `ruff check .` and `black --check .` return 0 on all changed files |
+| NFR2 | Full pytest suite green | `pytest` returns 0 with no new failures |
+| NFR3 | grep sentinel passes | `grep -rE 'send_group_message\|SendMessageToRecipients\|build_bmsg_multi\|_group_participants'` over `tincand/` + `tincan_gui/` returns no hits |
+| NFR4 | 1:1 messaging unaffected | Tests specifically covering 1:1 send and receive pass unchanged |
+| NFR5 | No new external dependencies | stdlib + existing requirements only |
 
 ---
 
@@ -185,21 +171,17 @@ from designing an "incoming" variant for outbound.
 
 *(derived from `docs/PROJECT_MANIFEST.md`)*
 
-- **GUI client:** PySide6 (Qt for Python) — `tincan_gui`; pure client of the daemon.
-- **Daemon boundary:** `dbus_client.dial(number)` is the only call surface; no daemon
-  changes are in scope.
-- **Calling is phase 3:** The daemon HFP path is implemented; this feature is the
-  missing GUI trigger layer only.
-- **`_is_dialable(s)` (`main.py:69`):** Validation predicate to reuse for the dialpad
-  input guard (FR1.3) — do not duplicate.
-- **`_enter_call(caller_name)` (`main.py:1564`):** Must be reused for the outbound
-  post-dial flow — do not duplicate.
-- **`_call_setup_ready` flag (`main.py:534,807`):** Capability gate populated from
-  daemon `call_setup_ready` cap key; guards all call actions.
-- **Group thread detection:** `conv_data.is_group` (`ConversationData`); already
-  available at conversation-open time.
-- **Python 3.14, ruff + black** must pass on all changed files.
-- **Dark-mode only** — Wayland/Fedora 44, no light mode.
+- **Python 3.14** — ruff + black must pass.
+- **Bluetooth-profiles-only constraint:** No iMessage RE, no non-MAP send paths.
+- **Daemon/client API boundary:** The D-Bus interface is the authoritative API;
+  GUI and MCP are pure clients. API changes (removing `SendMessageToRecipients`,
+  `GetConversationParticipants`, `is_group` D-Bus exposure) must be consistent
+  across all clients.
+- **Daemon is stateless:** No persistence inside `tincand`. Remove group state
+  (`_group_participants`, SHA1 conversation keys) without introducing new state.
+- **Capability detection principle:** Removing a feature that never worked is
+  not a regression; no capability flag needed for this removal.
+- **Branch convention:** `tincan-w621v` feature branch, merge after reviewer gate.
 
 ---
 
@@ -207,13 +189,9 @@ from designing an "incoming" variant for outbound.
 
 | # | Dependency | Needed For | Status |
 |---|------------|-----------|--------|
-| D1 | `dbus_client.dial(number)` | FR1.6, FR2.5 — place outbound call | Exists (`dbus_client.py:771`) |
-| D2 | `_enter_call(caller_name)` | FR3.1 — transition to in-call UI | Exists (`main.py:1564`); needs outbound wiring |
-| D3 | `_is_dialable(s)` | FR1.3 — validate dialpad input | Exists (`main.py:69`) |
-| D4 | `_call_setup_ready` flag | FR1.5, FR2.4 | Exists (`main.py:534`); populated from daemon caps |
-| D5 | `conv_data.is_group` | FR2.2 — hide Dial on group threads | Exists in `ConversationData` |
-| D6 | Designer: dialpad layout spec | FR1.2 — number-entry UI | **Required — this PRD routes to designer** |
-| D7 | Designer: Dial button placement spec | FR2.1 — thread action placement | **Required — this PRD routes to designer** |
+| D1 | PR #156 (MAP image spike) | Context for OQ-6 finding; docs already updated | Merged or in progress on `cohelper/map-image-spike` — builder should verify docs are in sync |
+| D2 | `normalize_phone` utility in `bluez_map.py` | Must be preserved through cleanup | Exists; keep regardless |
+| D3 | 1:1 `send_message` path | Reply path after removal (FR3.2) | Exists; unchanged |
 
 ---
 
@@ -221,38 +199,52 @@ from designing an "incoming" variant for outbound.
 
 | # | Question | Owner | Due |
 |---|----------|-------|-----|
-| OQ1 | Should the arbitrary dialpad be a modal dialog, a side panel, or a popover? The designer must decide given the existing compose-stack / call-stack layout in `MainWindow`. | designer | Before builder starts |
-| OQ2 | Should the per-thread Dial button show a phone icon, a label "Call", or both? What is the correct disabled-vs-hidden policy for group threads? | designer | Before builder starts |
-| OQ3 | When `dial()` fails (daemon returns empty call_id), should the error be inline in the dialpad, a toast/snackbar, or a QMessageBox? | designer | Before builder starts |
-| OQ4 | For outbound calls that connect, `_enter_call(caller_name)` is currently populated from incoming-call signals. What caller name should be shown for an outbound call placed to an unknown number (not in contacts)? Fallback = raw number string. | builder | Implementation |
-| OQ5 | Should the dialpad entry point be in the toolbar (always visible), or only visible in the conversation area when calls are available? | designer | Before builder starts |
+| OQ1 | Is `is_group` on `Conversation` / `ConversationData` used outside the group-message surface (e.g., the Calls UI dialpad dial-button hide rule `conv_data.is_group`)? If yes, keep the field and only remove the group-message-specific consumers. If no, remove the field entirely. | builder | Before removing `is_group` |
+| OQ2 | Is `GetConversationParticipants` D-Bus method used by any consumer other than the group-message surface (e.g., the calls UI bead tincan-8dehj)? If yes, keep it. | builder | Before removing method |
+| OQ3 | Are there any remaining references to `_parse_participants_from_bmsg` or `_parse_mms_content` in the MAP backend that are entangled with the group-message removal rather than the separate MMS attachment cleanup? If entangled, include; if separable, leave for the MMS cleanup bead. | builder | During implementation |
+
+---
+
+## Implementation Plan (for builder reference)
+
+The 11-step plan below is derived from the bead notes and is provided as a
+starting point. The builder must re-verify all file paths and line numbers
+against `origin/main` before editing (the bead notes warn that grepped line
+numbers may have drifted).
+
+1. Remove `send_group_message` from BackendInterface ABC, `bluez_map` (+ `build_bmsg_multi`, `_parse_participants`), `ancs`, `fake_map`, `mock`, `backend_manager`.
+2. Simplify `_emit_messages` / `poll_inbox`: multi-recipient inbound keys by sender as 1:1 (remove `is_group` logic, SHA1 key, `group_hint`).
+3. Remove `is_group` / `group_name` from `Conversation` dataclass + `to_dbus` **after verifying OQ1**.
+4. Remove `_group_participants`, `SendMessageToRecipients`, `GetConversationParticipants` from `dbus_service` **after verifying OQ2**.
+5. Remove `SendMessage` group branch; clean `register_backend` / `upsert_conversation`.
+6. Remove MCP `send_group_message` tool from `server.py`, `bridge.py`, `__main__.py`.
+7. GUI: remove `is_group` from `ConversationData`, `GroupAvatarWidget` usage, group rendering, `set_group_mode` on compose / `thread_view`.
+8. GUI: remove group branch in new-convo flow, `group_hint` handling.
+9. Remove `BubbleType.GROUP_UNKNOWN_SENDER` + `set_group_mode` from `ThreadView`.
+10. Remove `send_message_to_recipients` + `get_conversation_participants` from `dbus_client.py`.
+11. Tests: delete `test_map_group_send`, `test_dbus_service_group`; strip group tests from the 7 other files per FR4.2.
 
 ---
 
 ## Handoff Notes for Downstream Agents
 
-This feature requires **design work only** before the builder can act. No architecture
-changes are needed — the daemon D-Bus API is complete, and all required GUI hooks
-(`dial()`, `_enter_call()`, `_is_dialable()`) exist.
+This change is a **pure removal** with no new architecture or UI design needed.
 
-**Architect:** Not required. The daemon/client boundary is unchanged; no new D-Bus
-interfaces or domain types needed.
+**Architect:** Not required. No new D-Bus interfaces, no new domain types,
+no new dependencies. The removal plan is fully specified.
 
-**Designer:** Two UI elements need a visual spec:
-1. The **arbitrary dialpad** — modal dialog, panel, or popover; number-entry field +
-   12-key grid + Call/Cancel/Backspace actions.
-2. The **per-thread Dial button** — placement within the 1:1 conversation view;
-   icon, label, enabled/hidden state rules.
+**Designer:** Not required. The post-removal behavior (multi-recipient inbound
+→ 1:1 thread from sender) uses the existing 1:1 conversation UI without
+modification.
 
-The designer must resolve OQ1–OQ3 and OQ5. The builder can begin implementing
-FR1–FR2 only after the designer's spec is committed.
-
-**Builder (after design):** Implement FR1–FR3 in `tincan_gui/main.py` and
-`tincan_gui/call_panel.py`. Reuse `_is_dialable()`, `_enter_call()`, and
-`_call_setup_ready`; do not duplicate. Wire the Dial button's enabled/hidden state
-through `_sync_compose_state()`-style logic or its own sync method. Add a
-pytest-qt behavioural test (NFR5).
+**Builder:** Implement steps FR1–FR4 in the order given in the Implementation
+Plan above. Resolve OQ1–OQ3 during implementation (the answers are determinable
+by reading the current code). Run `ruff`, `black`, and `pytest` before
+submitting. Verify the grep sentinel in NFR3 returns zero hits before calling
+the work done. The docs (LIMITATIONS.md, PR #156) are already updated — check
+that they still match the final behavior but no further doc edits should be
+needed.
 
 ---
 
-*PRD covers bead: tincan-8dehj*
+*PRD covers bead: tincan-w621v*
