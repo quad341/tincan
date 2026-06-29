@@ -632,7 +632,7 @@ class SettingsDialog(QDialog):
 
             # Apply rich two-line delegate (AC 4)
             self._adapter_combo.setItemDelegate(_AdapterItemDelegate(self._adapter_combo))
-            self._configure_bt_combo_width(self._adapter_combo)
+            _configure_bt_combo_width(self._adapter_combo)
 
             # Restart banner (shown after adapter selection change)
             self._adapter_restart_banner = _AdapterRestartBanner()
@@ -679,7 +679,7 @@ class SettingsDialog(QDialog):
             self._device_combo.setPlaceholderText("Loading devices…")
             self._device_combo.setEnabled(False)
             self._device_combo.setAccessibleName("Bluetooth device")
-            self._configure_bt_combo_width(self._device_combo)
+            _configure_bt_combo_width(self._device_combo)
             bt_layout.addWidget(self._device_combo)
             self._device_combo.currentIndexChanged.connect(self._on_device_changed)
             self._device_loader = _DeviceLoader()
@@ -883,28 +883,6 @@ class SettingsDialog(QDialog):
     # Adapter picker: load, populate, update badges
     # ------------------------------------------------------------------
 
-    def _configure_bt_combo_width(self, combo: QComboBox) -> None:
-        combo.setMinimumWidth(_BT_COMBO_MIN_WIDTH)
-        combo.setMinimumContentsLength(_BT_COMBO_MIN_CONTENTS)
-        combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-
-    def _refresh_adapter_mismatch_annotation(self) -> None:
-        if not self._adapters_list or not self._client:
-            self._adapter_mismatch_annotation.hide()
-            return
-        try:
-            status = self._client.get_status() or {}
-            warning = str(status.get("adapter_warning", ""))
-        except Exception:
-            warning = ""
-        if warning:
-            self._adapter_mismatch_annotation.setText(warning)
-            self._adapter_mismatch_annotation.show()
-        else:
-            self._adapter_mismatch_annotation.hide()
-
     def _load_adapters_sync(self) -> None:
         if not self._client:
             return
@@ -1100,13 +1078,19 @@ class SettingsDialog(QDialog):
         except Exception:  # noqa: BLE001
             pass
 
-    def _refresh_adapter_mismatch_annotation(self, warning: str) -> None:
+    def _refresh_adapter_mismatch_annotation(self, warning: str = "") -> None:
         """AC6: show/hide ⚠ annotation on the Adapter row when adapter_warning is set."""
         if not hasattr(self, "_adapter_mismatch_annotation"):
             return
         if not self._adapters_list:
             self._adapter_mismatch_annotation.hide()
             return
+        if not warning and self._client:
+            try:
+                status = self._client.get_status() or {}
+                warning = str(status.get("adapter_warning", ""))
+            except Exception:
+                warning = ""
         if not warning:
             self._adapter_mismatch_annotation.hide()
             return
