@@ -67,7 +67,15 @@ class TestComposeButtonCount:
             if b.text() == "+"
         ]
         assert plus_buttons, "No '+' QToolButton found"
-        assert plus_buttons[0].toolTip() == "New conversation"
+        btn = plus_buttons[0]
+        # Initially disabled: tooltip explains how to enable
+        assert not btn.isEnabled(), "Compose button must start disabled"
+        assert "iPhone" in btn.toolTip() or "connect" in btn.toolTip().lower(), (
+            f"Disabled tooltip must mention iPhone connection; got {btn.toolTip()!r}"
+        )
+        # After enabling: tooltip reverts to 'New conversation'
+        w.set_compose_new_enabled(True)
+        assert btn.toolTip() == "New conversation"
 
     def test_compose_button_emits_signal_once(self, qtbot):
         w = ConversationListWidget()
@@ -82,6 +90,7 @@ class TestComposeButtonCount:
             if b.text() == "+"
         ]
         assert plus_buttons
+        w.set_compose_new_enabled(True)
         plus_buttons[0].click()
 
         assert signals == [1], f"Expected 1 signal, got {len(signals)}"

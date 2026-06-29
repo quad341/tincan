@@ -185,7 +185,6 @@ class TitleBar(QWidget):
         if not _gear_icon.isNull():
             self._gear_btn.setIcon(_gear_icon)
             self._gear_btn.setIconSize(QSize(18, 18))
-            self._gear_btn.setText("")
         else:
             self._gear_btn.setText("⚙")
         layout.addWidget(self._gear_btn)
@@ -201,11 +200,12 @@ class TitleBar(QWidget):
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
-        _bug_icon = _first_valid_icon("tools-report-bug", "dialog-warning", "emblem-important")
+        _bug_icon = _first_valid_icon(
+            "tools-report-bug", "dialog-warning", "emblem-important"
+        )
         if not _bug_icon.isNull():
             self._bug_btn.setIcon(_bug_icon)
             self._bug_btn.setIconSize(QSize(18, 18))
-            self._bug_btn.setText("")
         else:
             self._bug_btn.setText("⚠")
         layout.addWidget(self._bug_btn)
@@ -229,7 +229,6 @@ class TitleBar(QWidget):
         if not _bell_icon.isNull():
             self._bell_btn.setIcon(_bell_icon)
             self._bell_btn.setIconSize(QSize(18, 18))
-            self._bell_btn.setText("")
         else:
             self._bell_btn.setText("☆")
         layout.addWidget(self._bell_btn)
@@ -536,10 +535,12 @@ class MainWindow(QMainWindow):
         self._had_connection_this_session: bool = False
         self._daemon_spawn_attempted: bool = False
         self._messages_ok: bool = False   # True when daemon reports messages capability
+        self._ancs_status: str = "disabled"  # tincan-nbjrp: rich ANCS state string
         self._repair_notified: bool = False  # rate-limit: only one FALLBACK notification
         self._adapter_unavailable_banner_dismissed: bool = False
         self._adapter_mismatch_warning: str = ""
         self._conversations_by_id: dict[str, ConversationData] = {}
+        self._pending_load_conv: str = ""   # conv_id of the outstanding async GetMessages
         self._pending_sends: set[tuple[str, str]] = set()  # (conv_id, body) awaiting ack
         self._sent_bodies: dict[str, set[str]] = {}  # conv_id → {body}; suppresses MAP poll echoes
         self._self_echo_guard: set[tuple[str, str]] = set()  # suppress MAP echo of self-sends
@@ -605,7 +606,7 @@ class MainWindow(QMainWindow):
 
         self._banner_c = StateCBanner()
         self._banner_c.hide()
-        self._banner_c.refresh_clicked.connect(self.refresh_requested.emit)
+        self._banner_c.heal_clicked.connect(self._on_ancs_heal_requested)
         root_layout.addWidget(self._banner_c)
 
         # Contacts-empty hint (tincan-d3xw)
@@ -683,12 +684,14 @@ class MainWindow(QMainWindow):
         c.connected.connect(self._on_daemon_connected)
         c.disconnected.connect(self._on_daemon_disconnected)
         c.capability_changed.connect(self._on_capability_changed)
+        c.ancs_status_changed.connect(self._on_ancs_status_changed)
         c.message_received.connect(self._on_message_received)
         c.app_notification_received.connect(self._notifier.dispatch_app_notification)
         c.conversation_updated.connect(self._on_conversation_updated)
         c.contact_photo_received.connect(self._on_contact_photo_received)
         c.message_send_accepted.connect(self._on_send_accepted)
         c.message_send_failed.connect(self._on_send_failed)
+        c.messages_loaded.connect(self._on_messages_loaded)
         self.refresh_requested.connect(self._load_conversations)
         self.refresh_requested.connect(self._dbus_client.refresh_contacts)
         # HFP call signals (tincan-fx79v.2)
@@ -730,13 +733,18 @@ class MainWindow(QMainWindow):
             self._had_connection_this_session = True
             self._title_bar.set_connected(addr)
             self._banner_a.hide()
+            self._conv_list.set_compose_new_enabled(bool(addr))
             caps = status.get("capabilities") or {}
             self._apply_capabilities(caps)
+            self._apply_ancs_status(str(status.get("ancs_status", "disabled")))
             self._tray.set_connected(True)
             self._load_conversations()
         else:
             self._title_bar.set_disconnected()
             self._banner_a.show()
+            self._conv_list.set_compose_new_enabled(
+                False, "Connect to your iPhone to start a new conversation"
+            )
         self._refresh_adapter_unavailable_banner(status)
         self._refresh_adapter_mismatch_banner(status)
 
@@ -822,11 +830,12 @@ class MainWindow(QMainWindow):
         self._messages_ok = messages_ok
         self._banner_b.setVisible(not messages_ok)
         self._sync_compose_state()
-        ancs_ok = bool(caps.get("ancs", False))
-        ancs_needs_repair = bool(caps.get("ancs_needs_repair", False))
-        self._update_ancs_repair_banner(ancs_needs_repair)
-        self._update_state_c_banner(ancs_ok, ancs_needs_repair)
-        self._title_bar.ancs_status_dot.update_state(ancs_ok, ancs_needs_repair)
+        # Chip reflects messaging capability; update when connected.
+        if self._connected_device:
+            if messages_ok:
+                self._title_bar.set_connected(self._connected_device)
+            else:
+                self._title_bar.set_connected_limited(self._connected_device)
         # Contacts-empty hint (tincan-d3xw)
         contacts_empty = bool(caps.get("contacts_empty", False))
         self._banner_contacts_empty.setVisible(contacts_empty)
@@ -835,6 +844,29 @@ class MainWindow(QMainWindow):
         call_setup_ready = bool(caps.get("call_setup_ready", True))
         self._call_setup_ready = call_setup_ready
         self._banner_call_setup.setVisible(not call_setup_ready)
+
+    def _apply_ancs_status(self, ancs_status: str) -> None:
+        """Update ANCS banners and dot from the richer ancs_status string (tincan-nbjrp).
+
+        Hides State C and Repair banners when ANCS is disabled (user opted out)
+        to avoid nags about a feature the user intentionally turned off.
+        """
+        self._ancs_status = ancs_status
+        ancs_enabled = self._ancs_enabled()
+        if not ancs_enabled:
+            # User disabled ANCS — suppress all ANCS banners and dot
+            self._banner_ancs_repair.setVisible(False)
+            self._banner_c.setVisible(False)
+            self._title_bar.ancs_status_dot.hide()
+            return
+        self._update_ancs_repair_banner(ancs_status == "fallback")
+        self._update_state_c_banner(ancs_status)
+        self._title_bar.ancs_status_dot.update_state(ancs_status)
+
+    @staticmethod
+    def _ancs_enabled() -> bool:
+        from tincan_gui._settings import app_settings, bool_value  # noqa: PLC0415
+        return bool_value(app_settings(), "ancs/enabled", True)
 
     def _update_ancs_repair_banner(self, needs_repair: bool) -> None:
         """Show/hide ANCSRepairBanner; fire FALLBACK notification on first entry."""
@@ -851,22 +883,13 @@ class MainWindow(QMainWindow):
                 self._tray.set_repair_needed(False)
             self._repair_notified = False
 
-    def _update_state_c_banner(self, ancs_ok: bool, ancs_needs_repair: bool = False) -> None:
-        """Show/hide State C banner; update chip to amber when ANCS limited (tincan-om9).
+    def _update_state_c_banner(self, ancs_status: str) -> None:
+        """Show/hide State C (healing) banner (tincan-nbjrp).
 
-        State C is hidden when ancs_needs_repair=True — ANCSRepairBanner takes precedence.
-        Co-exists with State B — messages gate takes priority for compose state.
-        Chip color only changes when the device is actually connected.
+        State C shows only during HEALING — not during armed/active/fallback/disabled.
+        ANCSRepairBanner takes over for fallback; armed/disabled don't warrant a nag.
         """
-        show_c = not ancs_ok and not ancs_needs_repair
-        self._banner_c.setVisible(show_c)
-        if self._connected_device:
-            # Chip reflects messaging capability (primary), not ANCS notifications
-            # (secondary). ANCS unavailability is surfaced via the State C banner.
-            if self._messages_ok:
-                self._title_bar.set_connected(self._connected_device)
-            else:
-                self._title_bar.set_connected_limited(self._connected_device)
+        self._banner_c.setVisible(ancs_status == "healing")
 
     @property
     def conversation_list(self) -> ConversationListWidget:
@@ -920,11 +943,14 @@ class MainWindow(QMainWindow):
             name, conv_id, cached, "SMS",
             failures=self._failed_sends.get(cache_key, set()),
         )
+        if not cached:
+            self._thread_view.set_loading(True)
         self._sync_compose_state()
         self._tray.reset_unread()
         self._dbus_client.mark_conversation_read(conv_id)
         self._dbus_client.fetch_contact_photo(conv_id)
-        QTimer.singleShot(0, lambda: self._load_thread_messages(conv_id, name))
+        self._pending_load_conv = conv_id
+        self._dbus_client.get_messages_async(conv_id)
 
     def _load_thread_messages(self, conv_id: str, name: str) -> None:
         """Populate the thread view with messages (deferred from _on_conversation_selected)."""
@@ -987,19 +1013,89 @@ class MainWindow(QMainWindow):
             failures=self._failed_sends.get(cache_key, set()),
         )
 
+    def _on_messages_loaded(self, conv_id: str, raw_msgs: list) -> None:
+        """Handle async GetMessages reply: seed cache, then render if still the active conv."""
+        _conv = self._conversations_by_id.get(conv_id)
+        cache_key = (_conv.phone if _conv and _conv.phone else "") or conv_id
+        if conv_id and conv_id != cache_key:
+            self._msg_cache.merge_into(cache_key, conv_id)
+
+        # Seed persistent cache so future opens show cached messages immediately.
+        for m in raw_msgs:
+            direction = str(m.get("direction", "inbound"))
+            body = str(m.get("body", ""))
+            sender = str(m.get("from", ""))
+            raw_ts = str(m.get("timestamp", ""))
+            sort_key = str(m.get("sort_key") or raw_ts)
+            self._msg_cache.add_message(cache_key, direction, body, sender, raw_ts, sort_key)
+
+        # Stale reply (user switched to another conversation) — cache was seeded, skip render.
+        if conv_id != self._pending_load_conv:
+            return
+        if self._current_phone and not _same_conv(conv_id, self._current_phone):
+            return
+
+        conv_data = self._conversations_by_id.get(conv_id)
+        name = conv_data.name if conv_data else conv_id
+        messages: list[MessageData] = [self._msg_dict_to_data(m) for m in raw_msgs]
+
+        def _dk(m: MessageData) -> tuple:
+            return (m.bubble_type, m.sort_key) if m.sort_key else (m.bubble_type, m.body)
+
+        _outbound_by_dk: dict[tuple, int] = {
+            _dk(m): i
+            for i, m in enumerate(messages)
+            if m.bubble_type == BubbleType.OUTBOUND and m.sort_key
+        }
+        seen: set[tuple] = {_dk(m) for m in messages}
+        extras: list[MessageData] = []
+
+        for m in (self._cache_msg_to_data(c) for c in self._msg_cache.get_messages(cache_key)):
+            k = _dk(m)
+            if k not in seen:
+                extras.append(m)
+                seen.add(k)
+            elif k in _outbound_by_dk:
+                idx = _outbound_by_dk[k]
+                if len(m.body or "") > len(messages[idx].body or ""):
+                    messages[idx] = m
+
+        for m in self._sent_cache.get(cache_key, []):
+            k = _dk(m)
+            if k not in seen:
+                extras.append(m)
+                seen.add(k)
+            elif k in _outbound_by_dk:
+                idx = _outbound_by_dk[k]
+                if len(m.body or "") > len(messages[idx].body or ""):
+                    messages[idx] = m
+
+        if extras:
+            messages = sorted(messages + extras, key=lambda m: m.sort_key or m.timestamp)
+        messages = _collapse_outbound_echoes(messages)
+        _trace.emit("thread_load", conv_id=conv_id, live=len(raw_msgs),
+                    extras=len(extras), total=len(messages))
+        self._thread_view.set_loading(False)
+        self._thread_view.load_thread(
+            name, conv_id, messages, "SMS",
+            failures=self._failed_sends.get(cache_key, set()),
+        )
+
     def _on_daemon_connected(self, device_address: str) -> None:
         status = self._dbus_client.get_status()
         if status:
             caps = status.get("capabilities") or {}
             name = str(status.get("device_name") or device_address)
+            ancs_status = str(status.get("ancs_status", "disabled"))
         else:
             # Daemon just connected but GetStatus() is transiently unavailable;
             # assume all capabilities OK rather than showing degradation banners.
             caps = {"messages": True, "contacts": True, "ancs": True}
             name = str(device_address)
+            ancs_status = "armed"
 
-        # Persist device address so next startup reads config instead of needing
-        # --device (tincan-oxthc).
+        # Persist device address so next startup reads config
+        # instead of needing --device (tincan-oxthc).
         if device_address:
             cfg = load_daemon_config()
             if cfg.device != device_address:
@@ -1010,9 +1106,14 @@ class MainWindow(QMainWindow):
         self._title_bar.set_connected(name)
         self._banner_a.set_reconnecting(False)
         self._banner_a.hide()
+        self._conv_list.set_compose_new_enabled(True)
         self._apply_capabilities(caps)
+        self._apply_ancs_status(ancs_status)
         self._tray.set_connected(True)
         self._load_conversations()
+        QTimer.singleShot(500, self._prefetch_recent_threads)
+        self._refresh_adapter_unavailable_banner()
+        self._refresh_adapter_mismatch_banner()
 
     def _on_daemon_disconnected(self) -> None:
         self._connected_device = ""
@@ -1021,17 +1122,22 @@ class MainWindow(QMainWindow):
         self._self_echo_guard.clear()
         self._sent_cache.clear()
         self._failed_sends.clear()
+        self._pending_sends.clear()
         self._title_bar.set_disconnected()
         self._banner_a.set_reason(
             "OUT_OF_RANGE" if self._had_connection_this_session else "NEUTRAL"
         )
         self._banner_a.show()
         self._banner_b.hide()
+        self._ancs_status = "disabled"
         self._banner_ancs_repair.hide()
         self._banner_c.hide()
         self._banner_contacts_empty.hide()
         self._title_bar.ancs_status_dot.hide()
         self._compose.set_compose_enabled(False, "not connected")
+        self._conv_list.set_compose_new_enabled(
+            False, "Connect to your iPhone to start a new conversation"
+        )
         self._tray.set_connected(False)
         self._sync_compose_new_state()
 
@@ -1055,12 +1161,23 @@ class MainWindow(QMainWindow):
         status = self._dbus_client.get_status()
         if status:
             caps = status.get("capabilities") or {}
+            ancs_status = str(status.get("ancs_status", self._ancs_status))
         else:
             caps = {"messages": True, "contacts": True, "ancs": True}
             caps[feature] = available
+            ancs_status = self._ancs_status
         self._apply_capabilities(caps)
+        self._apply_ancs_status(ancs_status)
         if feature == "contacts" and available:
             self._load_conversations()
+
+    def _on_ancs_status_changed(self, ancs_status: str) -> None:
+        """Handle ANCSStatusChanged signal — update banners/dot without full re-fetch."""
+        self._apply_ancs_status(ancs_status)
+
+    def _on_ancs_heal_requested(self) -> None:
+        """StateCBanner Reconnect button — request ANCS heal from daemon."""
+        self._dbus_client.request_ancs_heal()
 
     def _on_message_received(self, message: dict) -> None:
         self._notifier.dispatch(message)
@@ -1220,73 +1337,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(prompt)
 
         note_edit = QTextEdit()
-        note_edit.setPlaceholderText("e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'")
+        note_edit.setPlaceholderText(
+            "e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'"
+        )
         note_edit.setFixedHeight(80)
         note_edit.setStyleSheet(
             "QTextEdit { background: #27272a; border: 1px solid #3f3f46;"
             " border-radius: 4px; color: #f4f4f5; padding: 4px; }"
         )
-        layout.addWidget(note_edit)
-
-        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btn_box.button(QDialogButtonBox.Ok).setText("Submit Report")
-        btn_box.accepted.connect(dlg.accept)
-        btn_box.rejected.connect(dlg.reject)
-        layout.addWidget(btn_box)
-
-        if dlg.exec() != QDialog.Accepted:
-            return
-
-        note = note_edit.toPlainText().strip()
-        if not note:
-            return
-
-        app_state = {
-            "current_phone": self._current_phone,
-            "connected_device": self._connected_device,
-            "messages_ok": self._messages_ok,
-            "pending_sends": len(self._pending_sends),
-            "conversations_loaded": len(self._conversations_by_id),
-            "trace_enabled": _trace._ENABLED,
-            "trace_cid": _trace.current_cid(),
-        }
-        report_path = _write_bug_report(note, app_state, _trace.recent_events(100))
-        _trace.emit("bug_report_filed", path=str(report_path), note_len=len(note))
-
-        QMessageBox.information(
-            self,
-            "Bug Report Saved",
-            f"Report saved to:\n{report_path}\n\nThank you — hand the path to the mayor.",
-        )
-
-    def _open_pairing_wizard(self) -> None:
-        from tincan_gui.pairing_wizard import PairingWizard
-        from tincand.pairing import PairingOrchestrator
-        orch = PairingOrchestrator(on_state_change=lambda state, reason=None: None)
-        wizard = PairingWizard(orchestrator=orch, parent=self)
-        wizard.exec()
-
-    def _on_file_bug(self) -> None:
-        """Show the File-a-Bug dialog and write a local structured report."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("File a Bug Report")
-        dlg.setMinimumWidth(440)
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
-
-        prompt = QLabel("Describe what looks wrong:")
-        prompt_font = QFont()
-        prompt_font.setPointSize(12)
-        prompt.setFont(prompt_font)
-        layout.addWidget(prompt)
-
-        note_edit = QTextEdit()
-        note_edit.setPlaceholderText(
-            "e.g. 'sent message shows 3 bubbles instead of 1 (~14:32)'"
-        )
-        note_edit.setFixedHeight(80)
         layout.addWidget(note_edit)
 
         btn_box = QDialogButtonBox(
@@ -1321,6 +1379,13 @@ class MainWindow(QMainWindow):
             "Bug Report Saved",
             f"Report saved to:\n{report_path}\n\nHand the path to the mayor.",
         )
+
+    def _open_pairing_wizard(self) -> None:
+        from tincan_gui.pairing_wizard import PairingWizard
+        from tincand.pairing import PairingOrchestrator
+        orch = PairingOrchestrator(on_state_change=lambda state, reason=None: None)
+        wizard = PairingWizard(orchestrator=orch, parent=self)
+        wizard.exec()
 
     def _on_open_notif_center(self) -> None:
         from tincan_gui.notification_center import NotificationCenterDialog
@@ -1627,6 +1692,9 @@ class MainWindow(QMainWindow):
 
     def _exit_call(self) -> None:
         """Remove pages 1-3 and restore ComposePanel (page 0)."""
+        if self._incall_dialog is not None:
+            self._incall_dialog.close()
+            self._incall_dialog = None
         self._compose_stack.setCurrentIndex(self._PAGE_COMPOSE)
         for attr in ("_dtmf_page", "_audio_err_panel", "_incall_panel"):
             w = getattr(self, attr)
@@ -1738,6 +1806,11 @@ class MainWindow(QMainWindow):
         if conversations and not self._current_phone:
             first_id = conversations[0].id
             QTimer.singleShot(0, lambda: self._conv_list.select_conversation(first_id))
+
+    def _prefetch_recent_threads(self) -> None:
+        """Eagerly load messages for the first 5 conversations to seed the cache."""
+        for conv in list(self._conversations_by_id.values())[:5]:
+            self._dbus_client.get_messages_async(conv.id)
 
     def _cache_msg_to_data(self, m: dict) -> MessageData:
         direction = m.get("direction", "inbound")

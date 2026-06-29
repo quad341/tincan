@@ -1,16 +1,18 @@
 """Tests: ANCS capability — daemon contract and GUI cold-start path.
 Bead: tincan-4au  (parent: tincan-okm)
+Updated: tincan-nbjrp (honest state model — ancs_status string)
 
 Coverage:
   - Daemon GetStatus() always returns ancs key: False before connect,
     True after set_capability('ancs', True), False after set_capability('ancs', False).
+  - Daemon GetStatus() returns ancs_status string reflecting ANCS state machine.
+  - set_ancs_status() emits ANCSStatusChanged and keeps legacy booleans in sync.
   - set_capability rejects invalid feature names.
-  - GUI cold-start: _apply_capabilities called on startup via _sync_daemon_state;
-    State C banner state matches GetStatus().capabilities.ancs.
-  - GUI runtime: _on_capability_changed('ancs', False) re-fetches GetStatus() then
-    calls _apply_capabilities with the full dict.
-  - GUI: State C banner shown/hidden correctly per ancs value.
-  - GUI: status chip shows 'limited' text when ANCS false and device is connected.
+  - GUI cold-start: _sync_daemon_state applies ancs_status from GetStatus();
+    State C banner shows only during HEALING, not during armed/disabled.
+  - GUI runtime: _on_ancs_status_changed updates banners without full re-fetch.
+  - GUI: State C banner shown only when ancs_status="healing".
+  - GUI: status chip shows 'limited' text when messages=False (not when ANCS missing).
   - GUI: no regression on State A (disconnected) and State B (messages=False) transitions.
 """
 from __future__ import annotations
@@ -38,6 +40,7 @@ def _make_service():
     svc.Connected = MagicMock()
     svc.Disconnected = MagicMock()
     svc.CapabilityChanged = MagicMock()
+    svc.ANCSStatusChanged = MagicMock()
     svc.MessageReceived = MagicMock()
     svc.MessageSent = MagicMock()
     svc.ConversationUpdated = MagicMock()
@@ -73,6 +76,47 @@ class TestAncsInGetStatus:
         svc = _make_service()
         svc.set_capability("ancs", True)
         assert bool(svc.GetStatus()["capabilities"]["messages"]) is False
+
+
+# ---------------------------------------------------------------------------
+# §1b Daemon: set_ancs_status — string state, signal, and legacy sync
+# ---------------------------------------------------------------------------
+
+class TestSetAncsStatus:
+    """set_ancs_status() emits ANCSStatusChanged and keeps legacy booleans in sync."""
+
+    def test_status_disabled_by_default(self):
+        svc = _make_service()
+        assert str(svc.GetStatus()["ancs_status"]) == "disabled"
+
+    def test_set_armed_emits_signal(self):
+        svc = _make_service()
+        svc.set_ancs_status("armed")
+        svc.ANCSStatusChanged.assert_called_once_with("armed")
+
+    def test_set_active_syncs_legacy_true(self):
+        svc = _make_service()
+        svc.set_ancs_status("active")
+        assert bool(svc._capabilities["ancs"]) is True
+        assert bool(svc._capabilities["ancs_needs_repair"]) is False
+
+    def test_set_fallback_syncs_legacy_needs_repair(self):
+        svc = _make_service()
+        svc.set_ancs_status("fallback")
+        assert bool(svc._capabilities["ancs"]) is False
+        assert bool(svc._capabilities["ancs_needs_repair"]) is True
+
+    def test_set_healing_keeps_both_false(self):
+        svc = _make_service()
+        svc.set_ancs_status("healing")
+        assert bool(svc._capabilities["ancs"]) is False
+        assert bool(svc._capabilities["ancs_needs_repair"]) is False
+
+    def test_unknown_status_ignored(self):
+        svc = _make_service()
+        svc.set_ancs_status("bogus")
+        svc.ANCSStatusChanged.assert_not_called()
+        assert str(svc._ancs_status) == "disabled"
 
 
 # ---------------------------------------------------------------------------
@@ -129,16 +173,31 @@ class TestApplyCapabilitiesColdStart:
             window.show()
         assert not window._banner_c.isVisible()
 
-    def test_state_c_banner_shown_when_ancs_false_on_startup(self, qtbot):
+    def test_state_c_banner_shown_when_ancs_healing_on_startup(self, qtbot):
+        """State C banner only shows during HEALING, not during armed/disabled."""
         with patch.object(TincandClient, "get_status", return_value={
             "connected": True,
             "device_address": "AA:BB:CC:DD:EE:FF",
             "capabilities": {"messages": True, "contacts": True, "ancs": False},
+            "ancs_status": "healing",
         }):
             window = MainWindow()
             qtbot.addWidget(window)
             window.show()
         assert window._banner_c.isVisible()
+
+    def test_state_c_banner_hidden_when_ancs_armed_on_startup(self, qtbot):
+        """ARMED state (soliciting) must NOT show the State C banner."""
+        with patch.object(TincandClient, "get_status", return_value={
+            "connected": True,
+            "device_address": "AA:BB:CC:DD:EE:FF",
+            "capabilities": {"messages": True, "contacts": True, "ancs": False},
+            "ancs_status": "armed",
+        }):
+            window = MainWindow()
+            qtbot.addWidget(window)
+            window.show()
+        assert not window._banner_c.isVisible()
 
     def test_state_c_banner_not_shown_when_daemon_absent_on_startup(self, qtbot):
         # get_status returns {} → daemon absent → no capability check
@@ -171,13 +230,32 @@ class TestCapabilityChangedAncsRuntime:
 
         window._dbus_client.get_status.assert_called_once()
 
-    def test_capability_changed_ancs_false_shows_banner_c(self, qtbot):
+    def test_capability_changed_does_not_show_banner_c_when_ancs_status_absent(self, qtbot):
+        """CapabilityChanged alone cannot show StateCBanner — ancs_status="healing" is needed."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        # Daemon absent → fallback dict used with ancs=False
+        # Daemon absent → fallback dict used; ancs_status defaults to "disabled"
         window._on_capability_changed("ancs", False)
+        assert not window._banner_c.isVisible()
+
+    def test_ancs_status_changed_healing_shows_banner_c(self, qtbot):
+        """ANCSStatusChanged("healing") from daemon shows State C banner."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+        window._on_ancs_status_changed("healing")
         assert window._banner_c.isVisible()
+
+    def test_ancs_status_changed_active_hides_banner_c(self, qtbot):
+        """ANCSStatusChanged("active") hides State C banner."""
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+        window._banner_c.show()  # start visible
+
+        window._on_ancs_status_changed("active")
+        assert not window._banner_c.isVisible()
 
     def test_capability_changed_ancs_true_hides_banner_c(self, qtbot):
         window = MainWindow()
@@ -185,7 +263,7 @@ class TestCapabilityChangedAncsRuntime:
         window.show()
         window._banner_c.show()  # start visible
 
-        # Daemon absent → fallback dict used with ancs=True
+        # Daemon absent → fallback dict used; ancs_status defaults to current ("disabled")
         window._on_capability_changed("ancs", True)
         assert not window._banner_c.isVisible()
 
@@ -194,25 +272,46 @@ class TestCapabilityChangedAncsRuntime:
 # §5 GUI: State C banner and status chip
 # ---------------------------------------------------------------------------
 
-class TestApplyCapabilitiesStateCBanner:
-    """_apply_capabilities shows/hides State C banner per ancs value."""
+class TestApplyAncsStatusStateCBanner:
+    """_apply_ancs_status shows/hides State C banner per ancs_status string."""
 
-    def test_ancs_false_shows_banner_c(self, qtbot):
+    def test_healing_shows_banner_c(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
 
-        window._apply_capabilities({"messages": True, "contacts": True, "ancs": False})
+        window._apply_ancs_status("healing")
 
         assert window._banner_c.isVisible()
 
-    def test_ancs_true_hides_banner_c(self, qtbot):
+    def test_armed_hides_banner_c(self, qtbot):
+        """ARMED (soliciting, no link yet) must not show the banner — it is not HEALING."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
         window._banner_c.show()
 
-        window._apply_capabilities({"messages": True, "contacts": True, "ancs": True})
+        window._apply_ancs_status("armed")
+
+        assert not window._banner_c.isVisible()
+
+    def test_active_hides_banner_c(self, qtbot):
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+        window._banner_c.show()
+
+        window._apply_ancs_status("active")
+
+        assert not window._banner_c.isVisible()
+
+    def test_disabled_hides_banner_c(self, qtbot):
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.show()
+        window._banner_c.show()
+
+        window._apply_ancs_status("disabled")
 
         assert not window._banner_c.isVisible()
 
@@ -296,12 +395,14 @@ class TestNoRegressionStateAB:
         assert window._banner_b.isVisible()
         assert not window._banner_c.isVisible()  # ancs=True → C hidden
 
-    def test_messages_true_ancs_false_shows_only_banner_c(self, qtbot):
+    def test_messages_true_ancs_healing_shows_only_banner_c(self, qtbot):
+        """When messages=True and ANCS is healing, only banner_c is visible."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
 
         window._apply_capabilities({"messages": True, "contacts": True, "ancs": False})
+        window._apply_ancs_status("healing")
 
         assert not window._banner_b.isVisible()
         assert window._banner_c.isVisible()

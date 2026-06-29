@@ -19,7 +19,8 @@ Coverage (acceptance criteria from tincan-iplg1, tincan-tqsre):
   §9  long-unbroken-wrap     — 200-char unbroken body wraps instead of clipping
   §10 cache-immediate-select — cache shown instantly on conversation select (tincan-tqsre)
   §11 cache-key-mismatch     — conv_id-written messages found via current_phone read (tincan-tqsre)
-  §12 outbound-body-upgrade  — full cached body shown for truncated MAP echo (tincan-ubsu5)
+  §12 outbound-body-upgrade  — full cached body shown when daemon MAP echo is truncated (tincan-ubsu5)
+  §13 async-message-load    — render, stale guard, cache key from conv_id (tincan-bmstd)
 """
 from __future__ import annotations
 
@@ -698,4 +699,89 @@ class TestOutboundBodyUpgrade:
         assert bubbles[0]._data.body == full_body, (
             f"In-session sent cache must upgrade truncated daemon echo — "
             f"got '{bubbles[0]._data.body}'"
+        )
+
+
+# ---------------------------------------------------------------------------
+# §13  async-message-load — _on_messages_loaded: render, stale guard, cache key
+# ---------------------------------------------------------------------------
+
+class TestAsyncMessageLoad:
+    """Integration tests for the async GetMessages flow (tincan-bmstd).
+
+    Drives messages_loaded.emit() directly to simulate the QDBusPendingCallWatcher
+    reply without a live D-Bus connection.
+    """
+
+    def test_async_load_renders_messages_for_active_conv(self, qtbot, tmp_path):
+        """messages_loaded for the active conv renders the messages in the thread."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        phone = "+15550001"
+        raw_msgs = [
+            {"direction": "inbound", "body": "Async hello", "from": phone,
+             "timestamp": "20260628T100000", "sort_key": "20260628T100000"},
+        ]
+
+        win._pending_load_conv = phone
+        with patch.object(win._dbus_client, "get_messages_async"):
+            win._dbus_client.messages_loaded.emit(phone, raw_msgs)
+
+        bubbles = _bubble_widgets(win)
+        bodies = [b._data.body for b in bubbles]
+        assert "Async hello" in bodies, (
+            f"async reply must render messages for the active conv — bodies: {bodies}"
+        )
+
+    def test_stale_reply_does_not_overwrite_active_thread(self, qtbot, tmp_path):
+        """A messages_loaded reply for a switched-away conv must not overwrite the thread."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        phone_active = "+15550001"
+        phone_stale = "+15550002"
+        win._conversations_by_id[phone_stale] = ConversationData(
+            id=phone_stale, name=phone_stale, phone=phone_stale,
+            preview="", timestamp="", preview_direction="inbound",
+        )
+
+        from tincan_gui.thread_view import BubbleType, MessageData
+        active_msgs = [MessageData(BubbleType.INBOUND, "Active msg", phone_active, "",
+                                   sort_key="20260628T100000")]
+        win._thread_view.load_thread(phone_active, phone_active, active_msgs, "SMS")
+
+        win._pending_load_conv = phone_active
+        stale_reply = [{"direction": "inbound", "body": "Stale msg", "from": phone_stale,
+                        "timestamp": "20260628T100001", "sort_key": "20260628T100001"}]
+        with patch.object(win._dbus_client, "get_messages_async"):
+            win._dbus_client.messages_loaded.emit(phone_stale, stale_reply)
+
+        bubbles = _bubble_widgets(win)
+        bodies = [b._data.body for b in bubbles]
+        assert "Active msg" in bodies, "active thread must be preserved after stale reply"
+        assert "Stale msg" not in bodies, "stale reply must not overwrite the active thread"
+
+    def test_cache_key_resolves_from_conv_id_not_current_phone(self, qtbot, tmp_path):
+        """Prefetch replies must seed the cache under the conv's own phone, not _current_phone."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        phone_active = "+15550001"
+        phone_prefetch = "+15550002"
+        win._conversations_by_id[phone_prefetch] = ConversationData(
+            id=phone_prefetch, name=phone_prefetch, phone=phone_prefetch,
+            preview="", timestamp="", preview_direction="inbound",
+        )
+
+        prefetch_msgs = [
+            {"direction": "inbound", "body": "Prefetched B", "from": phone_prefetch,
+             "timestamp": "20260628T100000", "sort_key": "20260628T100000"},
+        ]
+        # _pending_load_conv is A (active); B's reply is a prefetch (stale for render).
+        win._pending_load_conv = phone_active
+        with patch.object(win._dbus_client, "get_messages_async"):
+            win._dbus_client.messages_loaded.emit(phone_prefetch, prefetch_msgs)
+
+        cached_b = win._msg_cache.get_messages(phone_prefetch)
+        cached_a = win._msg_cache.get_messages(phone_active)
+        assert any(m.get("body") == "Prefetched B" for m in cached_b), (
+            f"prefetch reply must be cached under {phone_prefetch} — got: {cached_b}"
+        )
+        assert not any(m.get("body") == "Prefetched B" for m in cached_a), (
+            "prefetch reply must NOT bleed into the active conv's cache bucket"
         )

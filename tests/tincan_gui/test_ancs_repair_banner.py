@@ -1,10 +1,11 @@
 """Tests: ANCSRepairBanner widget and ancs_needs_repair integration in MainWindow.
 Bead: tincan-5mze.4
+Updated: tincan-nbjrp (honest state model — ancs_status string)
 
 Coverage:
   §1  ANCSRepairBanner smoke tests — instantiation, structure, accessible name
-  §2  _apply_capabilities(ancs_needs_repair=True) shows repair banner, hides StateC
-  §3  _apply_capabilities(ancs_needs_repair=False) hides repair banner, restores StateC
+  §2  _apply_ancs_status("fallback") shows repair banner, hides StateC
+  §3  _apply_ancs_status("armed"/"active") hides repair banner; StateC only during HEALING
   §4  reconnect_clicked signal fires when Reconnect button is clicked
   §5  Notification dedup — _repair_notified rate-limits repeated FALLBACK notifications
 """
@@ -62,66 +63,69 @@ class TestANCSRepairBannerSmoke:
 
 
 # ---------------------------------------------------------------------------
-# §2 _apply_capabilities: ancs_needs_repair=True shows banner, hides StateC
+# §2 _apply_ancs_status("fallback"): shows repair banner, hides StateC
 # ---------------------------------------------------------------------------
 
-class TestApplyCapabilitiesRepairBannerTrue:
-    """ancs_needs_repair=True shows ANCSRepairBanner and suppresses State C."""
+class TestApplyAncsStatusFallback:
+    """ancs_status="fallback" shows ANCSRepairBanner and suppresses State C."""
 
-    def test_ancs_needs_repair_true_shows_repair_banner(self, qtbot):
+    def test_fallback_shows_repair_banner(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
         with patch.object(window._notifier, "dispatch_repair"):
-            window._apply_capabilities({"ancs_needs_repair": True})
+            window._apply_ancs_status("fallback")
         assert window._banner_ancs_repair.isVisible()
 
-    def test_ancs_needs_repair_true_hides_banner_c_even_when_ancs_false(self, qtbot):
-        """ANCSRepairBanner takes precedence over State C banner."""
+    def test_fallback_hides_banner_c(self, qtbot):
+        """FALLBACK → ANCSRepairBanner; StateCBanner (HEALING) must be hidden."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
         window._banner_c.show()
         with patch.object(window._notifier, "dispatch_repair"):
-            window._apply_capabilities({"ancs": False, "ancs_needs_repair": True})
+            window._apply_ancs_status("fallback")
         assert not window._banner_c.isVisible()
 
-    def test_ancs_needs_repair_true_does_not_show_banner_c(self, qtbot):
+    def test_fallback_does_not_show_banner_c(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
         with patch.object(window._notifier, "dispatch_repair"):
-            window._apply_capabilities({"ancs": False, "ancs_needs_repair": True})
+            window._apply_ancs_status("fallback")
         assert not window._banner_c.isVisible()
 
 
 # ---------------------------------------------------------------------------
-# §3 _apply_capabilities: ancs_needs_repair=False hides banner, restores StateC
+# §3 _apply_ancs_status("armed"/"active"): hides repair banner; StateC only in HEALING
 # ---------------------------------------------------------------------------
 
-class TestApplyCapabilitiesRepairBannerFalse:
-    """ancs_needs_repair=False hides ANCSRepairBanner; StateC shows when ancs also False."""
+class TestApplyAncsStatusNonFallback:
+    """armed/active hides ANCSRepairBanner; StateCBanner only visible during HEALING."""
 
-    def test_ancs_needs_repair_false_hides_repair_banner(self, qtbot):
+    def test_armed_hides_repair_banner(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
         window._banner_ancs_repair.show()
-        window._apply_capabilities({"ancs_needs_repair": False})
+        window._apply_ancs_status("armed")
         assert not window._banner_ancs_repair.isVisible()
 
-    def test_ancs_needs_repair_false_shows_banner_c_when_ancs_false(self, qtbot):
+    def test_armed_hides_banner_c(self, qtbot):
+        """ARMED (soliciting) must not show State C — that's only for HEALING."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        window._apply_capabilities({"ancs": False, "ancs_needs_repair": False})
-        assert window._banner_c.isVisible()
+        window._banner_c.show()
+        window._apply_ancs_status("armed")
+        assert not window._banner_c.isVisible()
 
-    def test_ancs_needs_repair_false_hides_banner_c_when_ancs_true(self, qtbot):
+    def test_active_hides_banner_c(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
-        window._apply_capabilities({"ancs": True, "ancs_needs_repair": False})
+        window._banner_c.show()
+        window._apply_ancs_status("active")
         assert not window._banner_c.isVisible()
 
 
@@ -167,7 +171,7 @@ class TestRepairNotificationDedup:
         qtbot.addWidget(window)
         window.show()
         with patch.object(window._notifier, "dispatch_repair") as mock_dispatch:
-            window._apply_capabilities({"ancs_needs_repair": True})
+            window._apply_ancs_status("fallback")
         mock_dispatch.assert_called_once()
 
     def test_second_fallback_suppressed_when_repair_notified(self, qtbot):
@@ -175,21 +179,21 @@ class TestRepairNotificationDedup:
         qtbot.addWidget(window)
         window.show()
         with patch.object(window._notifier, "dispatch_repair") as mock_dispatch:
-            window._apply_capabilities({"ancs_needs_repair": True})  # first — fires
+            window._apply_ancs_status("fallback")  # first — fires
             mock_dispatch.reset_mock()
-            window._apply_capabilities({"ancs_needs_repair": True})  # second — suppressed
+            window._apply_ancs_status("fallback")  # second — suppressed
         mock_dispatch.assert_not_called()
 
     def test_notification_fires_again_after_wizard_success_resets_flag(self, qtbot):
-        """ancs_needs_repair=False resets _repair_notified; next FALLBACK fires again."""
+        """ancs_status="armed" resets _repair_notified; next FALLBACK fires again."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
         with patch.object(window._notifier, "dispatch_repair") as mock_dispatch:
-            window._apply_capabilities({"ancs_needs_repair": True})   # first FALLBACK
-            window._apply_capabilities({"ancs_needs_repair": False})  # wizard success → reset
+            window._apply_ancs_status("fallback")  # first FALLBACK
+            window._apply_ancs_status("armed")     # heal success → reset
             mock_dispatch.reset_mock()
-            window._apply_capabilities({"ancs_needs_repair": True})   # new FALLBACK — fires
+            window._apply_ancs_status("fallback")  # new FALLBACK — fires
         mock_dispatch.assert_called_once()
 
     def test_repair_notified_flag_set_on_first_fallback(self, qtbot):
@@ -198,15 +202,15 @@ class TestRepairNotificationDedup:
         window.show()
         assert not window._repair_notified
         with patch.object(window._notifier, "dispatch_repair"):
-            window._apply_capabilities({"ancs_needs_repair": True})
+            window._apply_ancs_status("fallback")
         assert window._repair_notified
 
-    def test_repair_notified_flag_cleared_on_wizard_success(self, qtbot):
+    def test_repair_notified_flag_cleared_on_non_fallback(self, qtbot):
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()
         with patch.object(window._notifier, "dispatch_repair"):
-            window._apply_capabilities({"ancs_needs_repair": True})
+            window._apply_ancs_status("fallback")
         assert window._repair_notified
-        window._apply_capabilities({"ancs_needs_repair": False})
+        window._apply_ancs_status("armed")
         assert not window._repair_notified

@@ -280,6 +280,8 @@ class ANCSBackend(BackendInterface):
             path="/",
         )
         _log.info("ANCSBackend: started — listening for ANCS device connection")
+        if self._service is not None and hasattr(self._service, "set_ancs_status"):
+            self._service.set_ancs_status("armed")
 
         # Probe for devices already connected before start() was called
         # (daemon restart or phone auto-reconnect before daemon starts).
@@ -410,6 +412,8 @@ class ANCSBackend(BackendInterface):
 
         if self._service is not None:
             self._service.set_capability("ancs", False)
+            if hasattr(self._service, "set_ancs_status"):
+                self._service.set_ancs_status("disabled")
         self._bus = None
         self._control_point_proxy = None
         _log.info("ANCSBackend: stopped")
@@ -672,6 +676,8 @@ class ANCSBackend(BackendInterface):
         if (self._verify_notifying(self._notif_src_path) and
                 self._verify_notifying(self._data_src_path)):
             _log.info("ANCSBackend: Notifying=True on both chars — ACTIVE confirmed")
+            if self._service is not None and hasattr(self._service, "set_ancs_status"):
+                self._service.set_ancs_status("active")
             self._health_check_id = GLib.timeout_add(30_000, self._health_check)
             self._backlog_suppress = True
             self._backlog_timer_id = GLib.timeout_add(2_000, self._end_backlog_suppress)
@@ -704,6 +710,8 @@ class ANCSBackend(BackendInterface):
         """Enter HEALING state: clear capability, cancel health check, start heal timer."""
         if self._service is not None:
             self._service.set_capability("ancs", False)
+            if hasattr(self._service, "set_ancs_status"):
+                self._service.set_ancs_status("healing")
         if self._health_check_id is not None:
             GLib.source_remove(self._health_check_id)
             self._health_check_id = None
@@ -735,6 +743,8 @@ class ANCSBackend(BackendInterface):
             if self._service is not None:
                 self._service.set_capability("ancs_needs_repair", False)
                 self._service.set_capability("ancs", True)
+                if hasattr(self._service, "set_ancs_status"):
+                    self._service.set_ancs_status("active")
             self._health_check_id = GLib.timeout_add(30_000, self._health_check)
             return GLib.SOURCE_REMOVE
 
@@ -754,6 +764,8 @@ class ANCSBackend(BackendInterface):
         """Enter FALLBACK: all healing attempts exhausted, wizard intervention required."""
         if self._service is not None:
             self._service.set_capability("ancs_needs_repair", True)
+            if hasattr(self._service, "set_ancs_status"):
+                self._service.set_ancs_status("fallback")
         _log.warning(
             "ANCSBackend: FALLBACK — LE ANCS link could not be re-armed after 3 attempts; "
             "wizard tap-to-reconnect required",

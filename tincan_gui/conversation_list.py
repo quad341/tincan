@@ -495,11 +495,11 @@ class ConversationListWidget(QWidget):
         self._compose_btn = QToolButton()
         self._compose_btn.setText("+")
         self._compose_btn.setFixedSize(28, 28)
-        self._compose_btn.setToolTip("New conversation")
         self._compose_btn.setAccessibleName("New conversation")
         self._compose_btn.setStyleSheet(_btn_style)
         self._compose_btn.clicked.connect(self.compose_new_requested.emit)
         header_layout.addWidget(self._compose_btn)
+        self.set_compose_new_enabled(False)
 
         layout.addWidget(header)
 
@@ -736,6 +736,15 @@ class ConversationListWidget(QWidget):
         """Disable/re-enable the refresh button and show ↻/⌛ text."""
         self._refresh_btn.setEnabled(not loading)
         self._refresh_btn.setText("⌛" if loading else "↻")
+
+    def set_compose_new_enabled(self, enabled: bool, tooltip: str = "") -> None:
+        self._compose_btn.setEnabled(enabled)
+        if enabled:
+            self._compose_btn.setToolTip("New conversation")
+        else:
+            self._compose_btn.setToolTip(
+                tooltip or "Connect to your iPhone to start a new conversation"
+            )
 
     def set_conversation_photo(self, conv_id: str, photo: bytes) -> None:
         """Route a contact photo to the matching ConversationItem."""

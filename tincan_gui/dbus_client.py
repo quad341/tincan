@@ -173,6 +173,7 @@ class TincandClient(QObject):
     connected = Signal(str)           # device_address
     disconnected = Signal()
     capability_changed = Signal(str, bool)  # feature, available
+    ancs_status_changed = Signal(str)       # "armed"|"healing"|"active"|"fallback"|"disabled"
     app_notification_received = Signal(dict)  # AppNotificationReceived a{sv} → dict
 
     # Messages interface
@@ -184,6 +185,9 @@ class TincandClient(QObject):
     # Async send outcome signals (to, body, message_id) / (to, body)
     message_send_accepted = Signal(str, str, str)
     message_send_failed = Signal(str, str)
+
+    # Async GetMessages result: (conv_id, messages)
+    messages_loaded = Signal(str, list)
 
     # Calls interface (HFP) — signals from im.tincan.Calls (tincan-xohrx pending)
     call_incoming = Signal(str, str)   # (caller_name, caller_number)
@@ -217,6 +221,8 @@ class TincandClient(QObject):
                       self, "1_on_disconnected()"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_DAEMON, "CapabilityChanged",
                       self, "1_on_capability_changed(QString,bool)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_DAEMON, "ANCSStatusChanged",
+                      self, "1_on_ancs_status_changed(QString)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_DAEMON, "AppNotificationReceived",
                       self, "1_on_app_notification_received(QVariantMap)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, "MessageReceived",
@@ -250,7 +256,7 @@ class TincandClient(QObject):
         if not all(_ok):
             _log.warning("tincan D-Bus: some signal subscriptions failed: %s", _ok)
         else:
-            _log.debug("tincan D-Bus: all 17 signal subscriptions registered")
+            _log.debug("tincan D-Bus: all 18 signal subscriptions registered")
 
     # ------------------------------------------------------------------
     # D-Bus signal → Qt signal bridges
@@ -270,6 +276,11 @@ class TincandClient(QObject):
     def _on_capability_changed(self, feature: str, available: bool) -> None:
         _log.debug("tincand: CapabilityChanged(%s, %s)", feature, available)
         self.capability_changed.emit(str(feature), bool(available))
+
+    @Slot(str)
+    def _on_ancs_status_changed(self, status: str) -> None:
+        _log.debug("tincand: ANCSStatusChanged(%s)", status)
+        self.ancs_status_changed.emit(str(status))
 
     @Slot("QVariantMap")
     def _on_app_notification_received(self, payload) -> None:
@@ -491,6 +502,41 @@ class TincandClient(QObject):
         _trace.emit("dbus_in", method="GetMessages", conv_id=conv_id, count=len(msgs))
         return msgs
 
+    def get_messages_async(self, conv_id: str) -> None:
+        """Call GetMessages asynchronously; emits messages_loaded(conv_id, msgs) on reply."""
+        if not self._bus.isConnected():
+            self.messages_loaded.emit(conv_id, [])
+            return
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
+        if not iface.isValid():
+            self.messages_loaded.emit(conv_id, [])
+            return
+        pending = iface.asyncCallWithArgumentList("GetMessages", [str(conv_id)])
+        watcher = QDBusPendingCallWatcher(pending, self)
+        watcher.finished.connect(lambda w: self._on_get_messages_reply(w, conv_id))
+
+    def _on_get_messages_reply(
+        self, watcher: QDBusPendingCallWatcher, conv_id: str
+    ) -> None:
+        raw = watcher.reply()
+        watcher.deleteLater()
+        if isinstance(raw, QDBusMessage):
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.debug("GetMessages async failed: %s", raw.errorMessage())
+                self.messages_loaded.emit(conv_id, [])
+                return
+            args = raw.arguments()
+            msgs = _demarshal_list_of_maps(args[0] if args else [])
+        else:
+            reply = _wrap_reply(raw)
+            if not reply.isValid():
+                _log.debug("GetMessages async failed: %s", reply.error().message())
+                self.messages_loaded.emit(conv_id, [])
+                return
+            msgs = _demarshal_list_of_maps(reply.value())
+        _trace.emit("dbus_in", method="GetMessages(async)", conv_id=conv_id, count=len(msgs))
+        self.messages_loaded.emit(conv_id, msgs)
+
     def send_message(self, to: str, body: str) -> str:
         """Call SendMessage.  Returns the new message_id or '' on error."""
         if not self._bus.isConnected():
@@ -559,22 +605,20 @@ class TincandClient(QObject):
             iface.call("RefreshContacts")
 
     def mark_conversation_read(self, conv_id: str) -> None:
-        """Call MarkConversationRead on the daemon (fire-and-forget)."""
-        if not self._bus.isConnected():
-            return
-        result = self._dbus_call(_IFACE_MESSAGES, "MarkConversationRead", str(conv_id))
-        if result is None:
-            iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
-            if iface.isValid():
-                iface.call("MarkConversationRead", str(conv_id))
-
-    def fetch_contact_photo(self, conv_id: str) -> None:
-        """Call FetchContactPhoto on the daemon (fire-and-forget)."""
+        """Call MarkConversationRead on the daemon (fire-and-forget, non-blocking)."""
         if not self._bus.isConnected():
             return
         iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
         if iface.isValid():
-            iface.call("FetchContactPhoto", str(conv_id))
+            iface.asyncCallWithArgumentList("MarkConversationRead", [str(conv_id)])
+
+    def fetch_contact_photo(self, conv_id: str) -> None:
+        """Call FetchContactPhoto on the daemon (fire-and-forget, non-blocking)."""
+        if not self._bus.isConnected():
+            return
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, self._bus)
+        if iface.isValid():
+            iface.asyncCallWithArgumentList("FetchContactPhoto", [str(conv_id)])
 
     def list_contacts(self) -> list[dict]:
         """Call GetContacts; returns [{phone, name}] or [] when daemon is absent."""
@@ -689,6 +733,7 @@ class TincandClient(QObject):
             if iface.isValid():
                 iface.call("SetAppFilter", str(app_id), str(action))
 
+    @Slot(str, "QByteArray")
     def _on_contact_photo_received(self, conv_id, photo) -> None:
         _log.debug("tincand: ContactPhotoReceived(%s)", conv_id)
         try:
@@ -773,7 +818,11 @@ class TincandClient(QObject):
         """Return the list of active calls as (call_id, number, state, direction) tuples."""
         try:
             result = self._dbus_call(_IFACE_CALLS, "GetCalls")
-            return [(str(c[0]), str(c[1]), str(c[2]), str(c[3])) for c in (result or [])]
+            return [
+                (str(c[0]), str(c[1]), str(c[2]), str(c[3]))
+                for c in (result or [])
+                if len(c) >= 4
+            ]
         except Exception as exc:
             _log.debug("get_calls() failed: %s", exc)
             return []

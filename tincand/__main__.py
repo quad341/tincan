@@ -53,17 +53,30 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-ancs",
         action="store_true",
+        default=None,
         dest="with_ancs",
-        help=(
-            "Run the ANCS backend concurrently with the primary backend "
-            "(MAP + ANCS in one process)."
-        ),
+        help="Deprecated — ANCS is now on by default with --backend map. No-op.",
+    )
+    parser.add_argument(
+        "--no-ancs",
+        action="store_true",
+        dest="no_ancs",
+        help="Disable the ANCS secondary backend (overrides the default-on setting).",
     )
     args = parser.parse_args()
     if args.mock:
         if args.backend and args.backend != "mock":
             parser.error("--mock cannot be combined with --backend ancs")
         args.backend = "mock"
+    # Remember whether the user actually passed --with-ancs before it is
+    # clobbered below; the deprecation hint should only fire on explicit use.
+    args.with_ancs_explicit = args.with_ancs is True
+    # ANCS is on by default with map; --no-ancs or ancs/enabled=false in tincan.ini opts out.
+    if not args.no_ancs:
+        from tincand.config import DaemonSettings  # noqa: PLC0415
+        if not DaemonSettings().value("ancs/enabled", True, type=bool):
+            args.no_ancs = True
+    args.with_ancs = not args.no_ancs
     return args
 
 
@@ -154,7 +167,8 @@ def _resolve_adapter_path(args: argparse.Namespace) -> tuple[str, str]:
     """Return (resolved_path, adapter_path_requested).
 
     Priority: --adapter flag → TINCAN_ADAPTER env var → DaemonSettings
-    bluetooth/adapter_path → auto-detect first powered adapter → /org/bluez/hci1.
+    bluetooth/adapter_path → auto-detect first powered adapter → first adapter
+    found (even if unpowered) → /org/bluez/hci0.
 
     adapter_path_requested is '' unless the QSettings adapter was absent from
     BlueZ; in that case it holds the requested path so GetStatus() can surface it.
@@ -188,16 +202,23 @@ def _resolve_adapter_path(args: argparse.Namespace) -> tuple[str, str]:
             _log.info("tincand: using QSettings adapter %s", qsettings_path)
             return str(qsettings_path), ""
 
+        first_adapter: str | None = None
         for path, ifaces in objects.items():
             if "org.bluez.Adapter1" not in ifaces:
                 continue
+            if first_adapter is None:
+                first_adapter = str(path)
             props = ifaces["org.bluez.Adapter1"]
             if props.get("Powered", False):
                 _log.info("tincand: auto-detected adapter %s", path)
                 return str(path), qsettings_path or ""
+
+        if first_adapter is not None:
+            _log.info("tincand: no powered adapter; using first found %s", first_adapter)
+            return first_adapter, qsettings_path or ""
     except Exception as exc:  # noqa: BLE001
-        _log.debug("tincand: adapter auto-detect failed (%s) — using /org/bluez/hci1", exc)
-    return "/org/bluez/hci1", qsettings_path or ""
+        _log.debug("tincand: adapter auto-detect failed (%s) — using /org/bluez/hci0", exc)
+    return "/org/bluez/hci0", qsettings_path or ""
 
 
 def _select_backend(
@@ -231,6 +252,89 @@ def _select_backend(
         return MapBackend(message_store=store)
     choices = ", ".join(sorted(_BACKENDS))
     sys.exit(f"Unknown backend {name!r}. Must be one of: {choices}")
+
+
+_MAX_AUTO_RECONNECTS = 5
+
+
+def _arm_device_watcher(backend: object, call_controller: object) -> None:
+    """Subscribe to oFono ModemAdded and trigger backend.connect() when the
+    target HFP device appears.
+
+    Handles the case where the phone was offline at daemon start (so
+    _device_addr resolved to "" and schedule_reconnect() is a no-op).
+    When a new HFP modem is announced, extract the MAC and connect.
+
+    Guards:
+    - Skip if the backend already has an active MAP session (is_connected).
+    - Skip if there are active calls (disruptive to reconnect mid-call).
+    - Bounded by _MAX_AUTO_RECONNECTS across the daemon lifetime.
+    """
+    try:
+        import dbus  # noqa: PLC0415
+
+        sys_bus = dbus.SystemBus()
+        manager_obj = sys_bus.get_object("org.ofono", "/")
+        manager = dbus.Interface(manager_obj, "org.ofono.Manager")
+    except Exception as exc:
+        _log.debug("_arm_device_watcher: oFono unavailable (%s) — not watching", exc)
+        return
+
+    reconnect_count: list[int] = [0]  # mutable counter captured by closure
+
+    def _on_modem_added(path: str, props: dict) -> None:
+        path = str(path)
+        props = dict(props)
+        if str(props.get("Type", "")) != "hfp":
+            return
+        mac = _mac_from_ofono_path(path)
+        if not mac:
+            return
+        if getattr(backend, "is_connected", False):
+            _log.debug("_arm_device_watcher: %s appeared but MAP session already up", mac)
+            return
+        if reconnect_count[0] >= _MAX_AUTO_RECONNECTS:
+            _log.info(
+                "_arm_device_watcher: %s appeared but auto-reconnect limit (%d) reached",
+                mac,
+                _MAX_AUTO_RECONNECTS,
+            )
+            return
+        _get_calls = getattr(call_controller, "get_calls", None)
+        active_calls = _get_calls() if _get_calls is not None else []
+        if active_calls:
+            _log.info(
+                "_arm_device_watcher: %s online but %d active call(s) — skipping reconnect",
+                mac,
+                len(active_calls),
+            )
+            return
+        reconnect_count[0] += 1
+        _log.info(
+            "_arm_device_watcher: HFP modem %s appeared — connecting backend "
+            "(attempt %d/%d)",
+            mac,
+            reconnect_count[0],
+            _MAX_AUTO_RECONNECTS,
+        )
+
+        def _connect_idle() -> bool:
+            try:
+                backend.connect(mac)
+            except Exception as exc2:
+                _log.warning(
+                    "_arm_device_watcher: connect(%s) failed: %s — retry via schedule_reconnect",
+                    mac,
+                    exc2,
+                )
+                if hasattr(backend, "schedule_reconnect"):
+                    backend.schedule_reconnect()
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(_connect_idle)
+
+    manager.connect_to_signal("ModemAdded", _on_modem_added)
+    _log.info("_arm_device_watcher: watching oFono for HFP modem appearance")
 
 
 def main() -> None:
@@ -290,11 +394,19 @@ def main() -> None:
         ancs = ANCSBackend(device_addr=_device_addr, adapter_path=adapter_path)
         backend = BackendManager(primary=backend, secondaries=[ancs])
         _log.info("tincand: multi-backend mode — MAP (primary) + ANCS (secondary)")
-    elif args.with_ancs:
-        _log.warning("--with-ancs is only supported with --backend map; ignoring")
+    elif args.with_ancs_explicit:
+        _log.warning(
+            "--with-ancs is deprecated and now a no-op; "
+            "ANCS is default-on with --backend map"
+        )
 
     backend.register_service(service)
     service.register_backend(backend)
+
+    # Watch for HFP modem appearance so the daemon can reconnect when the
+    # phone returns after being offline at startup (device_addr empty → normal
+    # retry loop is a no-op; this watcher fills the gap).
+    _arm_device_watcher(backend, call_controller)
 
     loop = GLib.MainLoop()
 

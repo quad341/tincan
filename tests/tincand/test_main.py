@@ -1,5 +1,6 @@
-"""Tests: tincand.__main__ — _select_backend(), _mac_from_ofono_path(), _resolve_device_address().
-Bead: tincan-spa (§1–4), tincan-17bsu (§5–6)
+"""Tests: tincand.__main__ — _select_backend(), _mac_from_ofono_path(), _resolve_device_address(),
+_arm_device_watcher(), _on_modem_added().
+Bead: tincan-spa (§1–4), tincan-17bsu (§5–6), tincan-i2rrp (§7)
 
 Coverage:
   §1 _select_backend() — --backend flag selects correct backend class
@@ -9,6 +10,7 @@ Coverage:
   §5 _mac_from_ofono_path() — extracts MAC from oFono modem path (3 cases)
   §6 _resolve_device_address() — 5-branch priority chain (CLI, env, DaemonSettings, oFono, empty)
   §7 main() D-Bus mainloop install order (regression: oFono call control)
+  §8 _arm_device_watcher / _on_modem_added — oFono ModemAdded guards (12 cases)
 
 No hardware or real D-Bus required.
 Run with: python -m pytest tests/tincand/test_main.py -v
@@ -115,8 +117,8 @@ class TestMacFromOfonoPath:
 
     def test_valid_path_returns_mac(self):
         from tincand.__main__ import _mac_from_ofono_path
-        result = _mac_from_ofono_path("/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20")
-        assert result == "D0:6B:78:33:46:20"
+        mac = _mac_from_ofono_path("/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20")
+        assert mac == "D0:6B:78:33:46:20"
 
     def test_path_too_short_returns_empty(self):
         from tincand.__main__ import _mac_from_ofono_path
@@ -301,3 +303,203 @@ class TestMainDbusMainloopOrdering:
         assert order.index("mainloop") < order.index("systembus"), (
             f"SystemBus() created before DBusGMainLoop(set_as_default=True): {order}"
         )
+
+
+# ---------------------------------------------------------------------------
+# §8 _arm_device_watcher / _on_modem_added — oFono ModemAdded signal guards
+# (tincan-i2rrp)
+#
+# _on_modem_added is a closure defined inside _arm_device_watcher.  Tests
+# arm the watcher (which registers the ModemAdded handler on a mock D-Bus
+# manager), then exercise the captured handler directly to validate each guard.
+#
+# GLib.idle_add is patched to invoke its callback synchronously so backend
+# state is observable without a real main loop.
+# ---------------------------------------------------------------------------
+
+_HFP_PATH = "/hfp/org/bluez/hci0/dev_D0_6B_78_33_46_20"
+_HFP_PROPS = {"Type": "hfp"}
+_HFP_MAC = "D0:6B:78:33:46:20"
+
+
+def _arm_watcher(backend, call_controller, monkeypatch):
+    """Arm _arm_device_watcher with a mock dbus; return the captured handler."""
+    import tincand.__main__ as m
+    from tincand.__main__ import _arm_device_watcher
+
+    mock_manager = MagicMock()
+    mock_dbus = MagicMock()
+    mock_dbus.Interface.return_value = mock_manager
+
+    mock_glib = MagicMock()
+    mock_glib.idle_add.side_effect = lambda fn: fn()
+    monkeypatch.setattr(m, "GLib", mock_glib)
+
+    with patch.dict(sys.modules, {"dbus": mock_dbus}):
+        _arm_device_watcher(backend, call_controller)
+
+    return next(
+        (c[0][1] for c in mock_manager.connect_to_signal.call_args_list if c[0][0] == "ModemAdded"),
+        None,
+    )
+
+
+class TestArmDeviceWatcherSetup:
+    """_arm_device_watcher(): watcher registration behaviour (tincan-i2rrp)."""
+
+    def test_ofono_unavailable_returns_early(self, monkeypatch):
+        import tincand.__main__ as m
+        from tincand.__main__ import _arm_device_watcher
+
+        mock_dbus = MagicMock()
+        mock_dbus.SystemBus.side_effect = Exception("no dbus")
+        backend = MagicMock()
+        monkeypatch.setattr(m, "GLib", MagicMock())
+
+        with patch.dict(sys.modules, {"dbus": mock_dbus}):
+            _arm_device_watcher(backend, MagicMock())
+
+        backend.connect.assert_not_called()
+
+    def test_watcher_registers_modem_added_signal(self, monkeypatch):
+        from unittest.mock import ANY
+        import tincand.__main__ as m
+        from tincand.__main__ import _arm_device_watcher
+
+        mock_manager = MagicMock()
+        mock_dbus = MagicMock()
+        mock_dbus.Interface.return_value = mock_manager
+        monkeypatch.setattr(m, "GLib", MagicMock())
+
+        with patch.dict(sys.modules, {"dbus": mock_dbus}):
+            _arm_device_watcher(MagicMock(), MagicMock())
+
+        mock_manager.connect_to_signal.assert_called_once_with("ModemAdded", ANY)
+
+
+class TestOnModemAddedGuards:
+    """_on_modem_added(): guard conditions on each reconnect path (tincan-i2rrp)."""
+
+    def test_happy_path_hfp_modem_calls_connect(self, monkeypatch):
+        backend = MagicMock()
+        backend.is_connected = False
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = []
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+        assert handler is not None, "ModemAdded handler was not registered"
+
+        handler(_HFP_PATH, _HFP_PROPS)
+
+        backend.connect.assert_called_once_with(_HFP_MAC)
+
+    def test_non_hfp_type_skips_connect(self, monkeypatch):
+        backend = MagicMock()
+        backend.is_connected = False
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = []
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+        handler(_HFP_PATH, {"Type": "handsfree"})
+
+        backend.connect.assert_not_called()
+
+    def test_malformed_path_skips_connect(self, monkeypatch):
+        backend = MagicMock()
+        backend.is_connected = False
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = []
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+        handler("/hfp/org/bluez/hci0/dev_BAD", _HFP_PROPS)
+
+        backend.connect.assert_not_called()
+
+    def test_is_connected_guard_skips_connect(self, monkeypatch):
+        backend = MagicMock()
+        backend.is_connected = True
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = []
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+        handler(_HFP_PATH, _HFP_PROPS)
+
+        backend.connect.assert_not_called()
+
+    def test_reconnect_limit_exhausted_skips_connect(self, monkeypatch):
+        backend = MagicMock()
+        backend.is_connected = False
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = []
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+
+        for _ in range(5):
+            handler(_HFP_PATH, _HFP_PROPS)
+
+        assert backend.connect.call_count == 5
+
+        handler(_HFP_PATH, _HFP_PROPS)
+
+        assert backend.connect.call_count == 5, "connect() called after limit exhausted"
+
+    def test_active_call_guard_skips_connect(self, monkeypatch):
+        backend = MagicMock()
+        backend.is_connected = False
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = [MagicMock()]
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+        handler(_HFP_PATH, _HFP_PROPS)
+
+        backend.connect.assert_not_called()
+
+    def test_missing_get_calls_treated_as_no_active_calls(self, monkeypatch):
+        """call_controller without get_calls attribute → treated as empty, connect proceeds."""
+        backend = MagicMock()
+        backend.is_connected = False
+        call_controller = MagicMock(spec=[])
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+        handler(_HFP_PATH, _HFP_PROPS)
+
+        backend.connect.assert_called_once_with(_HFP_MAC)
+
+    def test_reconnect_count_increments_and_connect_called_each_time(self, monkeypatch):
+        """Each successful modem appearance increments the counter and calls connect()."""
+        backend = MagicMock()
+        backend.is_connected = False
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = []
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+
+        for i in range(1, 4):
+            handler(_HFP_PATH, _HFP_PROPS)
+            assert backend.connect.call_count == i
+
+
+class TestOnModemAddedConnectErrors:
+    """_on_modem_added(): connect() error-handling paths (tincan-i2rrp)."""
+
+    def test_connect_failure_invokes_schedule_reconnect(self, monkeypatch):
+        backend = MagicMock()
+        backend.is_connected = False
+        backend.connect.side_effect = OSError("connection refused")
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = []
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+        handler(_HFP_PATH, _HFP_PROPS)
+
+        backend.schedule_reconnect.assert_called_once()
+
+    def test_connect_failure_without_schedule_reconnect_does_not_raise(self, monkeypatch):
+        backend = MagicMock(spec=["connect", "is_connected"])
+        backend.is_connected = False
+        backend.connect.side_effect = OSError("connection refused")
+        call_controller = MagicMock()
+        call_controller.get_calls.return_value = []
+
+        handler = _arm_watcher(backend, call_controller, monkeypatch)
+        handler(_HFP_PATH, _HFP_PROPS)  # must not raise

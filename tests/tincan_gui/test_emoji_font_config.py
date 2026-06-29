@@ -1,10 +1,10 @@
-"""Tests: toolbar button rendering + _NotifRow badge emoji font (tincan-3so6e / tincan-0oxkd).
+"""Tests: TitleBar toolbar button icons and _NotifRow badge (tincan-3so6e, tincan-0oxkd).
 
 Coverage:
-  §1 TitleBar — three toolbar buttons use QIcon.fromTheme + BMP Unicode fallback
-     - gear button has non-null icon OR non-empty fallback text
-     - bug button has non-null icon OR non-empty fallback text
-     - bell button has non-null icon OR non-empty fallback text
+  §1 TitleBar — three toolbar buttons (FR-C2: QIcon.fromTheme + BMP fallback)
+     - gear button has icon or BMP fallback text; does NOT use emoji font
+     - bug button has icon or BMP fallback text; does NOT use emoji font
+     - bell button has icon or BMP fallback text; does NOT use emoji font
   §2 _NotifRow badge
      - SMS kind badge font includes emoji families
      - app kind badge font includes emoji families
@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 _FAKE_EMOJI_FAMILIES = ["FakeEmoji", "NotoColorEmoji"]
+_BMP_FALLBACKS = {"⚙", "⚠", "☆"}
 
 
 @pytest.fixture
@@ -27,38 +28,42 @@ def _fake_emoji_families():
 
 
 # ---------------------------------------------------------------------------
-# §1 TitleBar button rendering (QIcon.fromTheme + BMP fallback, tincan-0oxkd)
+# §1 TitleBar toolbar button icons (FR-C2)
 # ---------------------------------------------------------------------------
 
-class TestTitleBarButtonRendering:
-    """TitleBar toolbar buttons display either a theme icon or a BMP Unicode fallback."""
+class TestTitleBarEmojiFontConfig:
+    """TitleBar toolbar buttons use QIcon.fromTheme with BMP fallback; no emoji font."""
+
+    def _assert_button_icon_or_bmp(self, btn, name: str) -> None:
+        has_icon = not btn.icon().isNull()
+        has_text = bool(btn.text())
+        assert has_icon or has_text, f"{name} button has neither icon nor text"
+        if has_text:
+            assert btn.text() in _BMP_FALLBACKS, (
+                f"{name} button text {btn.text()!r} is not a BMP fallback"
+            )
+            for fam in _FAKE_EMOJI_FAMILIES:
+                assert fam not in btn.font().families(), (
+                    f"{name} button uses emoji font family {fam!r} (should use default font)"
+                )
 
     def test_gear_button_has_icon_or_fallback_text(self, qtbot):
         from tincan_gui.main import TitleBar
         tb = TitleBar()
         qtbot.addWidget(tb)
-        btn = tb.gear_button
-        assert not btn.icon().isNull() or btn.text() != "", (
-            "gear button must show either a theme icon or fallback text '⚙'"
-        )
+        self._assert_button_icon_or_bmp(tb.gear_button, "gear")
 
-    def test_bug_button_has_icon_or_fallback_text(self, qtbot):
+    def test_bug_button_font_includes_emoji_families(self, qtbot, _fake_emoji_families):
         from tincan_gui.main import TitleBar
         tb = TitleBar()
         qtbot.addWidget(tb)
-        btn = tb.bug_button
-        assert not btn.icon().isNull() or btn.text() != "", (
-            "bug button must show either a theme icon or fallback text '⚠'"
-        )
+        self._assert_button_icon_or_bmp(tb.bug_button, "bug")
 
-    def test_bell_button_has_icon_or_fallback_text(self, qtbot):
+    def test_bell_button_font_includes_emoji_families(self, qtbot, _fake_emoji_families):
         from tincan_gui.main import TitleBar
         tb = TitleBar()
         qtbot.addWidget(tb)
-        btn = tb.bell_button
-        assert not btn.icon().isNull() or btn.text() != "", (
-            "bell button must show either a theme icon or fallback text '☆'"
-        )
+        self._assert_button_icon_or_bmp(tb.bell_button, "bell")
 
 
 # ---------------------------------------------------------------------------
