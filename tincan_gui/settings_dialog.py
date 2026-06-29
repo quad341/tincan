@@ -38,6 +38,9 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+_BT_COMBO_MIN_WIDTH = 360
+_BT_COMBO_MIN_CONTENTS = 42
+
 
 def _section_header(text: str) -> tuple[QLabel, QFrame]:
     """Return a (header QLabel, separator QFrame) pair styled per design spec."""
@@ -256,19 +259,19 @@ class _AdapterItemDelegate(QStyledItemDelegate):
             address = index.data(self._ADDR_ROLE) or ""
             r = option.rect
             x, w = r.x() + 8, r.width() - 16
+            _align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
             f1 = QFont()
             f1.setPointSize(12)
             painter.setFont(f1)
             painter.setPen(QColor("#f4f4f5"))
-            align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            painter.drawText(x, r.y() + 4, w, 22, align, alias)
+            painter.drawText(x, r.y() + 4, w, 22, _align, alias)
 
             f2 = QFont()
             f2.setPointSize(10)
             painter.setFont(f2)
             painter.setPen(QColor("#a1a1aa"))
-            painter.drawText(x, r.y() + 26, w, 20, align, address)
+            painter.drawText(x, r.y() + 26, w, 20, _align, address)
         finally:
             painter.restore()
 
@@ -387,6 +390,32 @@ class SettingsDialog(QDialog):
         )
         sublabel.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         layout.addWidget(sublabel)
+
+        layout.addSpacing(8)
+
+        self._ancs_cb = QCheckBox(self.tr("Enable push notifications (Bluetooth LE / ANCS)"))
+        self._ancs_cb.setAccessibleName(self.tr("Enable push notifications"))
+        self._ancs_cb.setFont(cb_font)
+        self._ancs_cb.setStyleSheet(
+            "color: #f4f4f5;" if self._dark else "color: #111827;"
+        )
+        ancs_enabled = bool_value(settings, "ancs/enabled", True)
+        self._ancs_cb.setChecked(ancs_enabled)
+        layout.addWidget(self._ancs_cb)
+
+        ancs_sublabel = QLabel(
+            "When enabled, tincan uses Bluetooth LE (ANCS) for real-time iPhone"
+            " notifications. Unchecking hides ANCS status in this app right away;"
+            " it takes effect on the daemon at its next start and does not stop a"
+            " running connection. Requires a re-pair after first enable."
+        )
+        ancs_sublabel.setWordWrap(True)
+        ancs_sublabel.setFont(sl_font)
+        ancs_sublabel.setStyleSheet(
+            "color: #a1a1aa;" if self._dark else "color: #6b7280;"
+        )
+        ancs_sublabel.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        layout.addWidget(ancs_sublabel)
 
         layout.addSpacing(20)
 
@@ -536,14 +565,16 @@ class SettingsDialog(QDialog):
                 Qt.TextInteractionFlag.NoTextInteraction
             )
             unavail_layout.addWidget(self._adapter_unavailable_label)
-            self._adapter_unavailable_frame.hide()
+            self._adapter_unavailable_frame.setAccessibleName("Bluetooth service unavailable")
+            self._adapter_unavailable_frame.show()
             bt_layout.addWidget(self._adapter_unavailable_frame)
 
-            # Adapter combo (populated async after show)
+            # Adapter combo (populated async after show; hidden until load completes)
             self._adapter_combo = QComboBox()
             self._adapter_combo.setPlaceholderText("Loading adapters…")
             self._adapter_combo.setEnabled(False)
             self._adapter_combo.setAccessibleName("Bluetooth Adapter")
+            self._adapter_combo.hide()
             bt_layout.addWidget(self._adapter_combo)
 
             # Capability badges (shown after load)
@@ -568,8 +599,22 @@ class SettingsDialog(QDialog):
             self._adapter_powered_off_badge.hide()
             bt_layout.addWidget(self._adapter_powered_off_badge)
 
+            self._adapter_mismatch_annotation = QLabel()
+            ann_font = QFont()
+            ann_font.setPointSize(10)
+            self._adapter_mismatch_annotation.setFont(ann_font)
+            self._adapter_mismatch_annotation.setWordWrap(True)
+            self._adapter_mismatch_annotation.setStyleSheet("QLabel { color: #fbbf24; }")
+            self._adapter_mismatch_annotation.setTextInteractionFlags(
+                Qt.TextInteractionFlag.NoTextInteraction
+            )
+            self._adapter_mismatch_annotation.setTextFormat(Qt.TextFormat.PlainText)
+            self._adapter_mismatch_annotation.hide()
+            bt_layout.addWidget(self._adapter_mismatch_annotation)
+
             # Apply rich two-line delegate (AC 4)
             self._adapter_combo.setItemDelegate(_AdapterItemDelegate(self._adapter_combo))
+            self._configure_bt_combo_width(self._adapter_combo)
 
             # Restart banner (shown after adapter selection change)
             self._adapter_restart_banner = _AdapterRestartBanner()
@@ -615,6 +660,7 @@ class SettingsDialog(QDialog):
             self._device_combo.setPlaceholderText("Loading devices…")
             self._device_combo.setEnabled(False)
             self._device_combo.setAccessibleName("Bluetooth Device")
+            self._configure_bt_combo_width(self._device_combo)
             bt_layout.addWidget(self._device_combo)
 
             self._device_combo.currentIndexChanged.connect(self._on_device_changed)
@@ -705,6 +751,7 @@ class SettingsDialog(QDialog):
 
         # Wire checkboxes → persist / daemon
         self._desktop_cb.toggled.connect(self._on_notif_toggled)
+        self._ancs_cb.toggled.connect(self._on_ancs_toggled)
         self._mirror_cb.toggled.connect(self._on_mirror_toggled)
         self._close_to_tray_cb.toggled.connect(self._on_close_to_tray_toggled)
 
@@ -739,7 +786,8 @@ class SettingsDialog(QDialog):
             action = self._filter_apps.get(app_id, "allow")
             row = _AppRowWidget(app_id, label_hint, action, self._client, self._dark)
             item = QListWidgetItem()
-            item.setSizeHint(QSize(1, row.sizeHint().height()))  # width=1: viewport width
+            # width=1: let view use viewport width
+            item.setSizeHint(QSize(1, row.sizeHint().height()))
             self._list_widget.addItem(item)
             self._list_widget.setItemWidget(item, row)
             self._row_widgets.append(row)
@@ -786,6 +834,11 @@ class SettingsDialog(QDialog):
         s.sync()  # flush immediately so the notifier's next read sees the change
         self.notifications_toggled.emit(checked)
 
+    def _on_ancs_toggled(self, checked: bool) -> None:
+        s = app_settings()
+        s.setValue("ancs/enabled", checked)
+        s.sync()
+
     @Slot(bool)
     def _on_mirror_toggled(self, checked: bool) -> None:
         self._opacity_effect.setOpacity(1.0 if checked else 0.5)
@@ -808,6 +861,28 @@ class SettingsDialog(QDialog):
     # Adapter picker: load, populate, update badges
     # ------------------------------------------------------------------
 
+    def _configure_bt_combo_width(self, combo: QComboBox) -> None:
+        combo.setMinimumWidth(_BT_COMBO_MIN_WIDTH)
+        combo.setMinimumContentsLength(_BT_COMBO_MIN_CONTENTS)
+        combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+
+    def _refresh_adapter_mismatch_annotation(self) -> None:
+        if not self._adapters_list or not self._client:
+            self._adapter_mismatch_annotation.hide()
+            return
+        try:
+            status = self._client.get_status() or {}
+            warning = str(status.get("adapter_warning", ""))
+        except Exception:
+            warning = ""
+        if warning:
+            self._adapter_mismatch_annotation.setText(warning)
+            self._adapter_mismatch_annotation.show()
+        else:
+            self._adapter_mismatch_annotation.hide()
+
     def _load_adapters_sync(self) -> None:
         if not self._client:
             return
@@ -826,9 +901,15 @@ class SettingsDialog(QDialog):
         if not adapters:
             self._adapter_combo.hide()
             self._adapter_badge_row.hide()
+            self._adapter_powered_off_badge.hide()
+            self._adapter_restart_banner.hide()
+            self._adapter_mismatch_annotation.hide()
             self._adapter_unavailable_frame.show()
             self._refresh_btn.hide()  # AC 13: no Refresh link in BlueZ-unavailable state
             self._bt_section.setEnabled(False)
+            if hasattr(self, "_device_combo"):
+                self._device_combo.setEnabled(False)
+                self._device_combo.setPlaceholderText("No adapters available")
             self._adapter_combo.blockSignals(False)
             return
 
@@ -884,6 +965,7 @@ class SettingsDialog(QDialog):
 
         selected = adapters[selected_idx] if adapters else None
         self._update_adapter_badges(selected)
+        self._refresh_adapter_mismatch_annotation()
 
     def _update_adapter_badges(self, adapter: dict | None) -> None:
         if adapter is None:
@@ -930,11 +1012,17 @@ class SettingsDialog(QDialog):
         self._adapter_restart_banner._restart_btn.setFocus()
         if index < len(self._adapters_list):
             self._update_adapter_badges(self._adapters_list[index])
+        self._refresh_adapter_mismatch_annotation()
 
     def _refresh_adapters(self) -> None:
         self._adapter_combo.setEnabled(False)
         self._adapter_combo.setPlaceholderText("Loading adapters…")
         if self._client:
+            if hasattr(self, "_loader_thread"):
+                try:
+                    self._loader_thread.loaded.disconnect(self._populate_adapter_combo)
+                except RuntimeError:
+                    pass
             self._loader_thread = _AdapterLoader(self._client)
             self._loader_thread.loaded.connect(self._populate_adapter_combo)
             self._loader_thread.start()
@@ -1009,6 +1097,7 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
         self._sigterm_daemon()
+        self._wait_for_daemon_name_free()
         spawn_daemon(backend, device)
         self.close()
 
@@ -1026,6 +1115,24 @@ class SettingsDialog(QDialog):
             os.kill(pid, _signal.SIGTERM)
         except Exception:
             pass
+
+    def _wait_for_daemon_name_free(self, timeout_ms: int = 1000) -> None:
+        """Poll until im.tincan.Daemon is off the session bus or timeout expires."""
+        import time as _time  # noqa: PLC0415
+        try:
+            import dbus as _dbus  # noqa: PLC0415
+            _bus = _dbus.SessionBus()
+            proxy = _dbus.Interface(
+                _bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus"),
+                "org.freedesktop.DBus",
+            )
+            deadline = _time.monotonic() + timeout_ms / 1000.0
+            while _time.monotonic() < deadline:
+                if "im.tincan.Daemon" not in proxy.ListNames():
+                    return
+                _time.sleep(0.05)
+        except Exception:
+            _time.sleep(0.1)
 
     # ------------------------------------------------------------------
     # Properties / helpers used by tests

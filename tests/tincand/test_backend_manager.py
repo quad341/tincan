@@ -69,3 +69,40 @@ class TestSendGroupMessage:
         mgr = BackendManager(primary)
         result = mgr.send_group_message(["+1", "+2"], "hello")
         assert result == "grp-handle-42"
+
+
+# ---------------------------------------------------------------------------
+# §3 connect resilience — a primary failure must not skip secondaries
+# ---------------------------------------------------------------------------
+
+class TestConnectResilience:
+    """A primary connect failure (e.g. MAP/OBEX 0x43 Forbidden on a fresh iOS
+    pairing) must still start the secondaries so ANCS can solicit — then the
+    primary failure is re-raised so the caller's retry path is unchanged."""
+
+    def test_secondary_connects_when_primary_raises(self):
+        primary = _mock_backend()
+        primary.connect.side_effect = RuntimeError("OBEX Connect failed with 0x43")
+        secondary = _mock_backend()
+        mgr = BackendManager(primary, secondaries=[secondary])
+        with pytest.raises(RuntimeError):
+            mgr.connect("AA:BB:CC:DD:EE:FF")
+        secondary.connect.assert_called_once_with("AA:BB:CC:DD:EE:FF")
+
+    def test_primary_exception_is_reraised(self):
+        primary = _mock_backend()
+        boom = RuntimeError("OBEX Connect failed with 0x43")
+        primary.connect.side_effect = boom
+        mgr = BackendManager(primary, secondaries=[_mock_backend()])
+        with pytest.raises(RuntimeError) as excinfo:
+            mgr.connect("AA:BB:CC:DD:EE:FF")
+        assert excinfo.value is boom
+
+    def test_all_secondaries_attempted_even_if_one_fails(self):
+        primary = _mock_backend()
+        failing = _mock_backend()
+        failing.connect.side_effect = RuntimeError("ancs boom")
+        healthy = _mock_backend()
+        mgr = BackendManager(primary, secondaries=[failing, healthy])
+        mgr.connect("AA:BB:CC:DD:EE:FF")  # primary ok, first secondary fails
+        healthy.connect.assert_called_once_with("AA:BB:CC:DD:EE:FF")

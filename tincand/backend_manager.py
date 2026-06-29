@@ -40,6 +40,10 @@ class BackendManager(BackendInterface):
     # BackendInterface
     # ------------------------------------------------------------------
 
+    @property
+    def is_connected(self) -> bool:
+        return getattr(self._primary, "is_connected", False)
+
     def register_service(self, service: object) -> None:
         self._service = service  # type: ignore[attr-defined]
         self._primary.register_service(service)
@@ -47,14 +51,34 @@ class BackendManager(BackendInterface):
             s.register_service(service)
 
     def connect(self, device_addr: str) -> None:
-        """Connect primary then each secondary in order."""
-        self._primary.connect(device_addr)
+        """Connect primary then each secondary in order.
+
+        A primary connect failure must NOT prevent secondaries from
+        connecting. On a fresh iOS pairing the MAP/OBEX connect can be
+        refused (0x43 Forbidden) while the device is otherwise reachable;
+        ANCS (a secondary) must still solicit so iOS can prompt for
+        notification access. So we attempt every secondary regardless of the
+        primary's outcome, then re-raise any primary failure so the caller's
+        existing retry path (MAP self-schedules a reconnect) is unchanged.
+        """
+        primary_exc: Exception | None = None
+        try:
+            self._primary.connect(device_addr)
+        except Exception as exc:  # noqa: BLE001
+            primary_exc = exc
+            _log.warning(
+                "BackendManager: primary %s connect failed (%s) — "
+                "starting secondaries anyway",
+                type(self._primary).__name__, exc,
+            )
         for s in self._secondaries:
             try:
                 s.connect(device_addr)
             except Exception as exc:
                 _log.warning("BackendManager: secondary %s connect failed: %s",
                              type(s).__name__, exc)
+        if primary_exc is not None:
+            raise primary_exc
 
     def disconnect(self) -> None:
         """Disconnect each secondary in reverse order, then primary."""
@@ -80,3 +104,9 @@ class BackendManager(BackendInterface):
 
     def schedule_reconnect(self) -> None:
         self._primary.schedule_reconnect()
+
+    def request_heal(self) -> None:
+        """Delegate ANCS heal request to any secondary that supports it."""
+        for s in self._secondaries:
+            if hasattr(s, "request_heal"):
+                s.request_heal()

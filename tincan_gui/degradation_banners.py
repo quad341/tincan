@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QCoreApplication, Signal
+from PySide6.QtCore import QCoreApplication, QTimer, Signal
 from PySide6.QtGui import QAccessible, QFont
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -207,8 +207,17 @@ class ANCSRepairBanner(QWidget):
         self._reconnect_btn.clicked.connect(self.reconnect_clicked)
         outer.addWidget(self._reconnect_btn)
 
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setSingleShot(True)
+        self._reconnect_timer.setInterval(10_000)
+        self._reconnect_timer.timeout.connect(lambda: self.set_reconnecting(False))
+
     def set_reconnecting(self, reconnecting: bool) -> None:
         """Switch button between idle and busy states."""
+        if reconnecting:
+            self._reconnect_timer.start()
+        else:
+            self._reconnect_timer.stop()
         self._reconnect_btn.setText(
             self.tr(self._BTN_BUSY if reconnecting else self._BTN_IDLE)
         )
@@ -224,9 +233,12 @@ class ANCSRepairBanner(QWidget):
 # ---------------------------------------------------------------------------
 
 class StateCBanner(QWidget):
-    """Thin ANCS-unavailable banner (h=32, lime). Design: tincan-s42 §2 State C."""
+    """Thin ANCS-healing banner (h=32, lime) — shown only during HEALING state.
 
-    refresh_clicked = Signal()
+    Design: tincan-s42 §2 State C.
+    """
+
+    heal_clicked = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -237,12 +249,12 @@ class StateCBanner(QWidget):
 
         # tincan-5en: accessible name uses plain-text form per spec §5
         msg = self.tr(
-            "ℹ Real-time push notifications unavailable"
+            "ℹ Real-time push notifications reconnecting"
             " · New messages appear after manual refresh."
             " · Send and conversation list still work."
         )
         accessible_name = self.tr(
-            "Real-time push notifications unavailable."
+            "Real-time push notifications reconnecting."
             " New messages appear after manual refresh."
             " Send and conversation list still work."
         )
@@ -258,15 +270,15 @@ class StateCBanner(QWidget):
         label.setStyleSheet("color: #365314;")
         layout.addWidget(label, stretch=1)
 
-        refresh_btn = QPushButton(self.tr("↻ Refresh"))
-        refresh_btn.setFixedWidth(80)
-        refresh_btn.setStyleSheet(
+        reconnect_btn = QPushButton(self.tr("↻ Reconnect"))
+        reconnect_btn.setFixedWidth(90)
+        reconnect_btn.setStyleSheet(
             "QPushButton { color: #365314; background: transparent; "
             "border: 1px solid #84cc16; border-radius: 4px; padding: 0 6px; }"
             "QPushButton:hover { background: #ecfccb; }"
         )
-        refresh_btn.clicked.connect(self.refresh_clicked)
-        layout.addWidget(refresh_btn)
+        reconnect_btn.clicked.connect(self.heal_clicked)
+        layout.addWidget(reconnect_btn)
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +404,7 @@ class AdapterUnavailableBanner(QFrame):
         primary_row.setSpacing(8)
 
         self._primary_label = QLabel()
+        self._primary_label.setTextFormat(Qt.TextFormat.PlainText)
         pf = QFont()
         pf.setPointSize(12)
         self._primary_label.setFont(pf)
@@ -458,6 +471,7 @@ class AdapterMismatchBanner(QFrame):
         self._label.setFont(lf)
         self._label.setStyleSheet("color: #7c4f00;")
         self._label.setWordWrap(True)
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self._label, stretch=1)
 
     def update_warning(self, text: str) -> None:

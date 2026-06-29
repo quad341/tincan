@@ -103,6 +103,9 @@ class TincanService(dbus.service.Object):
             "ancs_needs_repair": False,
             "call_setup_ready": False,
         }
+        # tincan-nbjrp: richer ANCS state ("disabled"|"armed"|"healing"|"active"|"fallback")
+        # kept separate from capabilities{} which has signature="sb" (bool values only).
+        self._ancs_status: str = "disabled"
         self._conversations: dict[str, Conversation] = {}
         self._messages: dict[str, list[dict]] = {}
         self._message_keys: set[tuple] = set()
@@ -203,6 +206,7 @@ class TincanService(dbus.service.Object):
                 "adapter_path_requested": dbus.String(self._adapter_path_requested),
                 "adapter_warning": dbus.String(self._adapter_warning),
                 "device_discovered": dbus.Boolean(self._device_discovered),
+                "ancs_status": dbus.String(self._ancs_status),
             },
             signature="sv",
         )
@@ -289,10 +293,37 @@ class TincanService(dbus.service.Object):
     def AppNotificationReceived(self, payload: dbus.Dictionary) -> None:  # noqa: N802
         pass
 
+    @dbus.service.signal(IFACE_DAEMON, signature="s")
+    def ANCSStatusChanged(self, status: str) -> None:  # noqa: N802
+        pass
+
     _KNOWN_CAPABILITIES = frozenset({
         "messages", "contacts", "contacts_empty", "ancs", "ancs_needs_repair",
         "call_setup_ready",
     })
+    _KNOWN_ANCS_STATUSES = frozenset({"disabled", "armed", "healing", "active", "fallback"})
+
+    def set_ancs_status(self, status: str) -> None:
+        """Update the ANCS state string and emit ANCSStatusChanged.
+
+        Also keeps the legacy ancs/ancs_needs_repair booleans in sync for
+        backwards compatibility with older GUI versions that don't read ancs_status.
+        """
+        if status not in self._KNOWN_ANCS_STATUSES:
+            _log.warning("set_ancs_status: unknown status %r — ignored", status)
+            return
+        self._ancs_status = status
+        self.ANCSStatusChanged(str(status))
+        # keep legacy booleans in sync
+        if status == "active":
+            self._capabilities["ancs"] = True
+            self._capabilities["ancs_needs_repair"] = False
+        elif status == "fallback":
+            self._capabilities["ancs"] = False
+            self._capabilities["ancs_needs_repair"] = True
+        elif status in ("healing", "armed", "disabled"):
+            self._capabilities["ancs"] = False
+            self._capabilities["ancs_needs_repair"] = False
 
     def set_capability(self, feature: str, available: bool) -> None:
         """Update a capability and emit CapabilityChanged.

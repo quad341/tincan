@@ -73,6 +73,7 @@ _GUI_SUBSCRIPTIONS: list[tuple[str, str, str, str]] = [
     (IFACE_DAEMON,   "Connected",               "_on_connected",               "QString"),
     (IFACE_DAEMON,   "Disconnected",             "_on_disconnected",            ""),
     (IFACE_DAEMON,   "CapabilityChanged",        "_on_capability_changed",      "QString,bool"),
+    (IFACE_DAEMON,   "ANCSStatusChanged",        "_on_ancs_status_changed",     "QString"),
     (IFACE_DAEMON,   "AppNotificationReceived",  "_on_app_notification_received", "QVariantMap"),
     (IFACE_MESSAGES, "MessageReceived",          "_on_message_received",        "QVariantMap"),
     (IFACE_MESSAGES, "MessageSent",             "_on_message_sent",            "QString"),
