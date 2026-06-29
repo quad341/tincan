@@ -47,6 +47,7 @@ from tincand.ancs_util import (
     parse_notification_source,
 )
 from tincand.backends.base import BackendInterface
+from tincand.pairing import FailureReason
 
 _log = logging.getLogger(__name__)
 
@@ -188,6 +189,7 @@ class ANCSBackend(BackendInterface):
         self._backlog_suppress: bool = False
         self._backlog_timer_id: int | None = None
         self._subscribe_pending: bool = False
+        self._adv_failure_reason: str | None = None
 
     # ------------------------------------------------------------------
     # BackendInterface
@@ -363,15 +365,35 @@ class ANCSBackend(BackendInterface):
         _log.info("ANCSBackend: SolicitUUIDs advertisement registered — soliciting ANCS")
 
     def _on_adv_error(self, exc) -> None:
+        exc_str = str(exc)
+        if "Invalid Parameters" in exc_str or "0x0d" in exc_str:
+            self._adv_failure_reason = FailureReason.ANCS_EXT_ADV_BUG
+            _log.warning(
+                "ANCSBackend: RegisterAdvertisement failed — BlueZ ext-adv length bug "
+                "(%s, adapter %s). Fix: patch BlueZ ≤ 5.86 or use a USB BT adapter "
+                "(RTL8761B, e.g. ASUS USB-BT500). "
+                "See docs/ancs-bluez-ext-adv-rootcause.md.",
+                exc, self._adapter_path,
+            )
+        elif "NotSupported" in exc_str:
+            self._adv_failure_reason = FailureReason.ANCS_EXPERIMENTAL_REQUIRED
+            _log.warning(
+                "ANCSBackend: RegisterAdvertisement failed — bluetoothd --experimental "
+                "required for SolicitUUIDs (%s, adapter %s). "
+                "Run bluetoothd with --experimental and restart bluetooth.",
+                exc, self._adapter_path,
+            )
+        else:
+            self._adv_failure_reason = FailureReason.ADVERTISING_FAILED
+            _log.warning(
+                "ANCSBackend: RegisterAdvertisement failed (%s). ANCS needs LE advertising; "
+                "this BT controller (%s) may not support it. Remedies: use a USB BT adapter "
+                "(RTL8761B, e.g. ASUS USB-BT500), or run bluetoothd --experimental and "
+                "restart bluetooth.",
+                exc, self._adapter_path,
+            )
         if self._service is not None:
             self._service.set_capability("ancs", False)
-        _log.warning(
-            "ANCSBackend: RegisterAdvertisement failed (%s). ANCS needs LE advertising; "
-            "this BT controller (%s) may not support it. Remedies: use a USB BT adapter "
-            "(RTL8761B, e.g. ASUS USB-BT500), or run bluetoothd --experimental and "
-            "restart bluetooth.",
-            exc, self._adapter_path,
-        )
 
     def stop(self) -> None:
         """Unregister advertisement + agent; clean up."""
