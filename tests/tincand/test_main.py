@@ -117,7 +117,8 @@ class TestMacFromOfonoPath:
 
     def test_valid_path_returns_mac(self):
         from tincand.__main__ import _mac_from_ofono_path
-        assert _mac_from_ofono_path("/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20") == "D0:6B:78:33:46:20"
+        mac = _mac_from_ofono_path("/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20")
+        assert mac == "D0:6B:78:33:46:20"
 
     def test_path_too_short_returns_empty(self):
         from tincand.__main__ import _mac_from_ofono_path

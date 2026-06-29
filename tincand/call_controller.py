@@ -356,6 +356,12 @@ class CallController:
             "PropertyChanged",
             lambda name, val, _cid=call_id: self._on_call_property_changed(_cid, name, val),
         )
+        old_sig = self._call_sigs.get(call_id)
+        if old_sig is not None:
+            try:
+                old_sig.remove()
+            except Exception:
+                pass
         self._call_sigs[call_id] = sig
 
         self._calls[call_id] = CallState(

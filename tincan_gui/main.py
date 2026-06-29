@@ -11,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QIcon, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -58,7 +58,7 @@ from tincan_gui.degradation_banners import (
 from tincan_gui.message_cache import MessageCache
 from tincan_gui.notifications import DesktopNotifier
 from tincan_gui.theme import is_dark_theme
-from tincan_gui.thread_view import BubbleType, MessageData, ThreadView, _emoji_font_families
+from tincan_gui.thread_view import BubbleType, MessageData, ThreadView
 from tincan_gui.tray import TrayIcon
 
 _ASSETS = Path(__file__).parent / "assets"
@@ -128,6 +128,14 @@ def _collapse_outbound_echoes(messages: list, window_s: int = 300) -> list:
     return kept
 
 
+def _first_valid_icon(*names: str) -> QIcon:
+    for name in names:
+        icon = QIcon.fromTheme(name)
+        if not icon.isNull():
+            return icon
+    return QIcon()
+
+
 class TitleBar(QWidget):
     """Title bar (h=48, forest teal): wordmark + gear + bug-report button + connection status."""
 
@@ -165,12 +173,7 @@ class TitleBar(QWidget):
         layout.addStretch()
 
         self._gear_btn = QToolButton()
-        self._gear_btn.setText("⚙")
         self._gear_btn.setFixedSize(32, 32)
-        _gear_font = QFont()
-        _gear_font.setFamilies(_emoji_font_families())
-        _gear_font.setPointSize(16)
-        self._gear_btn.setFont(_gear_font)
         self._gear_btn.setToolTip("Settings")
         self._gear_btn.setAccessibleName("Settings")
         self._gear_btn.setStyleSheet(
@@ -178,17 +181,18 @@ class TitleBar(QWidget):
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
+        _gear_icon = _first_valid_icon("configure", "preferences-system", "emblem-system")
+        if not _gear_icon.isNull():
+            self._gear_btn.setIcon(_gear_icon)
+            self._gear_btn.setIconSize(QSize(18, 18))
+        else:
+            self._gear_btn.setText("⚙")
         layout.addWidget(self._gear_btn)
 
         layout.addSpacing(4)
 
         self._bug_btn = QToolButton()
-        self._bug_btn.setText("🐞")
         self._bug_btn.setFixedSize(32, 32)
-        _emoji_btn_font = QFont()
-        _emoji_btn_font.setFamilies(_emoji_font_families())
-        _emoji_btn_font.setPointSize(13)
-        self._bug_btn.setFont(_emoji_btn_font)
         self._bug_btn.setToolTip("File a bug report")
         self._bug_btn.setAccessibleName("File a bug report")
         self._bug_btn.setStyleSheet(
@@ -196,14 +200,20 @@ class TitleBar(QWidget):
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
+        _bug_icon = _first_valid_icon(
+            "tools-report-bug", "dialog-warning", "emblem-important"
+        )
+        if not _bug_icon.isNull():
+            self._bug_btn.setIcon(_bug_icon)
+            self._bug_btn.setIconSize(QSize(18, 18))
+        else:
+            self._bug_btn.setText("⚠")
         layout.addWidget(self._bug_btn)
 
         layout.addSpacing(4)
 
         self._bell_btn = QToolButton()
-        self._bell_btn.setText("🔔")
         self._bell_btn.setFixedSize(32, 32)
-        self._bell_btn.setFont(_emoji_btn_font)
         self._bell_btn.setToolTip("Notification center")
         self._bell_btn.setAccessibleName("Notification center")
         self._bell_btn.setStyleSheet(
@@ -211,6 +221,16 @@ class TitleBar(QWidget):
             " background-color: #0f4c3a; }"
             " QToolButton:hover { background-color: #3f7061; border-radius: 4px; }"
         )
+        _bell_icon = _first_valid_icon(
+            "preferences-system-notifications",
+            "notification",
+            "preferences-desktop-notification",
+        )
+        if not _bell_icon.isNull():
+            self._bell_btn.setIcon(_bell_icon)
+            self._bell_btn.setIconSize(QSize(18, 18))
+        else:
+            self._bell_btn.setText("☆")
         layout.addWidget(self._bell_btn)
 
         layout.addSpacing(8)
@@ -711,6 +731,7 @@ class MainWindow(QMainWindow):
             self._connected_device = addr
             self._title_bar.set_connected(addr)
             self._banner_a.hide()
+            self._conv_list.set_compose_new_enabled(bool(addr))
             caps = status.get("capabilities") or {}
             self._apply_capabilities(caps)
             self._apply_ancs_status(str(status.get("ancs_status", "disabled")))
@@ -719,6 +740,9 @@ class MainWindow(QMainWindow):
         else:
             self._title_bar.set_disconnected()
             self._banner_a.show()
+            self._conv_list.set_compose_new_enabled(
+                False, "Connect to your iPhone to start a new conversation"
+            )
         self._refresh_adapter_unavailable_banner(status)
         self._refresh_adapter_mismatch_banner(status)
 
@@ -1059,7 +1083,8 @@ class MainWindow(QMainWindow):
             name = str(device_address)
             ancs_status = "armed"
 
-        # Persist device address so next startup reads config instead of needing --device (tincan-oxthc).
+        # Persist device address so next startup reads config
+        # instead of needing --device (tincan-oxthc).
         if device_address:
             cfg = load_daemon_config()
             if cfg.device != device_address:
@@ -1068,11 +1093,14 @@ class MainWindow(QMainWindow):
         self._connected_device = name
         self._title_bar.set_connected(name)
         self._banner_a.hide()
+        self._conv_list.set_compose_new_enabled(True)
         self._apply_capabilities(caps)
         self._apply_ancs_status(ancs_status)
         self._tray.set_connected(True)
         self._load_conversations()
         QTimer.singleShot(500, self._prefetch_recent_threads)
+        self._refresh_adapter_unavailable_banner()
+        self._refresh_adapter_mismatch_banner()
 
     def _on_daemon_disconnected(self) -> None:
         self._connected_device = ""
@@ -1091,6 +1119,9 @@ class MainWindow(QMainWindow):
         self._banner_contacts_empty.hide()
         self._title_bar.ancs_status_dot.hide()
         self._compose.set_compose_enabled(False, "not connected")
+        self._conv_list.set_compose_new_enabled(
+            False, "Connect to your iPhone to start a new conversation"
+        )
         self._tray.set_connected(False)
 
     def _on_reconnect_clicked(self) -> None:
