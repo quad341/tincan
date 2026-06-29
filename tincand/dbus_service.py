@@ -375,6 +375,37 @@ class TincanService(dbus.service.Object):
         """
         self._device_discovered = bool(discovered)
 
+    @dbus.service.method(IFACE_DAEMON, in_signature="a{sv}", out_signature="a{sv}")
+    def Preflight(self, options: dbus.Dictionary) -> dbus.Dictionary:
+        """Run system preflight checks for optional features.
+
+        options: a{sv} — currently supports calls_check(b).
+        When calls_check=True returns a{sv}:
+          ofono_available(b), wireplumber_ofono_backend(b),
+          selinux_hfp_module(v: b or s 'permissive'),
+          usb_autosuspend_disabled(b), adapter_vid_pid(s).
+        """
+        from tincand.setup_preflight import SetupPreflightChecker  # noqa: PLC0415
+
+        calls_check = bool(options.get("calls_check", False))
+        result: dict = {}
+        if calls_check:
+            raw = SetupPreflightChecker().check_calls(
+                adapter_path=self._adapter_path or "/org/bluez/hci0"
+            )
+            selinux = raw["selinux_hfp_module"]
+            result = {
+                "ofono_available": dbus.Boolean(raw["ofono_available"]),
+                "wireplumber_ofono_backend": dbus.Boolean(raw["wireplumber_ofono_backend"]),
+                "selinux_hfp_module": (
+                    dbus.String("permissive") if selinux == "permissive"
+                    else dbus.Boolean(bool(selinux))
+                ),
+                "usb_autosuspend_disabled": dbus.Boolean(raw["usb_autosuspend_disabled"]),
+                "adapter_vid_pid": dbus.String(raw["adapter_vid_pid"]),
+            }
+        return dbus.Dictionary(result, signature="sv")
+
     # ------------------------------------------------------------------
     # im.tincan.Messages — SMS/iMessage send and receive
     # ------------------------------------------------------------------

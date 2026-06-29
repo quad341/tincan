@@ -611,6 +611,51 @@ class TincandClient(QObject):
             self.message_send_failed.emit(to, body)
         watcher.deleteLater()
 
+    def preflight_calls(self, callback) -> None:
+        """Call Preflight(calls_check=True) asynchronously; fires callback(result: dict).
+
+        callback receives a dict with keys:
+          ofono_available: bool
+          wireplumber_ofono_backend: bool
+          selinux_hfp_module: bool | str  ('permissive' when SELinux not enforcing)
+          usb_autosuspend_disabled: bool
+          adapter_vid_pid: str
+
+        Never blocks the GUI event loop. If the daemon is absent, callback
+        receives an empty dict.
+        """
+        if not self._bus.isConnected():
+            callback({})
+            return
+        iface = QDBusInterface(_BUS_NAME, _OBJECT, _IFACE_DAEMON, self._bus)
+        if not iface.isValid():
+            callback({})
+            return
+        pending = iface.asyncCallWithArgumentList("Preflight", [{"calls_check": True}])
+        watcher = QDBusPendingCallWatcher(pending, self)
+        watcher.finished.connect(lambda w: self._on_preflight_calls_reply(w, callback))
+
+    def _on_preflight_calls_reply(
+        self, watcher: QDBusPendingCallWatcher, callback
+    ) -> None:
+        raw = watcher.reply()
+        watcher.deleteLater()
+        if isinstance(raw, QDBusMessage):
+            if raw.type() == QDBusMessage.MessageType.ErrorMessage:
+                _log.debug("Preflight(calls_check=True) failed: %s", raw.errorMessage())
+                callback({})
+                return
+            args = raw.arguments()
+            result = _demarshal_map(args[0] if args else {})
+        else:
+            reply = _wrap_reply(raw)
+            if not reply.isValid():
+                _log.debug("Preflight(calls_check=True) failed: %s", reply.error().message())
+                callback({})
+                return
+            result = _demarshal_map(reply.value())
+        callback(result)
+
     def request_reconnect(self) -> None:
         """Call RequestReconnect on the daemon (fire-and-forget)."""
         if not self._bus.isConnected():
