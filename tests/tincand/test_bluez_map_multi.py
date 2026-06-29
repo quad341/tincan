@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from tincand.backends.bluez_map import normalize_phone
+from tincand.contact_store import normalize_phone
 from tincand.contact_store import normalize_phone as cs_normalize_phone
-
 
 # ---------------------------------------------------------------------------
 # §1 normalize_phone
