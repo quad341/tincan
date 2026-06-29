@@ -399,6 +399,32 @@ class SettingsDialog(QDialog):
         sublabel.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         layout.addWidget(sublabel)
 
+        layout.addSpacing(8)
+
+        self._ancs_cb = QCheckBox(self.tr("Enable push notifications (Bluetooth LE / ANCS)"))
+        self._ancs_cb.setAccessibleName(self.tr("Enable push notifications"))
+        self._ancs_cb.setFont(cb_font)
+        self._ancs_cb.setStyleSheet(
+            "color: #f4f4f5;" if self._dark else "color: #111827;"
+        )
+        ancs_enabled = bool_value(settings, "ancs/enabled", True)
+        self._ancs_cb.setChecked(ancs_enabled)
+        layout.addWidget(self._ancs_cb)
+
+        ancs_sublabel = QLabel(
+            "When enabled, tincan uses Bluetooth LE (ANCS) for real-time iPhone"
+            " notifications. Unchecking hides ANCS status in this app right away;"
+            " it takes effect on the daemon at its next start and does not stop a"
+            " running connection. Requires a re-pair after first enable."
+        )
+        ancs_sublabel.setWordWrap(True)
+        ancs_sublabel.setFont(sl_font)
+        ancs_sublabel.setStyleSheet(
+            "color: #a1a1aa;" if self._dark else "color: #6b7280;"
+        )
+        ancs_sublabel.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        layout.addWidget(ancs_sublabel)
+
         layout.addSpacing(20)
 
         # ── APP NOTIFICATIONS section ──────────────────────────────────────
@@ -700,6 +726,7 @@ class SettingsDialog(QDialog):
 
         # Wire checkboxes → persist / daemon
         self._desktop_cb.toggled.connect(self._on_notif_toggled)
+        self._ancs_cb.toggled.connect(self._on_ancs_toggled)
         self._mirror_cb.toggled.connect(self._on_mirror_toggled)
         self._close_to_tray_cb.toggled.connect(self._on_close_to_tray_toggled)
 
@@ -778,6 +805,11 @@ class SettingsDialog(QDialog):
         s.setValue("notifications/desktop_enabled", checked)
         s.sync()  # flush immediately so the notifier's next read sees the change
         self.notifications_toggled.emit(checked)
+
+    def _on_ancs_toggled(self, checked: bool) -> None:
+        s = app_settings()
+        s.setValue("ancs/enabled", checked)
+        s.sync()
 
     @Slot(bool)
     def _on_mirror_toggled(self, checked: bool) -> None:

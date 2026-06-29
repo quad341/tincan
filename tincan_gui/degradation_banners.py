@@ -224,9 +224,12 @@ class ANCSRepairBanner(QWidget):
 # ---------------------------------------------------------------------------
 
 class StateCBanner(QWidget):
-    """Thin ANCS-unavailable banner (h=32, lime). Design: tincan-s42 §2 State C."""
+    """Thin ANCS-healing banner (h=32, lime) — shown only during HEALING state.
 
-    refresh_clicked = Signal()
+    Design: tincan-s42 §2 State C.
+    """
+
+    heal_clicked = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -237,12 +240,12 @@ class StateCBanner(QWidget):
 
         # tincan-5en: accessible name uses plain-text form per spec §5
         msg = self.tr(
-            "ℹ Real-time push notifications unavailable"
+            "ℹ Real-time push notifications reconnecting"
             " · New messages appear after manual refresh."
             " · Send and conversation list still work."
         )
         accessible_name = self.tr(
-            "Real-time push notifications unavailable."
+            "Real-time push notifications reconnecting."
             " New messages appear after manual refresh."
             " Send and conversation list still work."
         )
@@ -258,15 +261,15 @@ class StateCBanner(QWidget):
         label.setStyleSheet("color: #365314;")
         layout.addWidget(label, stretch=1)
 
-        refresh_btn = QPushButton(self.tr("↻ Refresh"))
-        refresh_btn.setFixedWidth(80)
-        refresh_btn.setStyleSheet(
+        reconnect_btn = QPushButton(self.tr("↻ Reconnect"))
+        reconnect_btn.setFixedWidth(90)
+        reconnect_btn.setStyleSheet(
             "QPushButton { color: #365314; background: transparent; "
             "border: 1px solid #84cc16; border-radius: 4px; padding: 0 6px; }"
             "QPushButton:hover { background: #ecfccb; }"
         )
-        refresh_btn.clicked.connect(self.refresh_clicked)
-        layout.addWidget(refresh_btn)
+        reconnect_btn.clicked.connect(self.heal_clicked)
+        layout.addWidget(reconnect_btn)
 
 
 # ---------------------------------------------------------------------------

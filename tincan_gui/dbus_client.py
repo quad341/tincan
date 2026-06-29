@@ -173,6 +173,7 @@ class TincandClient(QObject):
     connected = Signal(str)           # device_address
     disconnected = Signal()
     capability_changed = Signal(str, bool)  # feature, available
+    ancs_status_changed = Signal(str)       # "armed"|"healing"|"active"|"fallback"|"disabled"
     app_notification_received = Signal(dict)  # AppNotificationReceived a{sv} → dict
 
     # Messages interface
@@ -220,6 +221,8 @@ class TincandClient(QObject):
                       self, "1_on_disconnected()"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_DAEMON, "CapabilityChanged",
                       self, "1_on_capability_changed(QString,bool)"),
+            b.connect(_BUS_NAME, _OBJECT, _IFACE_DAEMON, "ANCSStatusChanged",
+                      self, "1_on_ancs_status_changed(QString)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_DAEMON, "AppNotificationReceived",
                       self, "1_on_app_notification_received(QVariantMap)"),
             b.connect(_BUS_NAME, _OBJECT, _IFACE_MESSAGES, "MessageReceived",
@@ -253,7 +256,7 @@ class TincandClient(QObject):
         if not all(_ok):
             _log.warning("tincan D-Bus: some signal subscriptions failed: %s", _ok)
         else:
-            _log.debug("tincan D-Bus: all 17 signal subscriptions registered")
+            _log.debug("tincan D-Bus: all 18 signal subscriptions registered")
 
     # ------------------------------------------------------------------
     # D-Bus signal → Qt signal bridges
@@ -273,6 +276,11 @@ class TincandClient(QObject):
     def _on_capability_changed(self, feature: str, available: bool) -> None:
         _log.debug("tincand: CapabilityChanged(%s, %s)", feature, available)
         self.capability_changed.emit(str(feature), bool(available))
+
+    @Slot(str)
+    def _on_ancs_status_changed(self, status: str) -> None:
+        _log.debug("tincand: ANCSStatusChanged(%s)", status)
+        self.ancs_status_changed.emit(str(status))
 
     @Slot("QVariantMap")
     def _on_app_notification_received(self, payload) -> None:
