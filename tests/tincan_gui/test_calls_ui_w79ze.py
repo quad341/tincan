@@ -20,7 +20,6 @@ from PySide6.QtWidgets import QSystemTrayIcon
 
 from tincan_gui.main import DialpadDialog, MainWindow
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
