@@ -413,7 +413,9 @@ class SettingsDialog(QDialog):
 
         ancs_sublabel = QLabel(
             "When enabled, tincan uses Bluetooth LE (ANCS) for real-time iPhone"
-            " notifications. Requires a re-pair after first enable."
+            " notifications. Unchecking hides ANCS status in this app right away;"
+            " it takes effect on the daemon at its next start and does not stop a"
+            " running connection. Requires a re-pair after first enable."
         )
         ancs_sublabel.setWordWrap(True)
         ancs_sublabel.setFont(sl_font)

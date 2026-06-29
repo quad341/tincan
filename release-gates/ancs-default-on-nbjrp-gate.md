@@ -26,7 +26,7 @@ Reviewer: `tincan/reviewer` (first-pass; gemini second-pass disabled per rig con
 |----|-------------|----------|
 | 1 | ANCS default-on: no `--with-ancs` flag needed | `tincand/__main__.py`: `--with-ancs` marked deprecated/no-op; `_activate_ancs_if_needed()` called by default when `--backend map`. `--no-ancs` opts out. |
 | 2 | Honest state model: status dot uses 5-state string | `tincan_gui/ancs_status_dot.py`: driven by `ancs_status` string (`"armed"/"active"/"healing"/"fallback"/"disabled"`); `"armed"` and `"disabled"` dots correctly hidden per spec. |
-| 3 | Settings toggle enables/disables ANCS + banner | `tincan_gui/settings_dialog.py`: ANCS checkbox wired; `_apply_ancs_status()` suppresses banners when disabled. |
+| 3 | Settings toggle suppresses ANCS UI + persists preference | `tincan_gui/settings_dialog.py`: ANCS checkbox wired; `_apply_ancs_status()` suppresses banners/dot in the GUI immediately when unchecked and persists `ancs/enabled`. Takes effect on the daemon at next start — it does not stop a running ANCS backend (live daemon enable/disable is a tracked follow-up). |
 | 4 | Heal button actually heals | `tincan_gui/degradation_banners.py`: `StateCBanner.heal_clicked` → `tincan_gui/main.py`: `_on_ancs_heal_requested()` → `request_ancs_heal()` → `tincand/dbus_service.py`: `RequestANCSHeal` → `tincand/backend_manager.py`: `request_heal()` → `tincand/backends/ancs.py`: `ANCSBackend.request_heal()`. Full delegation chain verified. |
 
 ---

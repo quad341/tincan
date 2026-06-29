@@ -68,6 +68,9 @@ def _parse_args() -> argparse.Namespace:
         if args.backend and args.backend != "mock":
             parser.error("--mock cannot be combined with --backend ancs")
         args.backend = "mock"
+    # Remember whether the user actually passed --with-ancs before it is
+    # clobbered below; the deprecation hint should only fire on explicit use.
+    args.with_ancs_explicit = args.with_ancs is True
     # ANCS is on by default with map; --no-ancs or ancs/enabled=false in tincan.ini opts out.
     if not args.no_ancs:
         from tincand.config import DaemonSettings  # noqa: PLC0415
@@ -300,8 +303,11 @@ def main() -> None:
         ancs = ANCSBackend(device_addr=_device_addr, adapter_path=adapter_path)
         backend = BackendManager(primary=backend, secondaries=[ancs])
         _log.info("tincand: multi-backend mode — MAP (primary) + ANCS (secondary)")
-    elif args.with_ancs:
-        _log.warning("--with-ancs is only supported with --backend map; ignoring")
+    elif args.with_ancs_explicit:
+        _log.warning(
+            "--with-ancs is deprecated and now a no-op; "
+            "ANCS is default-on with --backend map"
+        )
 
     backend.register_service(service)
     service.register_backend(backend)
