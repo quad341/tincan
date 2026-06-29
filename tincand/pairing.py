@@ -32,6 +32,8 @@ class PairingState:
 class FailureReason:
     ADAPTER_NOT_CAPABLE = "adapter_not_capable"
     ADVERTISING_FAILED = "advertising_failed"
+    ANCS_EXT_ADV_BUG = "ancs_ext_adv_bug"
+    ANCS_EXPERIMENTAL_REQUIRED = "ancs_experimental_required"
     PAIR_TIMEOUT = "pair_timeout"
     ANCS_NOT_EXPOSED = "ancs_not_exposed"
     MAP_CONSENT_DENIED = "map_consent_denied"
