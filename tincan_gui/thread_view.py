@@ -463,6 +463,8 @@ QAccessible.installFactory(_thread_view_factory)
 class ThreadHeader(QWidget):
     """Thread header bar (h=56): avatar + contact name + phone."""
 
+    call_requested = Signal()
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(56)
@@ -503,6 +505,39 @@ class ThreadHeader(QWidget):
         text_col.addWidget(self._phone_label)
 
         outer.addLayout(text_col, stretch=1)
+
+        self._call_btn = QPushButton("☎ Call")
+        self._call_btn.setFixedHeight(34)
+        self._call_btn.setStyleSheet(
+            "background: #0d9488; color: #ffffff; border-radius: 4px; padding: 4px 10px;"
+        )
+        self._call_btn.setAccessibleName("Call contact")
+        self._call_btn.clicked.connect(self.call_requested)
+        self._call_btn.hide()
+        outer.addWidget(self._call_btn, alignment=Qt.AlignVCenter)
+
+    def set_call_button(
+        self,
+        visible: bool,
+        enabled: bool = True,
+        contact_name: str = "",
+        tooltip: str = "",
+    ) -> None:
+        if not visible:
+            self._call_btn.hide()
+            return
+        self._call_btn.show()
+        self._call_btn.setEnabled(enabled)
+        if enabled:
+            self._call_btn.setStyleSheet(
+                "background: #0d9488; color: #ffffff; border-radius: 4px; padding: 4px 10px;"
+            )
+        else:
+            self._call_btn.setStyleSheet(
+                "background: #3f3f46; color: #52525b; border-radius: 4px; padding: 4px 10px;"
+            )
+        self._call_btn.setToolTip(tooltip)
+        self._call_btn.setAccessibleName(f"Call {contact_name or 'contact'}")
 
     def name_label_color(self) -> str:
         """Return the hex color applied to the name label (used by a11y tests)."""
@@ -661,6 +696,8 @@ class _ThreadSearchBar(QWidget):
 class ThreadView(QWidget):
     """Right pane (minus compose): thread header + scrollable message bubbles."""
 
+    call_requested = Signal()
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._last_outbound: Optional[MessageBubble] = None
@@ -683,12 +720,22 @@ class ThreadView(QWidget):
         """Update the header avatar with a PBAP photo for the current contact."""
         self._header.set_contact_photo(data)
 
+    def set_call_button(
+        self,
+        visible: bool,
+        enabled: bool = True,
+        contact_name: str = "",
+        tooltip: str = "",
+    ) -> None:
+        self._header.set_call_button(visible, enabled, contact_name, tooltip)
+
     def _build(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
         self._header = ThreadHeader()
+        self._header.call_requested.connect(self.call_requested)
         layout.addWidget(self._header)
 
         # In-thread search bar (Ctrl+F, hidden until activated)

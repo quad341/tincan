@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -164,6 +165,17 @@ class TitleBar(QWidget):
 
         layout.addStretch()
 
+        self._dial_btn = QPushButton("☎ Dial")
+        self._dial_btn.setFixedHeight(30)
+        self._dial_btn.setStyleSheet(
+            "background: #0d9488; color: #ffffff; border-radius: 4px; padding: 2px 10px;"
+        )
+        self._dial_btn.setToolTip("")
+        self._dial_btn.setAccessibleName("Open dialpad")
+        layout.addWidget(self._dial_btn)
+
+        layout.addSpacing(8)
+
         self._gear_btn = QToolButton()
         self._gear_btn.setText("⚙")
         self._gear_btn.setFixedSize(32, 32)
@@ -227,6 +239,10 @@ class TitleBar(QWidget):
         self._status_chip.setStyleSheet("color: #fca5a5;")
         self._status_chip.setAccessibleName("Connection status: Disconnected")
         layout.addWidget(self._status_chip)
+
+    @property
+    def dial_button(self) -> QPushButton:
+        return self._dial_btn
 
     @property
     def gear_button(self) -> QToolButton:
@@ -497,6 +513,123 @@ class NewConversationDialog(QDialog):
         self._text_input.setFocus()
 
 
+class DialpadDialog(QDialog):
+    """Arbitrary-number outbound dialer (tincan-8dehj).
+
+    Emits call_requested(number) when the user confirms a dial.
+    """
+
+    call_requested = Signal(str)
+
+    _KEYS = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["*", "0", "#"]]
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent, Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint)
+        self.setWindowTitle("Enter Number")
+        self.setFixedSize(360, 560)
+        self.setStyleSheet("background: #18181b; color: #f4f4f5;")
+        if parent:
+            self.move(parent.geometry().center() - self.rect().center())
+        self._build()
+        self._wire()
+
+    def _build(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(12)
+
+        display_row = QHBoxLayout()
+        self._number_input = QLineEdit()
+        self._number_input.setPlaceholderText("Enter number…")
+        self._number_input.setStyleSheet(
+            "background: #27272a; color: #f4f4f5; font-size: 22px;"
+            " border: 1px solid #3f3f46; border-radius: 4px; padding: 4px 8px;"
+        )
+        self._number_input.setAccessibleName("Phone number")
+        display_row.addWidget(self._number_input, stretch=1)
+
+        self._backspace_btn = QPushButton("⌫")
+        self._backspace_btn.setFixedSize(52, 52)
+        self._backspace_btn.setStyleSheet(
+            "background: #27272a; color: #f4f4f5; font-size: 20px;"
+            " border: 1px solid #3f3f46; border-radius: 4px;"
+        )
+        self._backspace_btn.setAccessibleName("Backspace")
+        display_row.addWidget(self._backspace_btn)
+        layout.addLayout(display_row)
+
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        for row, keys in enumerate(self._KEYS):
+            for col, key in enumerate(keys):
+                btn = QPushButton(key)
+                btn.setFixedHeight(56)
+                btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                btn.setStyleSheet(
+                    "background: #27272a; color: #f4f4f5; font-size: 22px;"
+                    " border: 1px solid #3f3f46; border-radius: 4px;"
+                )
+                btn.setAccessibleName(f"Dial {key}")
+                btn.clicked.connect(lambda _, k=key: self._on_key(k))
+                grid.addWidget(btn, row, col)
+        layout.addLayout(grid)
+
+        self._call_btn = QPushButton("☎  Call")
+        self._call_btn.setFixedHeight(52)
+        self._call_btn.setStyleSheet(
+            "background: #16a34a; color: #ffffff; font-size: 18px;"
+            " border-radius: 4px;"
+        )
+        self._call_btn.setEnabled(False)
+        self._call_btn.setAccessibleName("Call")
+        layout.addWidget(self._call_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(40)
+        cancel_btn.setStyleSheet(
+            "background: #3f3f46; color: #a1a1aa; font-size: 14px;"
+            " border-radius: 4px;"
+        )
+        cancel_btn.setAccessibleName("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        layout.addWidget(cancel_btn)
+
+        self._error_lbl = QLabel()
+        self._error_lbl.setStyleSheet("color: #dc2626; font-size: 11px;")
+        self._error_lbl.setWordWrap(True)
+        self._error_lbl.hide()
+        layout.addWidget(self._error_lbl)
+
+    def _wire(self) -> None:
+        self._number_input.textChanged.connect(self._on_text_changed)
+        self._backspace_btn.clicked.connect(self._on_backspace)
+        self._call_btn.clicked.connect(self._on_call)
+
+    def _on_key(self, key: str) -> None:
+        self._number_input.insert(key)
+
+    def _on_backspace(self) -> None:
+        self._number_input.backspace()
+
+    def _on_text_changed(self, text: str) -> None:
+        self._call_btn.setEnabled(_is_dialable(text))
+        self._error_lbl.hide()
+
+    def _on_call(self) -> None:
+        self.call_requested.emit(self._number_input.text())
+
+    def show_error(self, msg: str) -> None:
+        self._error_lbl.setText(f"⚠ {msg}")
+        self._error_lbl.show()
+
+    def keyPressEvent(self, ev: QKeyEvent) -> None:  # noqa: N802
+        if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self._call_btn.isEnabled():
+                self._on_call()
+        else:
+            super().keyPressEvent(ev)
+
+
 class MainWindow(QMainWindow):
     """Top-level window: title bar + QSplitter(left 300px, right pane)."""
 
@@ -511,6 +644,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(600, 400)
         self._current_phone: str = ""     # phone for the open conversation
         self._current_phone_dialable: bool = True  # False when phone is unresolvable name
+        self._current_is_group: bool = False
+        self._current_contact_name: str = ""
         self._connected_device: str = ""  # human-readable name or address of connected BT device
         self._daemon_spawn_attempted: bool = False
         self._messages_ok: bool = False   # True when daemon reports messages capability
@@ -545,6 +680,7 @@ class MainWindow(QMainWindow):
         self._wire_dbus()
         self._sync_daemon_state()
         self._sync_compose_state()  # ensure button reflects initial state (no daemon)
+        self._sync_call_state()
 
     def _build(self) -> None:
         central = QWidget()
@@ -649,6 +785,8 @@ class MainWindow(QMainWindow):
         self._conv_list.compose_new_requested.connect(self._on_compose_new)
         self._conv_list.refresh_requested.connect(self.refresh_requested.emit)
         self._compose.send_requested.connect(self._on_send)
+        self._title_bar.dial_button.clicked.connect(self._open_dialpad)
+        self._thread_view.call_requested.connect(self._on_thread_call)
         self._title_bar.gear_button.clicked.connect(self._open_settings)
         self._title_bar.bug_button.clicked.connect(self._on_file_bug)
         self._title_bar.bell_button.clicked.connect(self._on_open_notif_center)
@@ -788,6 +926,72 @@ class MainWindow(QMainWindow):
             btn.setToolTip(f"Sending unavailable — {reason}")
             btn.setAccessibleName(f"Send unavailable — {reason}")
 
+    def _sync_call_state(self) -> None:
+        """Gate dial/call buttons on call_setup_ready and conversation context."""
+        if not hasattr(self, "_title_bar"):
+            return
+        dial_btn = self._title_bar.dial_button
+        _setup_tooltip = (
+            "Call setup incomplete — load the tincan HFP SELinux module to enable calls."
+        )
+        if self._call_setup_ready:
+            dial_btn.setEnabled(True)
+            dial_btn.setStyleSheet(
+                "background: #0d9488; color: #ffffff; border-radius: 4px; padding: 2px 10px;"
+            )
+            dial_btn.setToolTip("")
+        else:
+            dial_btn.setEnabled(False)
+            dial_btn.setStyleSheet(
+                "background: #3f3f46; color: #52525b; border-radius: 4px; padding: 2px 10px;"
+            )
+            dial_btn.setToolTip(_setup_tooltip)
+
+        if self._current_is_group or not self._current_phone:
+            self._thread_view.set_call_button(visible=False, enabled=False)
+        elif not self._call_setup_ready:
+            self._thread_view.set_call_button(
+                visible=True, enabled=False,
+                contact_name=self._current_contact_name,
+                tooltip=_setup_tooltip,
+            )
+        elif not self._current_phone_dialable:
+            self._thread_view.set_call_button(
+                visible=True, enabled=False,
+                contact_name=self._current_contact_name,
+                tooltip="Phone number unavailable for this contact",
+            )
+        else:
+            self._thread_view.set_call_button(
+                visible=True, enabled=True,
+                contact_name=self._current_contact_name,
+            )
+
+    def _open_dialpad(self) -> None:
+        dlg = DialpadDialog(self)
+        dlg.call_requested.connect(self._on_dialpad_call)
+        dlg.exec()
+
+    def _on_dialpad_call(self, number: str) -> None:
+        call_id = self._dbus_client.dial(number)
+        if call_id:
+            sender = self.sender()
+            if isinstance(sender, DialpadDialog):
+                sender.accept()
+            self._enter_call(number)  # OQ4: raw number as caller display fallback
+        else:
+            sender = self.sender()
+            if isinstance(sender, DialpadDialog):
+                sender.show_error("Failed to connect call. Check iPhone and try again.")
+
+    def _on_thread_call(self) -> None:
+        if not self._current_phone or not self._current_phone_dialable:
+            return
+        call_id = self._dbus_client.dial(self._current_phone)
+        if call_id:
+            caller_display = self._current_contact_name or self._current_phone
+            self._enter_call(caller_display)
+
     def _apply_capabilities(self, caps: dict) -> None:
         # tincan-40c/tincan-5mze: all keys always present; default False (not
         # capable) when a key is absent so degradation banners show conservatively.
@@ -809,6 +1013,7 @@ class MainWindow(QMainWindow):
         call_setup_ready = bool(caps.get("call_setup_ready", True))
         self._call_setup_ready = call_setup_ready
         self._banner_call_setup.setVisible(not call_setup_ready)
+        self._sync_call_state()
 
     def _apply_ancs_status(self, ancs_status: str) -> None:
         """Update ANCS banners and dot from the richer ancs_status string (tincan-nbjrp).
@@ -867,8 +1072,11 @@ class MainWindow(QMainWindow):
     def _on_conversation_selected(self, conv_id: str) -> None:
         if not conv_id:
             self._current_phone = ""
+            self._current_is_group = False
+            self._current_contact_name = ""
             self._thread_view.load_thread("", "", [], "SMS")
             self._sync_compose_state()
+            self._sync_call_state()
             return
         _trace.emit("conversation_switch", cid=_trace.new_cid(), conv_id=conv_id)
         self.conversation_opened.emit(conv_id)
@@ -885,6 +1093,8 @@ class MainWindow(QMainWindow):
 
         # Set group mode on thread + compose before loading messages.
         is_group = bool(conv_data and conv_data.is_group)
+        self._current_is_group = is_group
+        self._current_contact_name = name
         participants: list[str] = (
             list(conv_data.participants) if conv_data and conv_data.is_group else []
         )
@@ -911,6 +1121,7 @@ class MainWindow(QMainWindow):
         if not cached:
             self._thread_view.set_loading(True)
         self._sync_compose_state()
+        self._sync_call_state()
         self._tray.reset_unread()
         self._dbus_client.mark_conversation_read(conv_id)
         self._dbus_client.fetch_contact_photo(conv_id)
@@ -1091,6 +1302,7 @@ class MainWindow(QMainWindow):
         self._title_bar.ancs_status_dot.hide()
         self._compose.set_compose_enabled(False, "not connected")
         self._tray.set_connected(False)
+        self._sync_call_state()
 
     def _on_reconnect_clicked(self) -> None:
         self._dbus_client.request_reconnect()
@@ -1494,10 +1706,13 @@ class MainWindow(QMainWindow):
             phone = phones[0]
             self._current_phone = phone
             self._current_phone_dialable = _is_dialable(phone)
+            self._current_is_group = False
+            self._current_contact_name = ""
             self._thread_view.set_group_mode(False)
             self._compose.set_group_mode(False)
             self._thread_view.load_thread(phone, phone, [], "SMS")
             self._sync_compose_state()
+            self._sync_call_state()
             self._compose._input.setFocus()
         else:
             conv_id = self._dbus_client.send_message_to_recipients(phones, "")
@@ -1505,10 +1720,13 @@ class MainWindow(QMainWindow):
                 conv_id = phones[0]
             self._current_phone = conv_id
             self._current_phone_dialable = True
+            self._current_is_group = True
+            self._current_contact_name = ""
             self._thread_view.set_group_mode(True, phones)
             self._compose.set_group_mode(True)
             self._thread_view.load_thread(conv_id, conv_id, [], "MMS")
             self._sync_compose_state()
+            self._sync_call_state()
             self._compose._input.setFocus()
 
     def _gather_autocomplete_contacts(self) -> list[dict]:
