@@ -395,6 +395,7 @@ class AdapterUnavailableBanner(QFrame):
         primary_row.setSpacing(8)
 
         self._primary_label = QLabel()
+        self._primary_label.setTextFormat(Qt.TextFormat.PlainText)
         pf = QFont()
         pf.setPointSize(12)
         self._primary_label.setFont(pf)

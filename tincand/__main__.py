@@ -167,7 +167,8 @@ def _resolve_adapter_path(args: argparse.Namespace) -> tuple[str, str]:
     """Return (resolved_path, adapter_path_requested).
 
     Priority: --adapter flag → TINCAN_ADAPTER env var → DaemonSettings
-    bluetooth/adapter_path → auto-detect first powered adapter → /org/bluez/hci1.
+    bluetooth/adapter_path → auto-detect first powered adapter → first adapter
+    found (even if unpowered) → /org/bluez/hci0.
 
     adapter_path_requested is '' unless the QSettings adapter was absent from
     BlueZ; in that case it holds the requested path so GetStatus() can surface it.
@@ -201,16 +202,23 @@ def _resolve_adapter_path(args: argparse.Namespace) -> tuple[str, str]:
             _log.info("tincand: using QSettings adapter %s", qsettings_path)
             return str(qsettings_path), ""
 
+        first_adapter: str | None = None
         for path, ifaces in objects.items():
             if "org.bluez.Adapter1" not in ifaces:
                 continue
+            if first_adapter is None:
+                first_adapter = str(path)
             props = ifaces["org.bluez.Adapter1"]
             if props.get("Powered", False):
                 _log.info("tincand: auto-detected adapter %s", path)
                 return str(path), qsettings_path or ""
+
+        if first_adapter is not None:
+            _log.info("tincand: no powered adapter; using first found %s", first_adapter)
+            return first_adapter, qsettings_path or ""
     except Exception as exc:  # noqa: BLE001
-        _log.debug("tincand: adapter auto-detect failed (%s) — using /org/bluez/hci1", exc)
-    return "/org/bluez/hci1", qsettings_path or ""
+        _log.debug("tincand: adapter auto-detect failed (%s) — using /org/bluez/hci0", exc)
+    return "/org/bluez/hci0", qsettings_path or ""
 
 
 def _select_backend(
