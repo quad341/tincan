@@ -55,6 +55,31 @@ Implications:
 Re-run: stop tincand, then
   DEVICE_ADDR=<phone-mac> PYTHONPATH=<repo-root> python spikes/m05_mms_attachment.py
 
+## OQ-6: Group MMS send over MAP?
+
+[x] Not possible — iOS delivers to the first recipient only
+
+Date: 2026-06-29. iPhone / iOS 26.x via RTL8761B (hci1), BlueZ 5.86.
+
+Probed by pushing a TYPE:MMS bMessage with two recipient VCARDs via
+MapBackend.send_group_message(). Two layers had hidden this:
+
+1. A real bug: send_group_message called obexd PushMessage with 2 args
+   (sourcefile, args), but the signature is `ssa{sv}` — (sourcefile, FOLDER, args).
+   It raised TypeError before anything left the host. That is why group send
+   "instantly failed." The mocked unit tests passed because they mock PushMessage
+   and never exercised the real arg count — the path was never tested against real
+   obexd/iOS.
+2. With the call corrected to PushMessage(tmp, "outbox", {}) (mirroring the working
+   1:1 send), obexd + iOS ACCEPTED the multi-recipient push (transfer completed) —
+   but iOS delivered ONLY to the first recipient VCARD, as a 1:1. The second
+   recipient received nothing and no group thread was created.
+
+Conclusion: group MMS send is not possible over MAP on iOS (matches Phone Link).
+With no way to reply to a group either, group participation over Bluetooth is out.
+Decision 2026-06-29: remove the group surface; surface inbound group messages as
+1:1 by sender.
+
 ## Amendments to PLAN.md
 
 List any assumptions that need revision.

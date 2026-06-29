@@ -15,7 +15,7 @@ The name: a tin-can telephone — a humble, honest string between two endpoints.
 Messaging **sends and receives today**, live-tested against an iPhone over Bluetooth MAP:
 
 - ✅ **SMS** — receive (with desktop notifications) and send from the GUI, delivered to the recipient's phone
-- ✅ **Group MMS** — receive, send, and a dedicated group conversation view
+- ⚠️ **Group texts aren't supported** — iOS can't send to a group over MAP (it delivers to only the first recipient) and offers no way to reply; incoming group messages appear as individual 1:1 threads. See [LIMITATIONS](docs/LIMITATIONS.md).
 - ✅ **App notification mirroring (ANCS)** — see notifications from phone apps on your desktop, with per-app filtering
 - ✅ **Message history** — a local SQLite cache, so conversations persist across restarts
 - ✅ **Contact names (PBAP)** — real names on conversations
