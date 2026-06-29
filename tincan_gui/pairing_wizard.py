@@ -301,8 +301,51 @@ class SuccessPage(_WizardPage):
         layout.addWidget(start_btn)
         layout.addStretch()
 
+    def set_partial(self, *, ancs: bool) -> None:
+        if not ancs:
+            self._body_label.setText(
+                "Your iPhone is connected. Text messages will appear in tincan.\n\n"
+                "⚠ Notifications unavailable\n"
+                "✓ Message access granted"
+            )
+
     def text(self) -> str:
         return f"You're all set! {self._body_label.text()}"
+
+
+class _AdapterCard(QWidget):
+    """Inline chip showing per-adapter detection state (tincan-06knm / tincan-p7cf2)."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        self._alias_label = QLabel()
+        self._status_label = QLabel()
+        layout.addWidget(self._alias_label)
+        layout.addWidget(self._status_label)
+
+    def configure(
+        self,
+        alias: str,
+        *,
+        le_capable: bool,
+        hfp_sco_capable: bool,
+        recommended: bool,
+    ) -> None:
+        self._alias_label.setText(alias)
+        if le_capable and hfp_sco_capable:
+            self._status_label.setText("✓ All tincan features available")
+            self.setStyleSheet("background-color: #dcfce7; border-radius: 4px;")
+        elif le_capable:
+            self._status_label.setText(
+                "⚠ Calls not available on this adapter.\n"
+                "For full support, use an ASUS USB-BT500 (RTL8761B) dongle."
+            )
+            self.setStyleSheet("background-color: #fef9c3; border-radius: 4px;")
+        else:
+            self._status_label.setText("✗ Not compatible")
+            self.setStyleSheet("background-color: #fee2e2; border-radius: 4px;")
 
 
 _FAILURE_CONTENT: dict[str, tuple[str, str]] = {
@@ -312,9 +355,19 @@ _FAILURE_CONTENT: dict[str, tuple[str, str]] = {
         "Plug in a Bluetooth USB adapter and try again.",
     ),
     FailureReason.ADVERTISING_FAILED: (
-        "No Bluetooth adapter found",
-        "tincan couldn't find a Bluetooth adapter on this computer.\n\n"
-        "Plug in a Bluetooth USB adapter and try again.",
+        "Bluetooth advertising failed",
+        "tincan couldn't start Bluetooth advertising.\n\n"
+        "Try restarting Bluetooth or plug in a USB Bluetooth adapter and try again.",
+    ),
+    FailureReason.ANCS_EXT_ADV_BUG: (
+        "Advertising failed — BlueZ bug",
+        "Your Bluetooth adapter triggered a known BlueZ extended-advertising bug.\n\n"
+        "Plug in an ASUS USB-BT500 (RTL8761B) adapter and try again.",
+    ),
+    FailureReason.ANCS_EXPERIMENTAL_REQUIRED: (
+        "Experimental features required",
+        "Notifications require BlueZ experimental mode.\n\n"
+        "Start bluetoothd with --experimental and try again.",
     ),
     FailureReason.PAIR_TIMEOUT: (
         "Pairing timed out",
@@ -373,10 +426,28 @@ class FailurePage(_WizardPage):
         )
         layout.addWidget(self.cancel_button)
 
+        self.continue_partial = QPushButton("Continue without notifications")
+        self.continue_partial.setAccessibleName(
+            self.tr("Continue without notifications — set up messaging only")
+        )
+        self.continue_partial.setStyleSheet(
+            "QPushButton { background-color: #f9fafb; color: #374151; "
+            "font-size: 14pt; min-height: 44px; border-radius: 4px; "
+            "border: 1px solid #9ca3af; }"
+        )
+        self.continue_partial.setVisible(False)
+        layout.addWidget(self.continue_partial)
+
+    _ANCS_PARTIAL_REASONS = frozenset({
+        FailureReason.ANCS_EXT_ADV_BUG,
+        FailureReason.ANCS_EXPERIMENTAL_REQUIRED,
+    })
+
     def configure(self, reason: str | None) -> None:
         heading, body = _FAILURE_CONTENT.get(reason or "", _DEFAULT_FAILURE)
         self._heading_label.setText(heading)
         self._body_label.setText(body)
+        self.continue_partial.setVisible(reason in self._ANCS_PARTIAL_REASONS)
 
     def text(self) -> str:
         return f"{self._heading_label.text()} {self._body_label.text()}"
