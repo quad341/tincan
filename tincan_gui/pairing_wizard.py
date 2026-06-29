@@ -375,13 +375,17 @@ _FAILURE_CONTENT: dict[str, tuple[str, str]] = {
     ),
     FailureReason.ANCS_EXT_ADV_BUG: (
         "Advertising failed — BlueZ bug",
-        "Your Bluetooth adapter triggered a known BlueZ extended-advertising bug.\n\n"
-        "Plug in an ASUS USB-BT500 (RTL8761B) adapter and try again.",
+        "Push notifications are unavailable. Your BlueZ version (≤ 5.86) has a known "
+        "extended-advertising bug.\n\n"
+        "🔧 Apply the ext-adv patch in docs/ancs-bluez-ext-adv-rootcause.md.\n\n"
+        "✓ SMS messages still work without ANCS.",
     ),
     FailureReason.ANCS_EXPERIMENTAL_REQUIRED: (
         "Experimental features required",
-        "Notifications require BlueZ experimental mode.\n\n"
-        "Start bluetoothd with --experimental and try again.",
+        "ANCS notifications need bluetoothd --experimental.\n\n"
+        "🔧 Edit /etc/bluetooth/main.conf → add ExperimentalFeatures = true\n"
+        "    sudo systemctl restart bluetooth\n\n"
+        "✓ SMS messages still work while you fix this.",
     ),
     FailureReason.PAIR_TIMEOUT: (
         "Pairing timed out",
@@ -392,17 +396,18 @@ _FAILURE_CONTENT: dict[str, tuple[str, str]] = {
     FailureReason.ANCS_NOT_EXPOSED: (
         "Notifications not allowed",
         "Your iPhone did not grant notification access.\n\n"
-        "To enable notifications:\n"
-        "1. On your iPhone: Settings → Bluetooth\n"
-        "2. Find your computer and tap ⓘ\n"
-        "3. Enable 'Show Notifications'\n\n"
-        "Then try again.",
+        "On your iPhone:\n"
+        "  Settings → Bluetooth → tap ⓘ next to {computer_name}\n"
+        "  Enable Show Notifications\n\n"
+        "Then tap Try again.",
     ),
     FailureReason.MAP_CONSENT_DENIED: (
         "Message access denied",
         "Your iPhone did not grant access to your messages.\n\n"
-        "To fix this on your iPhone: Settings → Privacy → Contacts\n\n"
-        "Then try again.",
+        "On your iPhone:\n"
+        "  Settings → Privacy & Security → Contacts → tincan\n"
+        "  Tap Allow\n\n"
+        "Then tap Try again.",
     ),
 }
 
@@ -448,9 +453,8 @@ class FailurePage(_WizardPage):
             self.tr("Continue without notifications — set up messaging only")
         )
         self.continue_partial.setStyleSheet(
-            "QPushButton { background-color: #f9fafb; color: #374151; "
-            "font-size: 14pt; min-height: 44px; border-radius: 4px; "
-            "border: 1px solid #9ca3af; }"
+            "QPushButton { background-color: #3f3f46; color: #a1a1aa; "
+            "font-size: 14pt; min-height: 44px; border-radius: 4px; }"
         )
         self.continue_partial.setVisible(False)
         layout.addWidget(self.continue_partial)
@@ -460,10 +464,10 @@ class FailurePage(_WizardPage):
         FailureReason.ANCS_EXPERIMENTAL_REQUIRED,
     })
 
-    def configure(self, reason: str | None) -> None:
+    def configure(self, reason: str | None, *, computer_name: str = "your computer") -> None:
         heading, body = _FAILURE_CONTENT.get(reason or "", _DEFAULT_FAILURE)
         self._heading_label.setText(heading)
-        self._body_label.setText(body)
+        self._body_label.setText(body.format(computer_name=computer_name))
         self.continue_partial.setVisible(reason in self._ANCS_PARTIAL_REASONS)
 
     def text(self) -> str:
