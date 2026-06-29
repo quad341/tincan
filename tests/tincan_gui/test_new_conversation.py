@@ -104,7 +104,7 @@ class TestComposeButtonCount:
             if b.text() == "+"
         ]
         assert plus_buttons
-        assert plus_buttons[0].accessibleName() == "New conversation"
+        assert plus_buttons[0].accessibleName() == "New conversation — connect a device first"
 
 
 # ---------------------------------------------------------------------------
