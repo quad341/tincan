@@ -206,6 +206,7 @@ class TestOnComposeNewLoadsThread:
 
         assert not button.isEnabled()
         assert button.toolTip() == "Connect a device to start a new conversation"
+        assert button.accessibleName() == "New conversation — connect a device first"
 
         monkeypatch.setattr(
             TincandClient,

@@ -737,15 +737,6 @@ class ConversationListWidget(QWidget):
         self._refresh_btn.setEnabled(not loading)
         self._refresh_btn.setText("⌛" if loading else "↻")
 
-    def set_compose_new_enabled(self, enabled: bool, tooltip: str = "") -> None:
-        self._compose_btn.setEnabled(enabled)
-        if enabled:
-            self._compose_btn.setToolTip("New conversation")
-        else:
-            self._compose_btn.setToolTip(
-                tooltip or "Connect to your iPhone to start a new conversation"
-            )
-
     def set_conversation_photo(self, conv_id: str, photo: bytes) -> None:
         """Route a contact photo to the matching ConversationItem."""
         for item in self._items:
