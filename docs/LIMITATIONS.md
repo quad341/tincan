@@ -17,10 +17,21 @@ Sources for every claim here are in [PROTOCOLS.md](PROTOCOLS.md).
 - **iMessage is not a first-class citizen.** Outbound messages auto-upgrade to
   iMessage when the recipient is on iMessage (good), but Tincan does not implement
   iMessage features (tapbacks, threads, blue-bubble fidelity, attachments).
-  Whether *incoming* iMessages even appear over MAP is unconfirmed — evidence so
-  far shows SMS only. **(to verify on iOS 26.5)**
-- **Group MMS sending / media sending is unsupported / unreliable** (mirrors Phone
-  Link). Treat as out of scope.
+  Incoming iMessage/RCS *text* does appear over MAP (as `sms-gsm` messages) —
+  verified live 2026-06-29 against an RCS thread — but none of the rich metadata
+  (tapbacks, delivery/read receipts, typing) does, and image attachments arrive
+  only as the "Attachment: N Image" placeholder (see Media, below).
+- **Group participation is not possible over MAP** (mirrors Phone Link). *Sending:* iOS
+  accepts a multi-recipient push (`PushMessage` with several recipient VCARDs) without
+  error but **delivers only to the first recipient** and creates no group thread (verified
+  live 2026-06-29). *Replying:* there is no working path back to a group. Group texts are
+  therefore not a supported feature; an incoming group message is surfaced as an ordinary
+  1:1 from its sender.
+- **Media is not retrievable over MAP — in either direction.** Outbound image *sending*
+  is unsupported. Inbound, iOS surfaces a received picture as a plain `sms-gsm` message
+  whose body is the literal placeholder "Attachment: N Image" — no MIME, no Content-Type,
+  no bytes — even when fetched with `attachment=True` (verified live 2026-06-29).
+  RCS/iMessage media rides Apple's IP stack, which is unreachable over Bluetooth.
 - **The iPhone must have "Show Notifications" enabled** for the paired laptop, or
   iOS drops the messaging link entirely. This is a hard requirement, surfaced in
   onboarding.
