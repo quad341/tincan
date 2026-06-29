@@ -513,6 +513,64 @@ class TestGetContacts:
 
 
 # ---------------------------------------------------------------------------
+# §GetHFPDevices — oFono HFP modem enumeration (PR #146, tincan-d5yyu)
+# ---------------------------------------------------------------------------
+
+class TestGetHFPDevices:
+    """GetHFPDevices enumerates oFono HFP modems; filters non-HFP; falls back to []."""
+
+    @staticmethod
+    def _modems():
+        """One HFP modem + one non-HFP modem returned by org.ofono.Manager.GetModems()."""
+        return [
+            (
+                "/org/ofono/hfp/dev_D0_6B_78_33_46_20",
+                {"Type": "hfp", "Name": "iPhone 15 Pro"},
+            ),
+            (
+                "/sim900_0",
+                {"Type": "hardware", "Name": "Builtin Modem"},
+            ),
+        ]
+
+    def test_filters_out_non_hfp_modems(self, service):
+        manager = MagicMock()
+        manager.GetModems.return_value = self._modems()
+        with patch("dbus.SystemBus"), patch("dbus.Interface", return_value=manager):
+            result = service.GetHFPDevices()
+        assert len(result) == 1
+        assert str(result[0]["path"]) == "/org/ofono/hfp/dev_D0_6B_78_33_46_20"
+
+    def test_extracts_mac_from_device_path(self, service):
+        manager = MagicMock()
+        manager.GetModems.return_value = self._modems()
+        with patch("dbus.SystemBus"), patch("dbus.Interface", return_value=manager):
+            result = service.GetHFPDevices()
+        assert str(result[0]["mac"]) == "D0:6B:78:33:46:20"
+
+    def test_result_has_path_mac_name_fields(self, service):
+        manager = MagicMock()
+        manager.GetModems.return_value = self._modems()
+        with patch("dbus.SystemBus"), patch("dbus.Interface", return_value=manager):
+            result = service.GetHFPDevices()
+        assert set(result[0].keys()) >= {"path", "mac", "name"}
+        assert str(result[0]["name"]) == "iPhone 15 Pro"
+
+    def test_skips_hfp_modem_with_unparseable_path(self, service):
+        manager = MagicMock()
+        manager.GetModems.return_value = [
+            ("/org/ofono/hfp/no_mac_here", {"Type": "hfp", "Name": "Mystery"}),
+        ]
+        with patch("dbus.SystemBus"), patch("dbus.Interface", return_value=manager):
+            result = service.GetHFPDevices()
+        assert result == []
+
+    def test_returns_empty_when_ofono_unavailable(self, service):
+        with patch("dbus.SystemBus", side_effect=Exception("no system bus")):
+            assert service.GetHFPDevices() == []
+
+
+# ---------------------------------------------------------------------------
 # §update_contact — name-keyed conversation merge (tincan-gfiuv, tincan-6zfcq)
 # ---------------------------------------------------------------------------
 
