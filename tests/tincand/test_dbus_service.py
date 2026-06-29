@@ -501,16 +501,6 @@ class TestGetContacts:
         contacts = service.GetContacts()
         assert contacts == []
 
-    def test_upsert_group_conv_populates_group_participants(self, service):
-        service.upsert_conversation(Conversation(
-            id="grp-xyz",
-            display_name="A, B",
-            participants=["4155550001", "4155550002"],
-            is_group=True,
-        ))
-        assert "grp-xyz" in service._group_participants
-        assert set(service._group_participants["grp-xyz"]) == {"4155550001", "4155550002"}
-
 
 # ---------------------------------------------------------------------------
 # §GetHFPDevices — oFono HFP modem enumeration (PR #146, tincan-d5yyu)

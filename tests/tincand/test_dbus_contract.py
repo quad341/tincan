@@ -105,8 +105,6 @@ _GUI_METHOD_CALLS: list[tuple[str, str]] = [
     (IFACE_MESSAGES, "ListConversations"),
     (IFACE_MESSAGES, "GetMessages"),
     (IFACE_MESSAGES, "SendMessage"),
-    (IFACE_MESSAGES, "SendMessageToRecipients"),
-    (IFACE_MESSAGES, "GetConversationParticipants"),
     (IFACE_MESSAGES, "MarkConversationRead"),
     (IFACE_MESSAGES, "FetchContactPhoto"),
     (IFACE_MESSAGES, "GetContacts"),

@@ -5,10 +5,6 @@ Coverage:
      - construct with primary only
      - construct with primary + ancs secondary
      - --with-ancs startup path doesn't raise
-
-  §2 send_group_message — delegated to primary
-     - delegates to primary.send_group_message
-     - returns primary's return value
 """
 from __future__ import annotations
 
@@ -22,9 +18,7 @@ from tincand.backends.base import BackendInterface
 
 def _mock_backend() -> MagicMock:
     """Return a MagicMock that satisfies BackendInterface."""
-    m = MagicMock(spec=BackendInterface)
-    m.send_group_message.return_value = "handle-group"
-    return m
+    return MagicMock(spec=BackendInterface)
 
 
 # ---------------------------------------------------------------------------
@@ -51,28 +45,7 @@ class TestBackendManagerInstantiation:
 
 
 # ---------------------------------------------------------------------------
-# §2 send_group_message
-# ---------------------------------------------------------------------------
-
-class TestSendGroupMessage:
-    """send_group_message must delegate to the primary backend."""
-
-    def test_delegates_to_primary(self):
-        primary = _mock_backend()
-        mgr = BackendManager(primary)
-        mgr.send_group_message(["+1", "+2"], "hello")
-        primary.send_group_message.assert_called_once_with(["+1", "+2"], "hello")
-
-    def test_returns_primary_return_value(self):
-        primary = _mock_backend()
-        primary.send_group_message.return_value = "grp-handle-42"
-        mgr = BackendManager(primary)
-        result = mgr.send_group_message(["+1", "+2"], "hello")
-        assert result == "grp-handle-42"
-
-
-# ---------------------------------------------------------------------------
-# §3 connect resilience — a primary failure must not skip secondaries
+# §2 connect resilience — a primary failure must not skip secondaries
 # ---------------------------------------------------------------------------
 
 class TestConnectResilience:

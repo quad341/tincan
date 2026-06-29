@@ -17,11 +17,6 @@ Coverage:
      - After update_contact, messages migrated to phone-keyed conv
      - After update_contact, ConversationUpdated emitted for merged phone-keyed conv
      - Name-keyed conv merged into existing phone-keyed slot (unread_count combined)
-
-  §4 group message routing (tincan-du1x4)
-     - upsert_conversation with is_group=True populates _group_participants
-     - SendMessage to MAP-fetched group conv routes to send_group_message
-     - Non-group upsert does not pollute _group_participants
 """
 from __future__ import annotations
 
@@ -58,7 +53,6 @@ def _connected_service_with_backend(backend=None) -> TincanService:
     if backend is None:
         backend = MagicMock(name="backend")
         backend.send_message.return_value = "/org/obex/transfer1"
-        backend.is_group.return_value = False
     svc._backend = backend
     return svc
 
@@ -245,55 +239,3 @@ class TestUpdateContactMerge:
         svc.update_contact("+18157916347", "Mom Wordelman")
         assert svc._conversations["8157916347"].display_name == "Mom Wordelman"
 
-
-# ---------------------------------------------------------------------------
-# §4  group message routing (tincan-du1x4)
-# ---------------------------------------------------------------------------
-
-class TestGroupMessageRouting:
-    """upsert_conversation must populate _group_participants so SendMessage works.
-
-    Bug: MAP-fetched group convs arrived via upsert_conversation which did NOT
-    write _group_participants.  SendMessage then fell through to _resolve_to_phone
-    with a non-phone group-conv key, failing to route to send_group_message.
-    """
-
-    def _seed_group_conv(self, svc: TincanService) -> str:
-        """Seed a group conversation as MAP backend would (via upsert_conversation)."""
-        conv_id = "grp-abc123"
-        svc.upsert_conversation(Conversation(
-            id=conv_id,
-            display_name="Alice, Bob",
-            participants=["4155550001", "4155550002"],
-            is_group=True,
-        ))
-        return conv_id
-
-    def test_upsert_group_conv_populates_group_participants(self):
-        """upsert_conversation with is_group=True must add entry to _group_participants."""
-        svc = _make_service()
-        conv_id = self._seed_group_conv(svc)
-        assert conv_id in svc._group_participants
-        assert set(svc._group_participants[conv_id]) == {"4155550001", "4155550002"}
-
-    def test_send_message_routes_to_send_group_message(self):
-        """SendMessage to a MAP-fetched group conv must call send_group_message."""
-        svc = _connected_service_with_backend()
-        conv_id = self._seed_group_conv(svc)
-
-        svc.SendMessage(conv_id, "hello group")
-
-        svc._backend.send_group_message.assert_called_once()
-        called_participants = svc._backend.send_group_message.call_args[0][0]
-        assert set(called_participants) == {"4155550001", "4155550002"}
-
-    def test_non_group_upsert_does_not_pollute_group_participants(self):
-        """upsert_conversation for a 1:1 conv must NOT add to _group_participants."""
-        svc = _make_service()
-        svc.upsert_conversation(Conversation(
-            id="4155550001",
-            display_name="Alice",
-            participants=["4155550001"],
-            is_group=False,
-        ))
-        assert "4155550001" not in svc._group_participants

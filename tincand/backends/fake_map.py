@@ -7,9 +7,8 @@ Reproduces the key iOS MAP quirks that real code must handle:
   (b) Inbox message shapes including MMS with base64-encoded attachments.
   (c) Lazy PBAP contact resolution — display_name starts as a phone number;
       a separate PBAP step later resolves it to a human name.
-  (d) Group messages — participants list has multiple entries.
-  (e) Configurable send failures — send_message() / send_group_message() can
-      raise an exception for specific targets.
+  (d) Configurable send failures — send_message() can raise an exception for
+      specific targets.
 
 No GLib, no D-Bus, no phone needed.  Pure Python — safe to import in any test.
 """
@@ -102,29 +101,6 @@ class FakeMapBackend(BackendInterface):
             "read": True,
             "timestamp": "",
             "conv_id": to,
-            "participants": [],
-            "attachments": "[]",
-        }
-        return handle
-
-    def send_group_message(self, participants: list[str], body: str) -> str:
-        """Return a handle on success; raise configured exception on failure."""
-        key = ",".join(sorted(participants))
-        result = self._send_results.get(key)
-        if isinstance(result, Exception):
-            raise result
-        handle = _next_handle("fake-group")
-        self._handles[handle] = {
-            "handle": handle,
-            "sender": participants[0] if participants else "",
-            "display_name": "",
-            "body": body,
-            "direction": "outbound",
-            "msg_type": "MMS",
-            "read": True,
-            "timestamp": "",
-            "conv_id": key,
-            "participants": list(participants),
             "attachments": "[]",
         }
         return handle
@@ -144,7 +120,6 @@ class FakeMapBackend(BackendInterface):
         read: bool = False,
         timestamp: str = "",
         display_name: str = "",
-        participants: list[str] | None = None,
     ) -> str:
         """Add a canned inbound message to poll_inbox() and return its handle.
 
@@ -153,8 +128,6 @@ class FakeMapBackend(BackendInterface):
 
         iOS MAP quirk (b): pass msg_type='MMS' with a non-empty attachments list
         to simulate a media message.
-
-        iOS MAP quirk (d): pass participants with multiple entries for a group MMS.
         """
         handle = _next_handle()
         msg: dict = {
@@ -168,7 +141,6 @@ class FakeMapBackend(BackendInterface):
             "read": read,
             "timestamp": timestamp,
             "conv_id": conv_id or sender,
-            "participants": list(participants or []),
             "attachments": json.dumps(attachments or []),
         }
         self._inbox.append(msg)
@@ -176,19 +148,12 @@ class FakeMapBackend(BackendInterface):
         return handle
 
     def set_send_failure(self, target: str, exc: Exception) -> None:
-        """Cause send_message(target) or send_group_message(...) to raise exc.
+        """Cause send_message(target) to raise exc.
 
-        For group targets, pass the comma-joined sorted participant list as target,
-        or use set_group_send_failure() for convenience.
-
-        iOS MAP quirk (e): MAP send can fail with an exception (e.g. obexd
+        iOS MAP quirk (d): MAP send can fail with an exception (e.g. obexd
         'Internal Server Error') — callers must handle this gracefully.
         """
         self._send_results[target] = exc
-
-    def set_group_send_failure(self, participants: list[str], exc: Exception) -> None:
-        """Convenience: cause send_group_message(participants, ...) to raise exc."""
-        self._send_results[",".join(sorted(participants))] = exc
 
     def resolve_contact_name(self, sender: str, name: str) -> None:
         """Simulate PBAP resolving a phone number to a human name.

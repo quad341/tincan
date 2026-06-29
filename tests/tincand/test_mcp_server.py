@@ -101,11 +101,6 @@ class TestErrorMapping:
         with pytest.raises(ToolError):
             server_mod.send_message("+1234567890", "hello")
 
-    def test_send_group_message_not_running(self, mock_bridge):
-        mock_bridge.send_group_message.side_effect = TincandNotRunning("not running")
-        with pytest.raises(ToolError):
-            server_mod.send_group_message(["+1111111111", "+2222222222"], "hi")
-
     def test_get_contacts_not_connected(self, mock_bridge):
         mock_bridge.get_contacts.side_effect = TincandNotConnected("not connected")
         with pytest.raises(ToolError):
@@ -115,10 +110,6 @@ class TestErrorMapping:
 class TestSendMessageDocstring:
     def test_side_effect_warning_present(self):
         doc = server_mod.send_message.__doc__
-        assert "SIDE EFFECT" in doc
-
-    def test_send_group_message_side_effect_warning_present(self):
-        doc = server_mod.send_group_message.__doc__
         assert "SIDE EFFECT" in doc
 
 

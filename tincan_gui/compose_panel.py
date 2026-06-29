@@ -254,15 +254,6 @@ class ComposePanel(QWidget):
         """Expose send button for accessibility tests."""
         return self._send_btn
 
-    def set_group_mode(self, is_group: bool) -> None:
-        """Update compose bar for 1:1 vs group conversation."""
-        if is_group:
-            self._input.setPlaceholderText("Reply to group…")
-            self._char_counter.setVisible(False)
-        else:
-            self._input.setPlaceholderText("Type a message…")
-            self._char_counter.setVisible(True)
-
     def set_compose_enabled(self, enabled: bool, reason: str = "") -> None:
         self._enabled = enabled
         self._disable_reason = reason

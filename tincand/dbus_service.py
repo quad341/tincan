@@ -12,7 +12,6 @@ Implements the interface contract from tincan-56i, with amendments:
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import re
@@ -47,8 +46,6 @@ class Conversation:
     last_message_direction: str = ""
     unread_count: int = 0
     send_target: str = ""  # canonical phone for reply (may differ from id when id is name-keyed)
-    is_group: bool = False
-    group_name: str = ""
 
     def to_dbus(self) -> dbus.Dictionary:
         return dbus.Dictionary(
@@ -63,8 +60,6 @@ class Conversation:
                 "last_message_direction": dbus.String(self.last_message_direction),
                 "unread_count": dbus.UInt32(self.unread_count),
                 "send_target": dbus.String(self.send_target),
-                "is_group": dbus.Boolean(self.is_group),
-                "group_name": dbus.String(self.group_name),
             },
             signature="sv",
         )
@@ -109,7 +104,6 @@ class TincanService(dbus.service.Object):
         self._conversations: dict[str, Conversation] = {}
         self._messages: dict[str, list[dict]] = {}
         self._message_keys: set[tuple] = set()
-        self._group_participants: dict[str, list[str]] = {}
         self._backend: object | None = None
         self._contact_store = ContactStore()
         self._pbap: object | None = None  # set by __main__ after construction
@@ -498,16 +492,6 @@ class TincanService(dbus.service.Object):
                 "No active Bluetooth session",
                 name="im.tincan.Error.NotConnected",
             )
-        if to in self._group_participants and self._backend is not None:
-            try:
-                participants = self._group_participants[to]
-                return str(
-                    self._backend.send_group_message(participants, body)  # type: ignore[attr-defined]
-                )
-            except RuntimeError as exc:
-                raise dbus.exceptions.DBusException(
-                    str(exc), name="im.tincan.Error.SendFailed"
-                ) from exc
         if self._backend is None:
             raise dbus.exceptions.DBusException(
                 "No backend registered",
@@ -545,61 +529,6 @@ class TincanService(dbus.service.Object):
         })
         self.MessageSent(str(handle))
         return str(handle)
-
-    @dbus.service.method(IFACE_MESSAGES, in_signature="ass", out_signature="s")
-    def SendMessageToRecipients(self, recipients: list, body: str) -> str:
-        """Start a group conversation and optionally send an opening message."""
-        if len(recipients) < 2:
-            raise dbus.exceptions.DBusException(
-                "At least 2 recipients required",
-                name="im.tincan.Error.InvalidArgument",
-            )
-        normalized: list[str] = []
-        for r in recipients:
-            phone = _normalize_phone(str(r))
-            if len(re.sub(r"[^\d]", "", phone)) < 7:
-                raise dbus.exceptions.DBusException(
-                    f"Invalid phone number: {r!r}",
-                    name="im.tincan.Error.InvalidArgument",
-                )
-            normalized.append(phone)
-
-        if not self._connected:
-            raise dbus.exceptions.DBusException(
-                "No active Bluetooth session",
-                name="im.tincan.Error.NotConnected",
-            )
-
-        key = "|".join(sorted(normalized))
-        conv_id = hashlib.sha1(key.encode()).hexdigest()[:8]
-        self._group_participants[conv_id] = normalized
-
-        label = f"{normalized[0]}, {normalized[1]}"
-        if len(normalized) > 2:
-            label += f" & {len(normalized) - 2} more"
-        conv = Conversation(
-            id=conv_id,
-            display_name=label,
-            participants=normalized,
-            is_group=True,
-            group_name=label,
-        )
-        self.upsert_conversation(conv)
-
-        if body and os.environ.get("TINCAN_GROUP_SEND_ENABLED") and self._backend is not None:
-            try:
-                self._backend.send_group_message(normalized, body)  # type: ignore[attr-defined]
-            except RuntimeError as exc:
-                raise dbus.exceptions.DBusException(
-                    str(exc), name="im.tincan.Error.SendFailed"
-                ) from exc
-
-        return conv_id
-
-    @dbus.service.method(IFACE_MESSAGES, in_signature="s", out_signature="as")
-    def GetConversationParticipants(self, conv_id: str) -> list:
-        """Return phone numbers for *conv_id*, or [] if unknown."""
-        return [dbus.String(p) for p in self._group_participants.get(conv_id, [])]
 
     @dbus.service.method(IFACE_MESSAGES, in_signature="", out_signature="aa{sv}")
     def GetContacts(self) -> list:  # noqa: N802
@@ -963,7 +892,7 @@ class TincanService(dbus.service.Object):
     # ------------------------------------------------------------------
 
     def register_backend(self, backend: object) -> None:
-        """Wire a backend so SendMessage/SendMessageToRecipients can call send_group_message."""
+        """Wire a backend so SendMessage can dispatch to send_message."""
         self._backend = backend
 
     def set_call_controller(self, controller: object) -> None:
@@ -973,8 +902,6 @@ class TincanService(dbus.service.Object):
     def upsert_conversation(self, conv: Conversation) -> None:
         """Add or replace a conversation in the in-memory store."""
         self._conversations[conv.id] = conv
-        if conv.is_group and conv.participants:
-            self._group_participants[conv.id] = list(conv.participants)
 
     def on_message_received(self, message: dict) -> None:
         """Record an inbound message; update conversation state; emit signals.
