@@ -70,10 +70,31 @@ class TestMessageCache:
         assert cache.get_messages("alice")[0]["body"] == "hi alice"
         assert cache.get_messages("bob")[0]["body"] == "hi bob"
 
+    def test_list_conversation_summaries_uses_latest_cached_message(self, cache):
+        cache.add_message("+15550001", "inbound", "older", "Alice", "t1", "t1")
+        cache.add_message("+15550001", "outbound", "newer", "", "t2", "t2")
+        cache.add_message("+15550002", "inbound", "newest", "Bob", "t3", "t3")
+
+        rows = cache.list_conversation_summaries()
+
+        assert [row["id"] for row in rows] == ["+15550002", "+15550001"]
+        assert rows[0]["display_name"] == "Bob"
+        assert rows[0]["last_message_preview"] == "newest"
+        assert rows[1]["last_message_preview"] == "newer"
+
     def test_corrupted_file_returns_empty(self, tmp_path):
         cache = MessageCache(cache_dir=tmp_path)
         (tmp_path / "conv1.json").write_text("not json{{")
         assert cache.get_messages("conv1") == []
+
+    def test_list_conversation_summaries_ignores_corrupt_files(self, tmp_path):
+        cache = MessageCache(cache_dir=tmp_path)
+        cache.add_message("good", "inbound", "hello", "", "t1", "t1")
+        (tmp_path / "bad.json").write_text("not json{{")
+
+        rows = cache.list_conversation_summaries()
+
+        assert [row["id"] for row in rows] == ["good"]
 
 
 class TestOutboundSortKeyGuard:

@@ -47,7 +47,7 @@ class TestTitleBarEmojiFontConfig:
                     f"{name} button uses emoji font family {fam!r} (should use default font)"
                 )
 
-    def test_gear_button_font_includes_emoji_families(self, qtbot, _fake_emoji_families):
+    def test_gear_button_has_icon_or_fallback_text(self, qtbot):
         from tincan_gui.main import TitleBar
         tb = TitleBar()
         qtbot.addWidget(tb)

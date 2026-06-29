@@ -63,6 +63,12 @@ def _section_header(text: str) -> tuple[QLabel, QFrame]:
     return label, sep
 
 
+def _configure_bt_combo_width(combo: QComboBox) -> None:
+    combo.setMinimumWidth(_BT_COMBO_MIN_WIDTH)
+    combo.setMinimumContentsLength(_BT_COMBO_MIN_CONTENTS)
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+
+
 class _AppRowWidget(QWidget):
     """Single per-app row: truncated app label + Allow/Deny button pair."""
 
@@ -566,7 +572,7 @@ class SettingsDialog(QDialog):
             )
             unavail_layout.addWidget(self._adapter_unavailable_label)
             self._adapter_unavailable_frame.setAccessibleName("Bluetooth service unavailable")
-            self._adapter_unavailable_frame.show()
+            self._adapter_unavailable_frame.hide()
             bt_layout.addWidget(self._adapter_unavailable_frame)
 
             # Adapter combo (populated async after show; hidden until load completes)
@@ -614,12 +620,26 @@ class SettingsDialog(QDialog):
 
             # Apply rich two-line delegate (AC 4)
             self._adapter_combo.setItemDelegate(_AdapterItemDelegate(self._adapter_combo))
-            self._configure_bt_combo_width(self._adapter_combo)
+            _configure_bt_combo_width(self._adapter_combo)
 
             # Restart banner (shown after adapter selection change)
             self._adapter_restart_banner = _AdapterRestartBanner()
             self._adapter_restart_banner.hide()
             bt_layout.addWidget(self._adapter_restart_banner)
+
+            # AC6: adapter-mismatch annotation (shown when adapter_warning is set)
+            self._adapter_mismatch_annotation = QLabel()
+            _ann_font = QFont()
+            _ann_font.setPointSize(10)
+            self._adapter_mismatch_annotation.setFont(_ann_font)
+            self._adapter_mismatch_annotation.setStyleSheet("color: #f59f00;")
+            self._adapter_mismatch_annotation.setAccessibleName("wrong adapter detected")
+            self._adapter_mismatch_annotation.setTextInteractionFlags(
+                Qt.TextInteractionFlag.NoTextInteraction
+            )
+            self._adapter_mismatch_annotation.setTextFormat(Qt.TextFormat.PlainText)
+            self._adapter_mismatch_annotation.hide()
+            bt_layout.addWidget(self._adapter_mismatch_annotation)
 
             # Wire BT picker
             self._adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
@@ -660,7 +680,7 @@ class SettingsDialog(QDialog):
             self._device_combo.setPlaceholderText("Loading devices…")
             self._device_combo.setEnabled(False)
             self._device_combo.setAccessibleName("Bluetooth Device")
-            self._configure_bt_combo_width(self._device_combo)
+            _configure_bt_combo_width(self._device_combo)
             bt_layout.addWidget(self._device_combo)
 
             self._device_combo.currentIndexChanged.connect(self._on_device_changed)
@@ -671,6 +691,8 @@ class SettingsDialog(QDialog):
             self._device_loader.start()
             if self._device_loader.wait(150):
                 QCoreApplication.processEvents()
+
+            self._refresh_adapter_mismatch_annotation()
         else:
             # Read-only fallback when no daemon client (legacy / no-D-Bus mode)
             import os as _os  # noqa: PLC0415
@@ -861,28 +883,6 @@ class SettingsDialog(QDialog):
     # Adapter picker: load, populate, update badges
     # ------------------------------------------------------------------
 
-    def _configure_bt_combo_width(self, combo: QComboBox) -> None:
-        combo.setMinimumWidth(_BT_COMBO_MIN_WIDTH)
-        combo.setMinimumContentsLength(_BT_COMBO_MIN_CONTENTS)
-        combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-
-    def _refresh_adapter_mismatch_annotation(self) -> None:
-        if not self._adapters_list or not self._client:
-            self._adapter_mismatch_annotation.hide()
-            return
-        try:
-            status = self._client.get_status() or {}
-            warning = str(status.get("adapter_warning", ""))
-        except Exception:
-            warning = ""
-        if warning:
-            self._adapter_mismatch_annotation.setText(warning)
-            self._adapter_mismatch_annotation.show()
-        else:
-            self._adapter_mismatch_annotation.hide()
-
     def _load_adapters_sync(self) -> None:
         if not self._client:
             return
@@ -899,6 +899,14 @@ class SettingsDialog(QDialog):
         self._adapter_combo.clear()
 
         if not adapters:
+            self._adapter_combo.setEnabled(False)
+            self._adapter_combo.addItem("No Bluetooth adapters found")
+            _placeholder = self._adapter_combo.model().item(0)
+            if _placeholder:
+                _placeholder.setFlags(_placeholder.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            self._adapter_combo.setAccessibleName(
+                "Bluetooth adapter — none found. Check that a Bluetooth adapter is connected."
+            )
             self._adapter_combo.hide()
             self._adapter_badge_row.hide()
             self._adapter_powered_off_badge.hide()
@@ -906,6 +914,11 @@ class SettingsDialog(QDialog):
             self._adapter_mismatch_annotation.hide()
             self._adapter_unavailable_frame.show()
             self._refresh_btn.hide()  # AC 13: no Refresh link in BlueZ-unavailable state
+            self._adapter_mismatch_annotation.hide()
+            self._adapter_powered_off_badge.hide()
+            self._adapter_restart_banner.hide()
+            if hasattr(self, "_device_combo"):
+                self._device_combo.setPlaceholderText("No adapters available")
             self._bt_section.setEnabled(False)
             if hasattr(self, "_device_combo"):
                 self._device_combo.setEnabled(False)
@@ -923,7 +936,8 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
 
-        selected_idx = 0
+        saved_idx = -1
+        daemon_idx = -1
         for i, a in enumerate(adapters):
             path = str(a.get("path", ""))
             alias = str(a.get("alias", ""))
@@ -945,9 +959,13 @@ class SettingsDialog(QDialog):
                 f"{hci} — {alias}, HFP call audio {hfp_text}, LE advertising {le_text}"
             )
             self._adapter_combo.setItemData(i, a11y_text, Qt.ItemDataRole.AccessibleTextRole)
-            if a.get("is_selected") or (saved_path and path == saved_path):
-                selected_idx = i
+            # Two-pass: saved path wins over daemon is_selected (first match per pass)
+            if saved_path and path == saved_path and saved_idx == -1:
+                saved_idx = i
+            if a.get("is_selected") and daemon_idx == -1:
+                daemon_idx = i
 
+        selected_idx = saved_idx if saved_idx >= 0 else (daemon_idx if daemon_idx >= 0 else 0)
         self._adapter_combo.setCurrentIndex(selected_idx)
         self._adapter_combo.blockSignals(False)
 
@@ -1086,6 +1104,28 @@ class SettingsDialog(QDialog):
         self._device_loader = _DeviceLoader(self._client)
         self._device_loader.loaded.connect(self._populate_device_combo)
         self._device_loader.start()
+
+    def _refresh_adapter_mismatch_annotation(self, warning: str = "") -> None:
+        """AC6: show/hide ⚠ annotation on the Adapter row when adapter_warning is set."""
+        if not hasattr(self, "_adapter_mismatch_annotation"):
+            return
+        if not self._adapters_list:
+            self._adapter_mismatch_annotation.hide()
+            return
+        if not warning and self._client:
+            try:
+                status = self._client.get_status() or {}
+                warning = str(status.get("adapter_warning", ""))
+            except Exception:
+                warning = ""
+        if not warning:
+            self._adapter_mismatch_annotation.hide()
+            return
+        import re  # noqa: PLC0415
+        m = re.search(r"\(([^)]+)\) for call audio", warning)
+        wanted = m.group(1) if m else "see warning above"
+        self._adapter_mismatch_annotation.setText(f"⚠ (wanted: {wanted})")
+        self._adapter_mismatch_annotation.show()
 
     def _on_adapter_restart_now(self) -> None:
         backend = ""

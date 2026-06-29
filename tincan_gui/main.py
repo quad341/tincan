@@ -532,6 +532,7 @@ class MainWindow(QMainWindow):
         self._current_phone: str = ""     # phone for the open conversation
         self._current_phone_dialable: bool = True  # False when phone is unresolvable name
         self._connected_device: str = ""  # human-readable name or address of connected BT device
+        self._had_connection_this_session: bool = False
         self._daemon_spawn_attempted: bool = False
         self._messages_ok: bool = False   # True when daemon reports messages capability
         self._ancs_status: str = "disabled"  # tincan-nbjrp: rich ANCS state string
@@ -729,6 +730,7 @@ class MainWindow(QMainWindow):
         if status.get("connected"):
             addr = str(status.get("device_name") or status.get("device_address") or "")
             self._connected_device = addr
+            self._had_connection_this_session = True
             self._title_bar.set_connected(addr)
             self._banner_a.hide()
             self._conv_list.set_compose_new_enabled(bool(addr))
@@ -811,6 +813,15 @@ class MainWindow(QMainWindow):
             reason = "no conversation selected"
             btn.setToolTip(f"Sending unavailable — {reason}")
             btn.setAccessibleName(f"Send unavailable — {reason}")
+
+        self._sync_compose_new_state()
+
+    def _sync_compose_new_state(self) -> None:
+        """Gate starting new conversations on an active device connection."""
+        self._conv_list.set_compose_new_enabled(
+            bool(self._connected_device),
+            "Connect a device to start a new conversation",
+        )
 
     def _apply_capabilities(self, caps: dict) -> None:
         # tincan-40c/tincan-5mze: all keys always present; default False (not
@@ -1090,8 +1101,10 @@ class MainWindow(QMainWindow):
             if cfg.device != device_address:
                 save_daemon_config(DaemonConfig(backend=cfg.backend, device=device_address))
 
+        self._had_connection_this_session = True
         self._connected_device = name
         self._title_bar.set_connected(name)
+        self._banner_a.set_reconnecting(False)
         self._banner_a.hide()
         self._conv_list.set_compose_new_enabled(True)
         self._apply_capabilities(caps)
@@ -1111,6 +1124,9 @@ class MainWindow(QMainWindow):
         self._failed_sends.clear()
         self._pending_sends.clear()
         self._title_bar.set_disconnected()
+        self._banner_a.set_reason(
+            "OUT_OF_RANGE" if self._had_connection_this_session else "NEUTRAL"
+        )
         self._banner_a.show()
         self._banner_b.hide()
         self._ancs_status = "disabled"
@@ -1123,8 +1139,10 @@ class MainWindow(QMainWindow):
             False, "Connect to your iPhone to start a new conversation"
         )
         self._tray.set_connected(False)
+        self._sync_compose_new_state()
 
     def _on_reconnect_clicked(self) -> None:
+        self._banner_a.set_reconnecting(True)
         self._dbus_client.request_reconnect()
 
     def _on_ancs_reconnect_clicked(self) -> None:
@@ -1463,6 +1481,8 @@ class MainWindow(QMainWindow):
 
     def _on_compose_new(self) -> None:
         """Open the multi-chip New Conversation dialog."""
+        if not self._connected_device:
+            return
         contacts = self._gather_autocomplete_contacts()
         dlg = NewConversationDialog(contacts, parent=self)
         if dlg.exec() != QDialog.Accepted:
@@ -1762,6 +1782,8 @@ class MainWindow(QMainWindow):
         """Load conversation list from daemon; show empty state when unavailable."""
         self._conv_list.set_refresh_loading(True)
         raw = self._dbus_client.list_conversations()
+        if not raw:
+            raw = self._msg_cache.list_conversation_summaries()
         conversations = []
         self._conversations_by_id = {}
         for c in raw:

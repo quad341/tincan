@@ -34,7 +34,6 @@ from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
 from tincan_gui.message_cache import MessageCache
 
-
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
 # ---------------------------------------------------------------------------
@@ -327,7 +326,6 @@ class TestInlineImage:
         """
         win = _make_window(qtbot, tmp_path=tmp_path)
 
-        import base64
         # 1×1 white JPEG in base64
         tiny_jpeg_b64 = (
             "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8U"
@@ -504,6 +502,21 @@ class TestCacheImmediateOnSelect:
         )
 
         win._load_thread_messages = original_load
+
+    def test_cached_conversation_rows_used_when_daemon_returns_empty(self, qtbot, tmp_path):
+        """Cached thread files populate the sidebar when D-Bus has no conversations."""
+        win = _make_window(qtbot, tmp_path=tmp_path)
+        win._msg_cache.add_message(
+            "+15550001", "inbound", "Cached hello", "Alice",
+            "20260101T120000", "20260101T120000",
+        )
+
+        win._load_conversations()
+
+        assert "+15550001" in win._conversations_by_id
+        data = win._conversations_by_id["+15550001"]
+        assert data.preview == "Cached hello"
+        assert data.name == "Alice"
 
     def test_sent_cache_shown_before_map_call(self, qtbot, tmp_path):
         """In-session sent messages appear synchronously at conversation-select time."""

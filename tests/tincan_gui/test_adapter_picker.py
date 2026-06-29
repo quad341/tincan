@@ -29,7 +29,7 @@ Run with: python -m pytest tests/tincan_gui/test_adapter_picker.py -v
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from PySide6.QtCore import Qt
@@ -118,13 +118,36 @@ class TestPickerNormalState:
         dlg = _make_dialog(qtbot, monkeypatch, _TWO_ADAPTERS)
         assert dlg._adapter_combo.count() == 2
 
+    def test_adapter_combo_has_non_clipping_width_policy(self, qtbot, monkeypatch):
+        """Collapsed adapter combo must keep enough width for alias + MAC labels."""
+        dlg = _make_dialog(qtbot, monkeypatch, _TWO_ADAPTERS)
+        assert dlg._adapter_combo.minimumWidth() >= 360
+        assert dlg._adapter_combo.minimumContentsLength() >= 42
+        assert (
+            dlg._adapter_combo.sizeAdjustPolicy()
+            == QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
+
+    def test_device_combo_has_non_clipping_width_policy(self, qtbot, monkeypatch):
+        """Collapsed device combo must keep enough width for MAC + name labels."""
+        dlg = _make_dialog(qtbot, monkeypatch, _TWO_ADAPTERS)
+        assert dlg._device_combo.minimumWidth() >= 360
+        assert dlg._device_combo.minimumContentsLength() >= 42
+        assert (
+            dlg._device_combo.sizeAdjustPolicy()
+            == QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
+
     def test_hfp_badge_text_present_for_selected_adapter(self, qtbot, monkeypatch):
         """A badge widget below the combo must mention 'HFP call audio'."""
         dlg = _make_dialog(qtbot, monkeypatch, _TWO_ADAPTERS)
-        badge_text = dlg._adapter_badge_row.text() if hasattr(dlg._adapter_badge_row, "text") else \
-            " ".join(
+        badge_text = (
+            dlg._adapter_badge_row.text()
+            if hasattr(dlg._adapter_badge_row, "text")
+            else " ".join(
                 w.text() for w in dlg._adapter_badge_row.findChildren(QLabel)
             )
+        )
         assert "HFP call audio" in badge_text, (
             f"Expected 'HFP call audio' badge text; got: {badge_text!r}"
         )
@@ -132,10 +155,13 @@ class TestPickerNormalState:
     def test_le_badge_text_present_for_selected_adapter(self, qtbot, monkeypatch):
         """A badge widget below the combo must mention 'LE advertising'."""
         dlg = _make_dialog(qtbot, monkeypatch, _TWO_ADAPTERS)
-        badge_text = dlg._adapter_badge_row.text() if hasattr(dlg._adapter_badge_row, "text") else \
-            " ".join(
+        badge_text = (
+            dlg._adapter_badge_row.text()
+            if hasattr(dlg._adapter_badge_row, "text")
+            else " ".join(
                 w.text() for w in dlg._adapter_badge_row.findChildren(QLabel)
             )
+        )
         assert "LE advertising" in badge_text, (
             f"Expected 'LE advertising' badge text; got: {badge_text!r}"
         )
@@ -425,7 +451,7 @@ class TestAdapterUnavailableBanner:
         )
 
     def test_banner_does_not_reappear_after_dismiss(self, qtbot, monkeypatch):
-        """After dismissal, re-triggering status check with same mismatch must not re-show banner."""
+        """After dismissal, the same mismatch must not re-show the banner."""
         window = self._make_window(
             qtbot, monkeypatch,
             adapter_path="/org/bluez/hci1",
