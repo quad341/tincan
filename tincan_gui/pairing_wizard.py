@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
     QWizard,
@@ -16,6 +17,62 @@ from PySide6.QtWidgets import (
 )
 
 from tincand.pairing import FailureReason, PairingState
+
+
+# ---------------------------------------------------------------------------
+# _DetectBadge — per-page detection mode chip
+# ---------------------------------------------------------------------------
+
+class _DetectBadge(QLabel):
+    """Inline chip showing the current detection mode for a wizard step.
+
+    Modes:
+      AUTO    — automatic detection active (green)
+      PENDING — detection in progress (amber)
+      IOS     — manual iOS step required (navy)
+      DONE    — detection complete (same as AUTO)
+    """
+
+    _STYLES: dict[str, tuple[str, str, str | None]] = {
+        # mode: (text, stylesheet, accessibleName or None)
+        "AUTO": (
+            "✓ AUTO",
+            "background-color: #14532d; color: #f0fdf4; "
+            "font-size: 11px; padding: 2px 8px; border-radius: 3px;",
+            "Detection mode: automatic",
+        ),
+        "PENDING": (
+            "⟳ DETECTING…",
+            "background-color: #92400e; color: #fffbeb; "
+            "font-size: 11px; padding: 2px 8px; border-radius: 3px;",
+            None,
+        ),
+        "IOS": (
+            "📱 iOS STEP",
+            "background-color: #1e3a5f; color: #eff6ff; "
+            "font-size: 11px; padding: 2px 8px; border-radius: 3px;",
+            "Detection mode: manual iOS step required",
+        ),
+        "DONE": (
+            "✓ AUTO",
+            "background-color: #14532d; color: #f0fdf4; "
+            "font-size: 11px; padding: 2px 8px; border-radius: 3px;",
+            None,
+        ),
+    }
+
+    def __init__(self, mode: str = "AUTO", parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(22)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.set_mode(mode)
+
+    def set_mode(self, mode: str) -> None:
+        text, style, accessible = self._STYLES.get(mode, self._STYLES["AUTO"])
+        self.setText(text)
+        self.setStyleSheet(style)
+        if accessible:
+            self.setAccessibleName(accessible)
 
 
 class _WizardPage(QWizardPage):
@@ -79,6 +136,8 @@ class _CheckingAdapterPage(_WizardPage):
         super().__init__()
         self.setTitle("Set up your iPhone  ·  Step 1 of 8")
         layout = QVBoxLayout(self)
+        self.detect_badge = _DetectBadge("AUTO")
+        layout.addWidget(self.detect_badge)
         layout.addWidget(self._progress(1))
         layout.addWidget(self._heading("Checking Bluetooth…"))
         self._body_label = self._body(
@@ -96,6 +155,8 @@ class _AdvertisingPage(_WizardPage):
         super().__init__()
         self.setTitle("Set up your iPhone  ·  Step 2 of 8")
         layout = QVBoxLayout(self)
+        self.detect_badge = _DetectBadge("AUTO")
+        layout.addWidget(self.detect_badge)
         layout.addWidget(self._progress(2))
         layout.addWidget(self._heading("Open Bluetooth on your iPhone"))
         self._body_label = self._body(
@@ -114,6 +175,8 @@ class _WaitingForPairPage(_WizardPage):
         super().__init__()
         self.setTitle("Set up your iPhone  ·  Step 3 of 8")
         layout = QVBoxLayout(self)
+        self.detect_badge = _DetectBadge("AUTO")
+        layout.addWidget(self.detect_badge)
         layout.addWidget(self._progress(3))
         layout.addWidget(self._heading("Tap 'Pair' on your iPhone"))
         self._body_label = self._body(
@@ -131,6 +194,8 @@ class _VerifyingAncsPage(_WizardPage):
         super().__init__()
         self.setTitle("Set up your iPhone  ·  Step 5 of 8")
         layout = QVBoxLayout(self)
+        self.detect_badge = _DetectBadge("AUTO")
+        layout.addWidget(self.detect_badge)
         layout.addWidget(self._progress(5))
         layout.addWidget(self._heading("Checking notifications…"))
         self._body_label = self._body("Confirming that notifications are working.")
@@ -146,6 +211,8 @@ class _MapSessionPage(_WizardPage):
         super().__init__()
         self.setTitle("Set up your iPhone  ·  Step 6 of 8")
         layout = QVBoxLayout(self)
+        self.detect_badge = _DetectBadge("AUTO")
+        layout.addWidget(self.detect_badge)
         layout.addWidget(self._progress(6))
         layout.addWidget(self._heading("Setting up message access…"))
         self._body_label = self._body("Preparing to access your messages.")
@@ -161,6 +228,8 @@ class _VerifyingMapPage(_WizardPage):
         super().__init__()
         self.setTitle("Set up your iPhone  ·  Step 7 of 8")
         layout = QVBoxLayout(self)
+        self.detect_badge = _DetectBadge("AUTO")
+        layout.addWidget(self.detect_badge)
         layout.addWidget(self._progress(7))
         layout.addWidget(self._heading("Checking message access…"))
         self._body_label = self._body("Confirming that message access is working.")
@@ -183,6 +252,8 @@ class MapConsentPage(_WizardPage):
         super().__init__()
         self.setTitle("Set up your iPhone  ·  Step 6 of 8")
         layout = QVBoxLayout(self)
+        self.detect_badge = _DetectBadge("IOS")
+        layout.addWidget(self.detect_badge)
         layout.addWidget(self._progress(6))
         layout.addWidget(self._heading("Allow message access on your iPhone"))
         self._body_label = self._body(
