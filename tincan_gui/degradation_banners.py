@@ -224,7 +224,10 @@ class ANCSRepairBanner(QWidget):
 # ---------------------------------------------------------------------------
 
 class StateCBanner(QWidget):
-    """Thin ANCS-healing banner (h=32, lime) — shown only during HEALING state. Design: tincan-s42 §2 State C."""
+    """Thin ANCS-healing banner (h=32, lime) — shown only during HEALING state.
+
+    Design: tincan-s42 §2 State C.
+    """
 
     heal_clicked = Signal()
 
