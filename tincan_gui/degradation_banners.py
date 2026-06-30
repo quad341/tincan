@@ -388,6 +388,8 @@ class ContactsEmptyBanner(QWidget):
 class CallSetupRequiredBanner(QWidget):
     """Slim amber banner shown when the SELinux call module is not installed."""
 
+    setup_calls_clicked = Signal()
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(32)
@@ -407,7 +409,7 @@ class CallSetupRequiredBanner(QWidget):
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 12, 0)
+        layout.setContentsMargins(12, 0, 8, 0)
 
         label = QLabel(msg)
         label_font = QFont()
@@ -416,6 +418,17 @@ class CallSetupRequiredBanner(QWidget):
         label.setStyleSheet("color: #92400e;")
         label.setWordWrap(True)
         layout.addWidget(label, stretch=1)
+
+        setup_btn = QPushButton(self.tr("Set up calls →"))
+        setup_btn.setFixedWidth(100)
+        setup_btn.setStyleSheet(
+            "QPushButton { color: #92400e; background: transparent; "
+            "border: 1px solid #fbbf24; border-radius: 4px; padding: 0 6px; }"
+            "QPushButton:hover { background: #fef3c7; }"
+        )
+        setup_btn.setAccessibleName(self.tr("Set up phone calls"))
+        setup_btn.clicked.connect(self.setup_calls_clicked)
+        layout.addWidget(setup_btn)
 
 
 # ---------------------------------------------------------------------------
