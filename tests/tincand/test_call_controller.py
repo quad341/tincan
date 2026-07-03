@@ -230,22 +230,27 @@ class TestAudioTimeout:
 # ---------------------------------------------------------------------------
 
 class TestCallPropertyChangedActive:
-    """_on_call_property_changed: active-after-error fires on_audio_restored;
-    normal active fires on_call_connected."""
+    """_on_call_property_changed: first connect always fires on_call_connected
+    (clearing any spurious ring-time audio error); only a re-active after a
+    mid-call error fires on_audio_restored."""
 
     @pytest.fixture
     def ctrl(self):
         return _make_controller()
 
-    def test_active_after_error_fires_audio_restored(self, ctrl):
-        cs = _add_fake_call(ctrl, state="incoming")
+    def test_reactive_after_error_fires_audio_restored(self, ctrl):
+        # An ALREADY-connected call that hit a mid-call audio error and goes
+        # active again → audio recovered (AudioRestored), not a fresh connect.
+        cs = _add_fake_call(ctrl, state="active")
+        cs.connected = True
         cs.audio_error = True
         ctrl._on_call_property_changed("call0", "State", "active")
         ctrl._service.on_audio_restored.assert_called_once()
         ctrl._service.on_call_connected.assert_not_called()
 
-    def test_active_after_error_clears_audio_error_flag(self, ctrl):
-        cs = _add_fake_call(ctrl, state="incoming")
+    def test_reactive_after_error_clears_audio_error_flag(self, ctrl):
+        cs = _add_fake_call(ctrl, state="active")
+        cs.connected = True
         cs.audio_error = True
         ctrl._on_call_property_changed("call0", "State", "active")
         assert cs.audio_error is False
@@ -256,6 +261,23 @@ class TestCallPropertyChangedActive:
         ctrl._on_call_property_changed("call0", "State", "active")
         ctrl._service.on_call_connected.assert_called_once()
         ctrl._service.on_audio_restored.assert_not_called()
+        assert cs.connected is True
+
+    def test_first_connect_after_ring_timeout_still_fires_call_connected(self, ctrl):
+        # Regression (the live "echo + card never noticed the call" bug): a ring
+        # longer than the audio watchdog used to fire a spurious AudioError
+        # (audio_error=True) BEFORE the call connected. The first "active" must
+        # still announce CallConnected — clearing the spurious flag — or the iris
+        # AEC bridge and Call Card capture (which key on CallConnected, not
+        # AudioRestored) never engage.
+        cs = _add_fake_call(ctrl, state="alerting")
+        cs.audio_error = True          # as if the ring-time watchdog had fired
+        assert cs.connected is False
+        ctrl._on_call_property_changed("call0", "State", "active")
+        ctrl._service.on_call_connected.assert_called_once()
+        ctrl._service.on_audio_restored.assert_not_called()
+        assert cs.audio_error is False
+        assert cs.connected is True
 
     def test_terminated_does_not_fire_call_ended(self, ctrl):
         # FR3: terminated in PropertyChanged defers teardown to CallRemoved
@@ -425,7 +447,8 @@ class TestCallActiveHeld:
         assert call_order == ["active", "connected"]
 
     def test_on_call_active_fires_before_on_audio_restored(self, ctrl):
-        cs = _add_fake_call(ctrl, "call0", state="incoming")
+        cs = _add_fake_call(ctrl, "call0", state="active")
+        cs.connected = True   # already connected → re-active is a recovery
         cs.audio_error = True
         call_order = []
         ctrl._service.on_call_active.side_effect = lambda *a: call_order.append("active")

@@ -51,6 +51,7 @@ class CallState:
     number: str
     direction: str
     audio_error: bool = field(default=False)
+    connected: bool = field(default=False)  # has the call ever reached "active"?
 
 
 class CallController:
@@ -440,11 +441,25 @@ class CallController:
         if new_state == "active":
             self._cancel_audio_timer()
             self._service.on_call_active(call_id, cs.number)
-            if cs.audio_error:
+            if not cs.connected:
+                # First time this call reaches active = it just connected. A
+                # timeout that fired while the phone was still ringing is
+                # spurious (audio cannot exist before "active"), so clear it and
+                # ALWAYS announce CallConnected — downstream (the iris AEC bridge
+                # and Call Card capture) engages on CallConnected, not
+                # AudioRestored. Firing AudioRestored here on first connect (the
+                # old behaviour when a long ring tripped the timer) silently
+                # skipped both, causing echo + a card that never noticed the call.
+                cs.connected = True
+                cs.audio_error = False
+                self._service.on_call_connected()
+            elif cs.audio_error:
+                # Re-active after a genuine mid-call audio drop → audio recovered.
                 cs.audio_error = False
                 self._service.on_audio_restored()
-            else:
-                self._service.on_call_connected()
+            # Audio can only establish now that the call is active — start the
+            # watchdog here (not on dial), so a long ring never trips it.
+            self._start_audio_timer(call_id)
             self._schedule_audio_setup()
         elif new_state == "held":
             self._service.on_call_held(call_id, cs.number)
@@ -508,6 +523,7 @@ class CallController:
                 self._sco_setup_attempts,
                 len(self._sco_links),
             )
+            self._cancel_audio_timer()  # audio is up — stand down the watchdog
             self._audio_setup_timer_id = None
             return False
 
@@ -537,7 +553,8 @@ class CallController:
         cs = self._resolve_call(call_id)
         call_obj = self._system_bus.get_object(_OFONO_BUS, cs.ofono_path)
         dbus.Interface(call_obj, _IFACE_CALL).Answer()
-        self._start_audio_timer(cs.call_id)
+        # The audio watchdog is started when the call reaches "active"
+        # (_on_call_property_changed), not here — so a long ring never trips it.
 
     def hangup_call(self, call_id: str) -> None:
         import dbus
@@ -554,7 +571,9 @@ class CallController:
             raise RuntimeError("oFono VoiceCallManager not available — HFP modem not found")
         path = self._vcm.Dial(number, "")
         call_id = self._short_id(str(path))
-        self._start_audio_timer(call_id)
+        # No audio watchdog here — it starts when the call reaches "active".
+        # Starting it on dial made a ring longer than the timeout fire a spurious
+        # AudioError, which then suppressed CallConnected on answer.
         return call_id
 
     def send_dtmf(self, key: str) -> None:
