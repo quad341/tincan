@@ -177,6 +177,7 @@ class CallController:
         self._pending_online_path = path
         modem_obj = self._system_bus.get_object(_OFONO_BUS, path)
         modem_iface = dbus.Interface(modem_obj, _IFACE_MODEM)
+        self._pending_modem_iface = modem_iface
         _log.info(
             "CallController: sending Powered=true to %s (preferred adapter %s) "
             "to trigger SLC establishment",
@@ -188,6 +189,18 @@ class CallController:
         except Exception as exc:
             _log.debug(
                 "CallController: SetProperty Powered=true on %s suppressed: %s",
+                path,
+                exc,
+            )
+        # A powered modem does NOT go Online on its own — request it, or calls
+        # never work (VoiceCallManager stays unbound). If not powered yet this
+        # raises NotAvailable (suppressed); the Powered PropertyChanged handler
+        # below then re-requests Online once the SLC is up.
+        try:
+            modem_iface.SetProperty("Online", dbus.Boolean(True))
+        except Exception as exc:
+            _log.debug(
+                "CallController: SetProperty Online=true on %s deferred until Powered: %s",
                 path,
                 exc,
             )
@@ -210,6 +223,7 @@ class CallController:
                 pass
             self._pending_subscription = None
         self._pending_online_path = None
+        self._pending_modem_iface = None
 
     def _cancel_vcm_subscriptions(self) -> None:
         for match in self._vcm_signal_matches:
@@ -220,8 +234,6 @@ class CallController:
         self._vcm_signal_matches = []
 
     def _on_pending_modem_property_changed(self, path: str, name: str, value: object) -> None:
-        if str(name) != "Online" or not bool(value):
-            return
         if path != self._pending_online_path:
             _log.debug(
                 "CallController: ignoring stale PropertyChanged from %s (watching %s)",
@@ -229,13 +241,31 @@ class CallController:
                 self._pending_online_path,
             )
             return
-        _log.info(
-            "CallController: %s went Online — binding (preferred adapter %s)",
-            path,
-            self._adapter_hci,
-        )
-        self._cancel_pending_subscription()
-        self._bind_modem(path)
+        prop = str(name)
+        if prop == "Powered" and bool(value):
+            # SLC is up now — request Online (rejected before Powered, hence here).
+            iface = self._pending_modem_iface
+            if iface is not None:
+                import dbus
+
+                _log.info("CallController: %s Powered — requesting Online", path)
+                try:
+                    iface.SetProperty("Online", dbus.Boolean(True))
+                except Exception as exc:
+                    _log.debug(
+                        "CallController: SetProperty Online=true on %s suppressed: %s",
+                        path,
+                        exc,
+                    )
+            return
+        if prop == "Online" and bool(value):
+            _log.info(
+                "CallController: %s went Online — binding (preferred adapter %s)",
+                path,
+                self._adapter_hci,
+            )
+            self._cancel_pending_subscription()
+            self._bind_modem(path)
 
     def _bind_modem(self, path: str) -> None:
         import dbus
