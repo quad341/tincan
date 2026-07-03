@@ -1172,3 +1172,42 @@ class TestBindModemRealCallAudio:
             ctrl._bind_modem(_PREFERRED_PATH)
 
         assert ctrl._modem_path == _PREFERRED_PATH
+
+
+# ---------------------------------------------------------------------------
+# §16 _on_audio_setup_tick — poll for the SCO nodes (they lag call-active)
+# ---------------------------------------------------------------------------
+
+class TestScoAudioSetupRetry:
+    """The bluez SCO nodes appear a beat after call-active, so audio setup polls
+    setup_sco_routing until it wires links (or gives up after MAX_ATTEMPTS)."""
+
+    @staticmethod
+    def _ready_controller():
+        ctrl = _make_controller()
+        ctrl._modem_path = "/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20"
+        ctrl._system_bus = MagicMock()
+        ctrl._sco_setup_attempts = 0
+        return ctrl
+
+    def test_retries_while_empty_then_stops_on_success(self):
+        ctrl = self._ready_controller()
+        with patch("tincand.call_controller.call_audio") as ca:
+            ca.setup_sco_routing.side_effect = [[], [], [("bi:capture_FL", "sink:playback_FL")]]
+            assert ctrl._on_audio_setup_tick() is True    # nodes not up yet → retry
+            assert ctrl._on_audio_setup_tick() is True    # still not up → retry
+            assert ctrl._on_audio_setup_tick() is False   # linked → stop
+        assert ctrl._sco_links == [("bi:capture_FL", "sink:playback_FL")]
+        assert ctrl._sco_setup_attempts == 3
+        # CallVolume is maxed once, on the first tick only — not every retry
+        assert ca.set_ofono_call_volume.call_count == 1
+
+    def test_gives_up_after_max_attempts(self):
+        from tincand.call_controller import _SCO_SETUP_MAX_ATTEMPTS
+        ctrl = self._ready_controller()
+        with patch("tincand.call_controller.call_audio") as ca:
+            ca.setup_sco_routing.return_value = []        # SCO never comes up
+            results = [ctrl._on_audio_setup_tick() for _ in range(_SCO_SETUP_MAX_ATTEMPTS)]
+        assert results[:-1] == [True] * (_SCO_SETUP_MAX_ATTEMPTS - 1)  # keep polling
+        assert results[-1] is False                                    # then give up
+        assert ctrl._sco_links == []

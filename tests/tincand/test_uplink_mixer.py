@@ -155,9 +155,9 @@ def mock_subproc(monkeypatch):
 
     def _run(cmd, **kw):
         calls_made.append(cmd)
-        if cmd[0] == "pw-link" and "--list-outputs" in cmd:
+        if cmd[0] == "pw-link" and "-o" in cmd:
             return _cp(_FAKE_OUTPUTS)
-        if cmd[0] == "pw-link" and "--list-inputs" in cmd:
+        if cmd[0] == "pw-link" and "-i" in cmd:
             return _cp(_FAKE_INPUTS)
         if cmd[0] == "pw-link" and "-d" not in cmd and len(cmd) == 3:
             return _cp(returncode=0)
@@ -181,9 +181,9 @@ def mock_subproc(monkeypatch):
 def no_bluez_subproc(monkeypatch):
     """Subprocess returning ports with NO bluez_output for the given MAC."""
     def _run(cmd, **kw):
-        if cmd[0] == "pw-link" and "--list-outputs" in cmd:
+        if cmd[0] == "pw-link" and "-o" in cmd:
             return _cp(_NO_BLUEZ_OUTPUTS)
-        if cmd[0] == "pw-link" and "--list-inputs" in cmd:
+        if cmd[0] == "pw-link" and "-i" in cmd:
             return _cp(_NO_BLUEZ_INPUTS)
         if cmd[0] == "pactl":
             return _cp(stdout="17", returncode=0)
@@ -200,9 +200,9 @@ def no_bluez_subproc(monkeypatch):
 def no_mic_subproc(monkeypatch):
     """Subprocess returning ports with NO mic capture for the given MAC."""
     def _run(cmd, **kw):
-        if cmd[0] == "pw-link" and "--list-outputs" in cmd:
+        if cmd[0] == "pw-link" and "-o" in cmd:
             return _cp(_NO_MIC_OUTPUTS)
-        if cmd[0] == "pw-link" and "--list-inputs" in cmd:
+        if cmd[0] == "pw-link" and "-i" in cmd:
             return _cp(_FAKE_INPUTS)
         if cmd[0] == "pactl":
             return _cp(stdout="17", returncode=0)
@@ -219,9 +219,9 @@ def no_mic_subproc(monkeypatch):
 def pactl_fail_subproc(monkeypatch):
     """Subprocess where pactl load-module fails."""
     def _run(cmd, **kw):
-        if cmd[0] == "pw-link" and "--list-outputs" in cmd:
+        if cmd[0] == "pw-link" and "-o" in cmd:
             return _cp(_FAKE_OUTPUTS)
-        if cmd[0] == "pw-link" and "--list-inputs" in cmd:
+        if cmd[0] == "pw-link" and "-i" in cmd:
             return _cp(_FAKE_INPUTS)
         if cmd[0] == "pactl" and "load-module" in cmd:
             return _cp(stdout="", returncode=1)
