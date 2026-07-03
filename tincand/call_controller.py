@@ -29,6 +29,12 @@ _IFACE_CALL = "org.ofono.VoiceCall"
 _RETRY_STEPS = [1.0, 2.0, 4.0, 8.0, 15.0]
 _AUDIO_TIMEOUT_S = 5
 
+# SCO audio setup: the native bluez SCO nodes are created only when the SCO
+# transport comes up, which lags call-active by a beat (observed ~0.5–1 s, but
+# can be longer). Poll for them instead of a single deferred shot.
+_SCO_SETUP_INTERVAL_MS = 500
+_SCO_SETUP_MAX_ATTEMPTS = 10  # ~5 s total
+
 _HCI_RE = re.compile(r"/(hci\d+)/")
 
 
@@ -77,6 +83,7 @@ class CallController:
         self._audio_timer_id: int | None = None
         self._audio_timer_call_id: str | None = None
         self._audio_setup_timer_id: int | None = None
+        self._sco_setup_attempts: int = 0
         self._sco_links: list[tuple[str, str]] = []
         self._call_sigs: dict[str, object] = {}  # SignalMatch per call_id
         self._retry_index: int = 0
@@ -469,12 +476,15 @@ class CallController:
         return False
 
     # ------------------------------------------------------------------
-    # SCO audio setup (deferred 1 s to let PipeWire register SCO nodes)
+    # SCO audio setup (polled — the SCO nodes lag call-active)
     # ------------------------------------------------------------------
 
     def _schedule_audio_setup(self) -> None:
         self._cancel_audio_setup_timer()
-        self._audio_setup_timer_id = GLib.timeout_add(1000, self._on_audio_setup_tick)
+        self._sco_setup_attempts = 0
+        self._audio_setup_timer_id = GLib.timeout_add(
+            _SCO_SETUP_INTERVAL_MS, self._on_audio_setup_tick
+        )
 
     def _cancel_audio_setup_timer(self) -> None:
         if self._audio_setup_timer_id is not None:
@@ -482,11 +492,36 @@ class CallController:
             self._audio_setup_timer_id = None
 
     def _on_audio_setup_tick(self) -> bool:
-        self._audio_setup_timer_id = None
+        """Poll for the bluez SCO nodes and wire routing once they appear.
+
+        Returns True to keep the GLib timer firing (retry), False to stop.
+        """
+        self._sco_setup_attempts += 1
         if self._modem_path and self._system_bus:
-            call_audio.set_ofono_call_volume(self._system_bus, self._modem_path)
+            if self._sco_setup_attempts == 1:
+                call_audio.set_ofono_call_volume(self._system_bus, self._modem_path)
             self._sco_links = call_audio.setup_sco_routing(self._mac_fragment)
-        return False
+
+        if self._sco_links:
+            _log.info(
+                "CallController: SCO routing established on attempt %d (%d links)",
+                self._sco_setup_attempts,
+                len(self._sco_links),
+            )
+            self._audio_setup_timer_id = None
+            return False
+
+        if self._sco_setup_attempts >= _SCO_SETUP_MAX_ATTEMPTS:
+            _log.warning(
+                "CallController: SCO routing not established after %d attempts "
+                "(~%.1fs) — call audio may be relying on the iris AEC bridge",
+                self._sco_setup_attempts,
+                _SCO_SETUP_MAX_ATTEMPTS * _SCO_SETUP_INTERVAL_MS / 1000.0,
+            )
+            self._audio_setup_timer_id = None
+            return False
+
+        return True  # SCO nodes not up yet — retry
 
     def _teardown_call_audio(self) -> None:
         call_audio.teardown_sco_routing(self._sco_links)

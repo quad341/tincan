@@ -111,29 +111,63 @@ def set_ofono_call_volume(system_bus: object, modem_path: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _pw_list_outputs() -> list[str]:
-    """Return available pw-link output port names (sources)."""
+    """Return available pw-link output port names (sources).
+
+    Uses ``pw-link -o`` — the real flag. ``--list-outputs`` is NOT a valid
+    pw-link option: it prints usage to stderr and returns an empty list, which
+    silently disabled all SCO routing (every call logged "no bluez ports").
+    """
     try:
         r = subprocess.run(
-            ["pw-link", "--list-outputs"],
+            ["pw-link", "-o"],
             capture_output=True, text=True, timeout=5,
         )
         return [line.split()[0] for line in r.stdout.splitlines() if line.strip()]
     except Exception as exc:
-        _log.debug("call_audio: pw-link --list-outputs failed: %s", exc)
+        _log.debug("call_audio: pw-link -o failed: %s", exc)
         return []
 
 
 def _pw_list_inputs() -> list[str]:
-    """Return available pw-link input port names (sinks)."""
+    """Return available pw-link input port names (sinks).
+
+    Uses ``pw-link -i`` (the real flag; ``--list-inputs`` is not valid).
+    """
     try:
         r = subprocess.run(
-            ["pw-link", "--list-inputs"],
+            ["pw-link", "-i"],
             capture_output=True, text=True, timeout=5,
         )
         return [line.split()[0] for line in r.stdout.splitlines() if line.strip()]
     except Exception as exc:
-        _log.debug("call_audio: pw-link --list-inputs failed: %s", exc)
+        _log.debug("call_audio: pw-link -i failed: %s", exc)
         return []
+
+
+def _default_sink() -> str:
+    """Return the current default sink node name (e.g. ``iris_aec_sink``), or ''."""
+    try:
+        r = subprocess.run(
+            ["pactl", "get-default-sink"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip()
+    except Exception as exc:
+        _log.debug("call_audio: pactl get-default-sink failed: %s", exc)
+        return ""
+
+
+def _default_source() -> str:
+    """Return the current default source node name (e.g. ``iris_aec_src``), or ''."""
+    try:
+        r = subprocess.run(
+            ["pactl", "get-default-source"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip()
+    except Exception as exc:
+        _log.debug("call_audio: pactl get-default-source failed: %s", exc)
+        return ""
 
 
 def _pw_link(out_port: str, in_port: str) -> bool:
@@ -172,14 +206,22 @@ def setup_sco_routing(device_mac_fragment: str) -> list[tuple[str, str]]:
     """Wire PipeWire SCO routing for device_mac_fragment.
 
     Creates two link groups:
-      bluez_input (far-end audio from phone) → default sink (speakers)
-      default source (microphone)            → bluez_output (audio to phone)
+      bluez_input (far-end audio from phone) → the default sink   (what you hear)
+      the default source (your microphone)   → bluez_output       (what they hear)
+
+    The far-end/mic are wired to the *current default* sink/source by name — so
+    under the ambient WebRTC-AEC setup (where ``iris_aec_sink``/``iris_aec_src``
+    are the defaults) this lands the echo-cancelled full-duplex path directly,
+    convergent with iris's ``aec_audio.sh bridge`` rather than fighting it. When
+    no AEC is loaded it degrades to the raw default devices (basic call audio).
 
     Returns the list of (output_port, input_port) pairs successfully linked;
     pass this to teardown_sco_routing() when the call ends.
 
-    If ports are not yet registered (PipeWire may take ~1s after call active),
-    logs a warning and returns an empty list.
+    The bluez SCO nodes lag ``call_connected`` (they are created when the SCO
+    transport comes up), so an empty return is normal for the first attempt —
+    CallController retries. Empty-return reasons are logged at debug; the
+    controller emits a single warning if every retry is exhausted.
     """
     if not device_mac_fragment:
         _log.warning(
@@ -192,31 +234,44 @@ def setup_sco_routing(device_mac_fragment: str) -> list[tuple[str, str]]:
     outputs = _pw_list_outputs()
     inputs = _pw_list_inputs()
 
-    # Ports for phone→speaker path
-    bluez_out_ports = [p for p in outputs if "bluez_input" in p.lower() and mac in p.lower()]
-    sink_in_ports = [p for p in inputs if "playback" in p.lower() and "bluez" not in p.lower()]
+    default_sink = _default_sink()
+    default_source = _default_source()
 
-    # Ports for mic→phone path
-    src_out_ports = [p for p in outputs if "capture" in p.lower() and "bluez" not in p.lower()]
+    # Ports for phone→speaker path: far party → the default sink's playback ports.
+    bluez_out_ports = [p for p in outputs if "bluez_input" in p.lower() and mac in p.lower()]
+    sink_in_ports = [
+        p for p in inputs
+        if "playback" in p.lower() and default_sink and p.startswith(default_sink + ":")
+    ]
+
+    # Ports for mic→phone path: the default source's capture ports → bluez uplink.
+    src_out_ports = [
+        p for p in outputs
+        if "capture" in p.lower() and default_source and p.startswith(default_source + ":")
+    ]
     bluez_in_ports = [p for p in inputs if "bluez_output" in p.lower() and mac in p.lower()]
 
     if not bluez_out_ports:
-        _log.warning(
-            "call_audio: no bluez_input ports found for MAC %s — SCO routing skipped "
-            "(PipeWire may need more time; will retry if configured)",
+        _log.debug(
+            "call_audio: no bluez_input ports for MAC %s yet — SCO nodes lag "
+            "call-connect; controller will retry",
             mac,
         )
         return []
     if not bluez_in_ports:
-        _log.warning(
-            "call_audio: no bluez_output ports found for MAC %s — SCO routing skipped", mac
-        )
+        _log.debug("call_audio: no bluez_output ports for MAC %s yet — will retry", mac)
         return []
     if not sink_in_ports:
-        _log.warning("call_audio: no default sink playback ports — SCO routing skipped")
+        _log.debug(
+            "call_audio: default sink %r has no playback ports yet — will retry",
+            default_sink,
+        )
         return []
     if not src_out_ports:
-        _log.warning("call_audio: no default source capture ports — SCO routing skipped")
+        _log.debug(
+            "call_audio: default source %r has no capture ports yet — will retry",
+            default_source,
+        )
         return []
 
     links: list[tuple[str, str]] = []
