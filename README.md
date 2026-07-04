@@ -17,12 +17,13 @@ Messaging **sends and receives today**, live-tested against an iPhone over Bluet
 - ✅ **SMS** — receive (with desktop notifications) and send from the GUI, delivered to the recipient's phone
 - ✅ **Group MMS** — receive, send, and a dedicated group conversation view
 - ✅ **App notification mirroring (ANCS)** — see notifications from phone apps on your desktop, with per-app filtering
-- ✅ **Message history** — a local SQLite cache, so conversations persist across restarts
+- ✅ **Message history** — conversations persist across restarts (today via a GUI-side cache; daemon-owned history as the single source of truth is on the roadmap)
 - ✅ **Contact names (PBAP)** — real names on conversations
 - ✅ **Desktop UX** — conversation threads, dark mode, close-to-tray, clickable links, "Delivered ✓", color emoji on Wayland, one-click launch
 - ✅ **Internationalization** — translatable UI (i18n pipeline)
-- 🚧 In progress: contact **avatars & search**, conversation-dedup polish
-- 🗺️ Planned: **phone calls** (HFP audio), **packaging & distribution**, an **MCP API** for agents — see the **[roadmap](https://github.com/quad341/tincan/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap)**
+- ✅ **Phone calls (HFP)** — dial, answer, hang up, DTMF, with SCO audio via oFono + PipeWire (reference dongle required — see [COMPATIBILITY.md](COMPATIBILITY.md))
+- 🚧 In progress: **reliability baseline** — ANCS auto re-arm after reconnect, HFP bring-up without manual oFono poking, gated echo cancellation (AEC) on every call
+- 🗺️ Planned: **first-run onboarding**, daemon-owned message history, **packaging & distribution** — see the **[roadmap](https://github.com/quad341/tincan/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap)**
 
 Reference setup: iPhone (iOS 26.x) ↔ Fedora 44, BlueZ 5.86, PipeWire, PySide6, Python 3.14.
 
