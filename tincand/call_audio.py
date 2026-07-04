@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import re
 import subprocess
 from dataclasses import dataclass, field
 
@@ -110,6 +111,19 @@ def set_ofono_call_volume(system_bus: object, modem_path: str) -> None:
 # PipeWire SCO routing via pw-link
 # ---------------------------------------------------------------------------
 
+_PW_CMD_TIMEOUT = 5
+
+# Matches both AEC naming schemes seen in the wild: PipeWire/Pulse
+# module-echo-cancel ("echo-cancel-capture"/"echo-cancel-playback") and
+# iris's virtual pair ("iris_aec_src"/"iris_aec_sink").
+_AEC_NODE_RE = re.compile(r"aec|echo.?cancel", re.IGNORECASE)
+
+
+def _run_pw(args: list[str]) -> subprocess.CompletedProcess:
+    """Run a PipeWire/Pulse CLI command. Single seam — tests monkeypatch this."""
+    return subprocess.run(args, capture_output=True, text=True, timeout=_PW_CMD_TIMEOUT)
+
+
 def _pw_list_outputs() -> list[str]:
     """Return available pw-link output port names (sources).
 
@@ -118,10 +132,7 @@ def _pw_list_outputs() -> list[str]:
     silently disabled all SCO routing (every call logged "no bluez ports").
     """
     try:
-        r = subprocess.run(
-            ["pw-link", "-o"],
-            capture_output=True, text=True, timeout=5,
-        )
+        r = _run_pw(["pw-link", "-o"])
         return [line.split()[0] for line in r.stdout.splitlines() if line.strip()]
     except Exception as exc:
         _log.debug("call_audio: pw-link -o failed: %s", exc)
@@ -134,10 +145,7 @@ def _pw_list_inputs() -> list[str]:
     Uses ``pw-link -i`` (the real flag; ``--list-inputs`` is not valid).
     """
     try:
-        r = subprocess.run(
-            ["pw-link", "-i"],
-            capture_output=True, text=True, timeout=5,
-        )
+        r = _run_pw(["pw-link", "-i"])
         return [line.split()[0] for line in r.stdout.splitlines() if line.strip()]
     except Exception as exc:
         _log.debug("call_audio: pw-link -i failed: %s", exc)
@@ -147,10 +155,7 @@ def _pw_list_inputs() -> list[str]:
 def _default_sink() -> str:
     """Return the current default sink node name (e.g. ``iris_aec_sink``), or ''."""
     try:
-        r = subprocess.run(
-            ["pactl", "get-default-sink"],
-            capture_output=True, text=True, timeout=5,
-        )
+        r = _run_pw(["pactl", "get-default-sink"])
         return r.stdout.strip()
     except Exception as exc:
         _log.debug("call_audio: pactl get-default-sink failed: %s", exc)
@@ -160,10 +165,7 @@ def _default_sink() -> str:
 def _default_source() -> str:
     """Return the current default source node name (e.g. ``iris_aec_src``), or ''."""
     try:
-        r = subprocess.run(
-            ["pactl", "get-default-source"],
-            capture_output=True, text=True, timeout=5,
-        )
+        r = _run_pw(["pactl", "get-default-source"])
         return r.stdout.strip()
     except Exception as exc:
         _log.debug("call_audio: pactl get-default-source failed: %s", exc)
@@ -173,12 +175,15 @@ def _default_source() -> str:
 def _pw_link(out_port: str, in_port: str) -> bool:
     """Create a pw-link connection. Return True on success."""
     try:
-        r = subprocess.run(
-            ["pw-link", out_port, in_port],
-            capture_output=True, text=True, timeout=5,
-        )
+        r = _run_pw(["pw-link", out_port, in_port])
         if r.returncode == 0:
             _log.debug("call_audio: linked %s → %s", out_port, in_port)
+            return True
+        if "File exists" in (r.stderr or ""):
+            # WirePlumber (or a prior attempt) already made this exact link —
+            # the routing we want is in place; count it as ours to track so
+            # the controller doesn't keep retrying an already-routed call.
+            _log.debug("call_audio: link %s → %s already exists", out_port, in_port)
             return True
         _log.warning(
             "call_audio: pw-link %s → %s failed (rc=%d): %s",
@@ -193,10 +198,7 @@ def _pw_link(out_port: str, in_port: str) -> bool:
 def _pw_unlink(out_port: str, in_port: str) -> None:
     """Disconnect a pw-link connection."""
     try:
-        subprocess.run(
-            ["pw-link", "-d", out_port, in_port],
-            capture_output=True, text=True, timeout=5,
-        )
+        _run_pw(["pw-link", "-d", out_port, in_port])
         _log.debug("call_audio: unlinked %s → %s", out_port, in_port)
     except Exception as exc:
         _log.debug("call_audio: pw-link -d error: %s", exc)
@@ -541,3 +543,114 @@ class BargeInController:
 
     def is_muted(self) -> bool:
         return self._muted
+
+
+# ---------------------------------------------------------------------------
+# Echo-cancellation verification (tincan-97mlk.2)
+# ---------------------------------------------------------------------------
+
+def _pw_current_links() -> list[tuple[str, str]]:
+    """Parse ``pw-link -l`` into (output_port, input_port) pairs.
+
+    Format: an unindented line names a port; indented ``|->`` lines are links
+    FROM that port, indented ``|<-`` lines are links INTO it.
+    """
+    try:
+        r = _run_pw(["pw-link", "-l"])
+        if r.returncode != 0:
+            return []
+    except Exception as exc:
+        _log.debug("call_audio: pw-link -l failed: %s", exc)
+        return []
+    links: list[tuple[str, str]] = []
+    current: str | None = None
+    for raw in r.stdout.splitlines():
+        if not raw.strip():
+            continue
+        stripped = raw.strip()
+        if stripped.startswith("|->"):
+            if current:
+                links.append((current, stripped[3:].strip()))
+        elif stripped.startswith("|<-"):
+            if current:
+                links.append((stripped[3:].strip(), current))
+        elif not raw[0].isspace():
+            current = stripped
+    return links
+
+
+def verify_aec_in_path(device_mac_fragment: str = "") -> tuple[bool, str]:
+    """Check both echo-cancellation invariants on the live call graph.
+
+    The echo the far party hears is their own downlink voice leaving the
+    speakers and re-entering the raw microphone. Two invariants kill it —
+    break either and the far party hears themselves (see iris
+    scripts/aec_audio.sh, which documents the same pair):
+
+      1. REFERENCE — the SCO downlink (bluez_input, far-party voice) must
+         feed an echo-cancel sink, so their voice is in the AEC reference
+         and gets subtracted from the mic.
+      2. CLEAN MIC — the SCO uplink (bluez_output, what the far party
+         hears) must be fed by the echo-cancelled source, and must NOT also
+         be fed by a raw physical microphone (alsa_input*).
+
+    Inspects the live link graph regardless of who created the links
+    (tincand, WirePlumber, or iris's aec_audio.sh). Playback streams into
+    the uplink (e.g. an agent's TTS) are intended and not flagged.
+
+    Returns (ok, detail) — detail names the offending nodes on failure.
+    """
+    mac = device_mac_fragment.lower().replace(":", "_")
+    links = _pw_current_links()
+    if not links:
+        return False, "no PipeWire links visible (pw-link -l empty or failed)"
+
+    def _node(port: str) -> str:
+        return port.split(":", 1)[0]
+
+    down_targets = {
+        _node(inp) for out, inp in links
+        if _node(out).lower().startswith("bluez_input") and (not mac or mac in out.lower())
+    }
+    up_sources = {
+        _node(out) for out, inp in links
+        if _node(inp).lower().startswith("bluez_output") and (not mac or mac in inp.lower())
+    }
+    if not down_targets and not up_sources:
+        return False, "SCO nodes absent from the link graph (no active call audio)"
+
+    ref_ok = any(_AEC_NODE_RE.search(n) for n in down_targets)
+    mic_ok = any(_AEC_NODE_RE.search(n) for n in up_sources)
+    # A raw physical mic feeding the uplink reopens the echo path even when
+    # the AEC source is also linked.
+    raw_mic_leak = sorted(n for n in up_sources if n.startswith("alsa_input"))
+    # Downlink also wired straight to speakers bypasses the AEC reference
+    # (double audio + reference mismatch).
+    speaker_bypass = sorted(n for n in down_targets if n.startswith("alsa_output"))
+
+    if ref_ok and mic_ok and not raw_mic_leak and not speaker_bypass:
+        return True, (
+            f"reference sink(s) {sorted(down_targets)}, "
+            f"uplink source(s) {sorted(up_sources)}"
+        )
+    problems: list[str] = []
+    if not ref_ok:
+        problems.append(
+            f"downlink feeds {sorted(down_targets) or 'nothing'} — "
+            "far-party voice is not in any AEC reference"
+        )
+    elif speaker_bypass:
+        problems.append(
+            f"downlink also feeds speaker(s) {speaker_bypass} directly, "
+            "bypassing the AEC reference"
+        )
+    if not mic_ok:
+        problems.append(
+            f"uplink fed by {sorted(up_sources) or 'nothing'} — "
+            "no echo-cancelled source on the uplink"
+        )
+    elif raw_mic_leak:
+        problems.append(
+            f"uplink ALSO fed by raw microphone {raw_mic_leak} — echo path open"
+        )
+    return False, "; ".join(problems)
