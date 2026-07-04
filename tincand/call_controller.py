@@ -27,6 +27,11 @@ _IFACE_VCM = "org.ofono.VoiceCallManager"
 _IFACE_CALL = "org.ofono.VoiceCall"
 
 _RETRY_STEPS = [1.0, 2.0, 4.0, 8.0, 15.0]
+# The phone may stay absent far longer than the 30s fast-backoff above (e.g.
+# disconnected overnight) — once it's exhausted, keep polling indefinitely at
+# this slower cadence instead of giving up, so a later reconnect self-heals
+# without a daemon restart (tincan-c7b8g).
+_RETRY_STEADY_STATE_S = 30.0
 _AUDIO_TIMEOUT_S = 5
 
 # SCO audio setup: the native bluez SCO nodes are created only when the SCO
@@ -167,11 +172,19 @@ class CallController:
         self._bind_modem(top_path)
 
     def _schedule_retry(self) -> None:
-        if self._retry_index >= len(_RETRY_STEPS):
-            _log.info("CallController: modem discovery exhausted 30s — idling")
-            return
-        delay_s = _RETRY_STEPS[self._retry_index]
-        self._retry_index += 1
+        if self._retry_index < len(_RETRY_STEPS):
+            delay_s = _RETRY_STEPS[self._retry_index]
+            self._retry_index += 1
+        else:
+            if self._retry_index == len(_RETRY_STEPS):
+                _log.info(
+                    "CallController: modem discovery exhausted %ds fast backoff — "
+                    "falling back to steady %ds polling until the phone reconnects",
+                    int(sum(_RETRY_STEPS)),
+                    int(_RETRY_STEADY_STATE_S),
+                )
+                self._retry_index += 1  # advance past the log-once marker
+            delay_s = _RETRY_STEADY_STATE_S
         GLib.timeout_add(int(delay_s * 1000), self._retry_tick)
 
     def _retry_tick(self) -> bool:
@@ -320,6 +333,8 @@ class CallController:
         self._retry_index = 0
         vcm_obj = self._system_bus.get_object(_OFONO_BUS, path)
         self._vcm = dbus.Interface(vcm_obj, _IFACE_VCM)
+        if hasattr(self._service, "set_capability"):
+            self._service.set_capability("call_link_ready", True)
         self._vcm_signal_matches.append(
             self._vcm.connect_to_signal("CallAdded", self._on_call_added)
         )
@@ -363,6 +378,8 @@ class CallController:
         self._calls.clear()
         self._cancel_vcm_subscriptions()
         self._vcm = None
+        if hasattr(self._service, "set_capability"):
+            self._service.set_capability("call_link_ready", False)
         self._modem_path = None
         self._cancel_audio_timer()
         self._cancel_audio_setup_timer()

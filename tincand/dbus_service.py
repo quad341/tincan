@@ -35,6 +35,54 @@ IFACE_CALLS = "im.tincan.Calls"
 
 _DEV_RE = re.compile(r"dev_([0-9A-Fa-f]{2}(?:_[0-9A-Fa-f]{2}){5})")
 
+_BLUEZ_SERVICE = "org.bluez"
+_BLUEZ_ROOT = "/"
+_OBJ_MANAGER_IFACE = "org.freedesktop.DBus.ObjectManager"
+_DEVICE_IFACE = "org.bluez.Device1"
+
+
+def _bt_connect_device(device_address: str, bus: dbus.SystemBus | None = None) -> None:
+    """Best-effort, non-blocking org.bluez Device1.Connect() to bring up the BT ACL link.
+
+    Device1.Connect() blocks for the entire BT connection attempt (can be
+    many seconds, longer if the phone is out of range) — tincand has a
+    single GLib main loop, so a synchronous call here would stall the whole
+    daemon (all D-Bus dispatch, timers, signal delivery) for that window.
+    Fired with reply_handler/error_handler so it returns immediately; the
+    outcome is only logged, not surfaced to the Connect() caller.
+    Silently no-ops (logs only) if the device is not in BlueZ's managed
+    objects (e.g. unpaired). Pass a mock bus to test without hardware.
+    """
+    try:
+        if bus is None:
+            bus = dbus.SystemBus()
+        obj_mgr = dbus.Interface(
+            bus.get_object(_BLUEZ_SERVICE, _BLUEZ_ROOT), _OBJ_MANAGER_IFACE
+        )
+        for path, interfaces in obj_mgr.GetManagedObjects().items():
+            dev = interfaces.get(_DEVICE_IFACE, {})
+            if str(dev.get("Address", "")) == device_address:
+                device = dbus.Interface(
+                    bus.get_object(_BLUEZ_SERVICE, path), _DEVICE_IFACE
+                )
+                device.Connect(
+                    reply_handler=lambda: _log.info(
+                        "_bt_connect_device: Device1.Connect(%s) succeeded", device_address
+                    ),
+                    error_handler=lambda exc: _log.info(
+                        "_bt_connect_device: Device1.Connect(%s) did not complete: %s",
+                        device_address, exc,
+                    ),
+                )
+                return
+        _log.debug(
+            "_bt_connect_device: %s not found in BlueZ managed objects", device_address
+        )
+    except Exception as exc:
+        _log.warning(
+            "_bt_connect_device: Device1.Connect(%s) failed: %s", device_address, exc
+        )
+
 
 @dataclass
 class Conversation:
@@ -90,6 +138,10 @@ class TincanService(dbus.service.Object):
         # tincan-5mze: ancs_needs_repair added for FALLBACK state.
         # tincan-r41sx: call_setup_ready is system-level (SELinux module present),
         # not per-connection; it is NOT reset on Disconnect.
+        # tincan-c7b8g: call_link_ready is per-connection — True iff CallController
+        # currently has a bound VoiceCallManager (dialing is actually possible right
+        # now). Distinct from call_setup_ready on purpose: don't conflate SELinux
+        # readiness with live HFP link state.
         self._capabilities: dict[str, bool] = {
             "messages": False,
             "contacts": False,
@@ -101,6 +153,7 @@ class TincanService(dbus.service.Object):
             # echo-cancellation invariants (downlink in AEC reference, uplink
             # fed by the AEC source). False between calls.
             "call_audio_aec": False,
+            "call_link_ready": False,
         }
         # tincan-nbjrp: richer ANCS state ("disabled"|"armed"|"healing"|"active"|"fallback")
         # kept separate from capabilities{} which has signature="sb" (bool values only).
@@ -133,6 +186,10 @@ class TincanService(dbus.service.Object):
         # TODO(review F3): raise im.tincan.Error.DeviceNotFound when device_address
         # is not in the BlueZ paired-devices list.  Requires BlueZ adapter wiring
         # (tincand/bluetooth/pairing.py) — deferred to M1.1.
+        # tincan-c7b8g: actually bring up the BT ACL link — previously this only
+        # flipped internal state, leaving BlueZ disconnected while GetStatus()
+        # optimistically reported connected=true.
+        _bt_connect_device(str(device_address))
         self._connected = True
         self._device_address = str(device_address)
         # Remember the address every session actually connects to, as the
@@ -173,6 +230,7 @@ class TincanService(dbus.service.Object):
             "ancs_needs_repair": False,
             "call_setup_ready": call_setup_ready,
             "call_audio_aec": False,
+            "call_link_ready": False,
         }
         self._contact_store.clear()
         _log.info("Disconnected")
@@ -311,7 +369,7 @@ class TincanService(dbus.service.Object):
 
     _KNOWN_CAPABILITIES = frozenset({
         "messages", "contacts", "contacts_empty", "ancs", "ancs_needs_repair",
-        "call_setup_ready", "call_audio_aec",
+        "call_setup_ready", "call_audio_aec", "call_link_ready",
     })
     _KNOWN_ANCS_STATUSES = frozenset({"disabled", "armed", "healing", "active", "fallback"})
 
