@@ -38,6 +38,7 @@ import pytest
 
 from tincand.backends.bluez_map import ConsentRequired, MapBackend
 from tincand.backends.mock import MockBackend
+from tincand.obex_worker import InlineWorker
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1160,8 +1161,9 @@ class TestMapBackendDeadSessionUnaffectedByUpdateInboxFix:
         assert exc_info.value.get_dbus_name() == "org.freedesktop.DBus.Error.UnknownObject"
 
     def test_poll_tick_calls_handle_session_dead_when_setfolder_raises_unknown_object(self):
-        """_poll_tick calls _handle_session_dead when poll_inbox raises UnknownObject."""
+        """_poll_tick triggers _handle_session_dead when the poll raises UnknownObject."""
         backend, mock_glib, _ = _make_reconnect_backend()
+        backend._worker = InlineWorker()  # deliver the worker completion synchronously
         backend._msg_access = MagicMock()
         backend._update_inbox_unsupported = True  # flag set from prior poll
 
@@ -1177,4 +1179,6 @@ class TestMapBackendDeadSessionUnaffectedByUpdateInboxFix:
             result = backend._poll_tick()
 
         assert len(handle_dead_calls) == 1
-        assert result == mock_glib.SOURCE_REMOVE
+        # The tick itself stays armed (SOURCE_CONTINUE); on session death the
+        # real _handle_session_dead → disconnect() removes the source by id.
+        assert result == mock_glib.SOURCE_CONTINUE

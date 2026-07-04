@@ -352,6 +352,12 @@ def main() -> None:
     import dbus.mainloop.glib
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    # The OBEX worker thread (tincand.obex_worker) makes D-Bus calls off the
+    # main thread; thread support must be initialized before it does.
+    # SerialWorker also calls this in its constructor, but doing it here —
+    # right after the mainloop is installed, before any bus use — removes any
+    # ordering doubt. Idempotent.
+    dbus.mainloop.glib.threads_init()
 
     adapter_path, adapter_path_requested = _resolve_adapter_path(args)
     _device_addr, _device_discovered = _resolve_device_address(args)
