@@ -525,6 +525,7 @@ class CallController:
             )
             self._cancel_audio_timer()  # audio is up — stand down the watchdog
             self._audio_setup_timer_id = None
+            self._report_aec_state()
             return False
 
         if self._sco_setup_attempts >= _SCO_SETUP_MAX_ATTEMPTS:
@@ -535,13 +536,43 @@ class CallController:
                 _SCO_SETUP_MAX_ATTEMPTS * _SCO_SETUP_INTERVAL_MS / 1000.0,
             )
             self._audio_setup_timer_id = None
+            # Still verify: WirePlumber or iris's bridge may have routed the
+            # call on its own, and the AEC state matters either way.
+            self._report_aec_state()
             return False
 
         return True  # SCO nodes not up yet — retry
 
+    def _report_aec_state(self) -> None:
+        """Verify the echo-cancellation invariants and surface the result.
+
+        Echo-free calls are a hard requirement (tincan-97mlk.2): without AEC
+        the far party hears themselves and won't stay on the call. The result
+        is exposed as the call_audio_aec capability so clients and the doctor
+        check can see it.
+        """
+        ok, detail = call_audio.verify_aec_in_path(self._mac_fragment)
+        try:
+            self._service.set_capability("call_audio_aec", ok)
+        except Exception as exc:  # service surface optional in some tests
+            _log.debug("CallController: set_capability(call_audio_aec) failed: %s", exc)
+        if ok:
+            _log.info("CallController: AEC verified in call path ✓ (%s)", detail)
+        else:
+            _log.warning(
+                "CallController: NO ECHO CANCELLATION in call path — far party "
+                "may hear themselves: %s",
+                detail,
+            )
+
     def _teardown_call_audio(self) -> None:
+        self._cancel_audio_setup_timer()
         call_audio.teardown_sco_routing(self._sco_links)
         self._sco_links = []
+        try:
+            self._service.set_capability("call_audio_aec", False)
+        except Exception as exc:
+            _log.debug("CallController: set_capability(call_audio_aec) failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Call control (called by TincanService D-Bus methods)

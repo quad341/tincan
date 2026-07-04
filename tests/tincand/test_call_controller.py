@@ -1217,6 +1217,7 @@ class TestScoAudioSetupRetry:
         ctrl = self._ready_controller()
         with patch("tincand.call_controller.call_audio") as ca:
             ca.setup_sco_routing.side_effect = [[], [], [("bi:capture_FL", "sink:playback_FL")]]
+            ca.verify_aec_in_path.return_value = (False, "test graph")
             assert ctrl._on_audio_setup_tick() is True    # nodes not up yet → retry
             assert ctrl._on_audio_setup_tick() is True    # still not up → retry
             assert ctrl._on_audio_setup_tick() is False   # linked → stop
@@ -1230,7 +1231,88 @@ class TestScoAudioSetupRetry:
         ctrl = self._ready_controller()
         with patch("tincand.call_controller.call_audio") as ca:
             ca.setup_sco_routing.return_value = []        # SCO never comes up
+            ca.verify_aec_in_path.return_value = (False, "test graph")
             results = [ctrl._on_audio_setup_tick() for _ in range(_SCO_SETUP_MAX_ATTEMPTS)]
         assert results[:-1] == [True] * (_SCO_SETUP_MAX_ATTEMPTS - 1)  # keep polling
         assert results[-1] is False                                    # then give up
         assert ctrl._sco_links == []
+
+
+# ---------------------------------------------------------------------------
+# AEC state reporting on audio setup (tincan-97mlk.2)
+# ---------------------------------------------------------------------------
+
+class TestAecReporting:
+    """_on_audio_setup_tick verifies AEC once routing resolves; teardown clears it."""
+
+    def _armed_controller(self):
+        ctrl = _make_controller()
+        ctrl._modem_path = "/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20"
+        ctrl._system_bus = MagicMock()
+        return ctrl
+
+    def test_aec_verified_when_routing_established(self):
+        ctrl = self._armed_controller()
+        with patch("tincand.call_controller.call_audio") as mock_audio, \
+             patch("tincand.call_controller.GLib"):
+            mock_audio.setup_sco_routing.return_value = [("out", "in")]
+            mock_audio.verify_aec_in_path.return_value = (True, "aec ok")
+            ctrl._sco_setup_attempts = 0
+            keep_going = ctrl._on_audio_setup_tick()
+
+        assert keep_going is False
+        mock_audio.verify_aec_in_path.assert_called_once()
+        ctrl._service.set_capability.assert_any_call("call_audio_aec", True)
+
+    def test_aec_failure_sets_capability_false(self):
+        ctrl = self._armed_controller()
+        with patch("tincand.call_controller.call_audio") as mock_audio, \
+             patch("tincand.call_controller.GLib"):
+            mock_audio.setup_sco_routing.return_value = [("out", "in")]
+            mock_audio.verify_aec_in_path.return_value = (False, "raw mic on uplink")
+            ctrl._sco_setup_attempts = 0
+            ctrl._on_audio_setup_tick()
+
+        ctrl._service.set_capability.assert_any_call("call_audio_aec", False)
+
+    def test_aec_still_verified_after_retries_exhausted(self):
+        """WirePlumber/iris may have routed on their own — verify regardless."""
+        from tincand.call_controller import _SCO_SETUP_MAX_ATTEMPTS
+
+        ctrl = self._armed_controller()
+        with patch("tincand.call_controller.call_audio") as mock_audio, \
+             patch("tincand.call_controller.GLib"):
+            mock_audio.setup_sco_routing.return_value = []
+            mock_audio.verify_aec_in_path.return_value = (False, "no links")
+            ctrl._sco_setup_attempts = 0
+            keep_going = True
+            while keep_going:
+                keep_going = ctrl._on_audio_setup_tick()
+
+        assert ctrl._sco_setup_attempts == _SCO_SETUP_MAX_ATTEMPTS
+        mock_audio.verify_aec_in_path.assert_called_once()
+        ctrl._service.set_capability.assert_any_call("call_audio_aec", False)
+
+    def test_no_aec_verify_while_still_retrying(self):
+        ctrl = self._armed_controller()
+        with patch("tincand.call_controller.call_audio") as mock_audio, \
+             patch("tincand.call_controller.GLib"):
+            mock_audio.setup_sco_routing.return_value = []
+            ctrl._sco_setup_attempts = 0
+            keep_going = ctrl._on_audio_setup_tick()
+
+        assert keep_going is True
+        mock_audio.verify_aec_in_path.assert_not_called()
+
+    def test_teardown_clears_aec_capability_and_cancels_setup_timer(self):
+        ctrl = self._armed_controller()
+        with patch("tincand.call_controller.call_audio") as mock_audio, \
+             patch("tincand.call_controller.GLib") as mock_glib:
+            ctrl._audio_setup_timer_id = 77
+            ctrl._sco_links = [("out", "in")]
+            ctrl._teardown_call_audio()
+
+        mock_glib.source_remove.assert_called_once_with(77)
+        mock_audio.teardown_sco_routing.assert_called_once_with([("out", "in")])
+        assert ctrl._sco_links == []
+        ctrl._service.set_capability.assert_any_call("call_audio_aec", False)

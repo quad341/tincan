@@ -97,6 +97,10 @@ class TincanService(dbus.service.Object):
             "ancs": False,
             "ancs_needs_repair": False,
             "call_setup_ready": False,
+            # tincan-97mlk.2: True while a live call's audio graph passes both
+            # echo-cancellation invariants (downlink in AEC reference, uplink
+            # fed by the AEC source). False between calls.
+            "call_audio_aec": False,
         }
         # tincan-nbjrp: richer ANCS state ("disabled"|"armed"|"healing"|"active"|"fallback")
         # kept separate from capabilities{} which has signature="sb" (bool values only).
@@ -155,6 +159,7 @@ class TincanService(dbus.service.Object):
             "ancs": False,
             "ancs_needs_repair": False,
             "call_setup_ready": call_setup_ready,
+            "call_audio_aec": False,
         }
         self._contact_store.clear()
         _log.info("Disconnected")
@@ -293,7 +298,7 @@ class TincanService(dbus.service.Object):
 
     _KNOWN_CAPABILITIES = frozenset({
         "messages", "contacts", "contacts_empty", "ancs", "ancs_needs_repair",
-        "call_setup_ready",
+        "call_setup_ready", "call_audio_aec",
     })
     _KNOWN_ANCS_STATUSES = frozenset({"disabled", "armed", "healing", "active", "fallback"})
 
