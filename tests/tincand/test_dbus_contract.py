@@ -27,13 +27,7 @@ import re
 import pytest
 
 from tincan_gui.dbus_client import TincandClient
-from tincand.dbus_service import IFACE_DAEMON, IFACE_MESSAGES, TincanService
-
-try:
-    from tincand.dbus_service import IFACE_CALLS
-except ImportError:
-    IFACE_CALLS = "im.tincan.Calls"  # not yet exported — tests fail until tincan-0e6na lands
-
+from tincand.dbus_service import IFACE_CALLS, IFACE_DAEMON, IFACE_MESSAGES, TincanService
 
 # ---------------------------------------------------------------------------
 # Daemon interface introspection
@@ -79,7 +73,7 @@ _GUI_SUBSCRIPTIONS: list[tuple[str, str, str, str]] = [
     (IFACE_MESSAGES, "MessageSent",             "_on_message_sent",            "QString"),
     (IFACE_MESSAGES, "ConversationUpdated",     "_on_conversation_updated",    "QVariantMap"),
     (IFACE_MESSAGES, "ContactPhotoReceived",    "_on_contact_photo_received",  "QString,QByteArray"),
-    # im.tincan.Calls — HFP call signals (tincan-0e6na)
+    # im.tincan.Calls — HFP call signals (landed via tincan-0e6na)
     (IFACE_CALLS, "IncomingCall",   "_on_call_incoming",  "QString,QString"),
     (IFACE_CALLS, "CallConnected",  "_on_call_connected", ""),
     (IFACE_CALLS, "CallEnded",      "_on_call_ended",     ""),
@@ -131,11 +125,15 @@ _DBUS_SIG_ARG_COUNT = {
 }
 
 # Interfaces whose signals are not yet exported by the daemon.
-# §1 (test_signal_exists_in_daemon) xfails for entries whose iface is in this set
-# so the contract table stays complete without requiring the daemon to implement
-# those interfaces first.
-_KNOWN_PENDING_DAEMON_IFACES: set[str] = {
-    "im.tincan.Calls",  # HFP call/audio signals — pending tincan-xohrx
+# §1 (test_signal_exists_in_daemon) xfails (strict=True) for entries whose iface is
+# in this dict, keyed by iface with the xfail reason as the value, so the contract
+# table stays complete without requiring the daemon to implement those interfaces
+# first. strict=True mirrors conftest.py's _KNOWN_BROKEN_CONTRACT: once the iface
+# is exported the case XPASSES and CI fails until the entry is removed here, so a
+# landed interface can't rot silently (see tincan-73eki).
+_KNOWN_PENDING_DAEMON_IFACES: dict[str, str] = {
+    # im.tincan.Calls xfail removed: the daemon now exports all 9 Calls signals
+    # (landed via tincan-0e6na) so the contract cases pass for real (tincan-73eki).
 }
 
 
@@ -203,10 +201,12 @@ class TestGuiSubscriptionsMatchDaemonSignals:
         _GUI_SUBSCRIPTIONS,
         ids=[f"{iface.split('.')[-1]}.{sig}" for iface, sig, *_ in _GUI_SUBSCRIPTIONS],
     )
-    def test_signal_exists_in_daemon(self, iface, signal, handler, slot_types):
+    def test_signal_exists_in_daemon(self, request, iface, signal, handler, slot_types):
         if iface in _KNOWN_PENDING_DAEMON_IFACES:
-            pytest.xfail(
-                f"{iface} not yet exported by daemon — pending tincan-xohrx"
+            request.node.add_marker(
+                pytest.mark.xfail(
+                    strict=True, reason=_KNOWN_PENDING_DAEMON_IFACES[iface]
+                )
             )
         signals = _daemon_signals()
         assert (iface, signal) in signals, (
