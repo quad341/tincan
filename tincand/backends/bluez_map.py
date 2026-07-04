@@ -28,6 +28,7 @@ from gi.repository import GLib
 from tincand.backends.base import BackendInterface
 from tincand.dbus_service import Conversation
 from tincand.message_store import MessageStore
+from tincand.obex_worker import SerialWorker
 
 _log = logging.getLogger(__name__)
 
@@ -223,10 +224,20 @@ def _parse_map_datetime(dt: str) -> str:
 class MapBackend(BackendInterface):
     """MAP backend using obexd org.bluez.obex.Client1."""
 
-    def __init__(self, message_store: MessageStore | None = None) -> None:
+    def __init__(
+        self, message_store: MessageStore | None = None, worker: object | None = None
+    ) -> None:
         self._service: object | None = None
         self._session_path: str | None = None
         self._msg_access: object | None = None
+        # Serialized worker thread owning all blocking OBEX I/O; injectable
+        # for tests (InlineWorker). Created lazily so direct synchronous use
+        # of poll_inbox()/send_message() never spawns a thread.
+        self._worker: object | None = worker
+        self._poll_in_flight: bool = False
+        # Bumped on every connect/disconnect; poll completions carry the
+        # generation they were submitted under and are dropped when stale.
+        self._session_gen: int = 0
         self._poll_source_id: int | None = None
         self._reconnect_source_id: int | None = None
         self._reconnect_attempt: int = 0  # exponential backoff counter
@@ -300,6 +311,8 @@ class MapBackend(BackendInterface):
         _log.info("MAP session established: %s → %s", device_addr, self._session_path)
 
         self._device_name = self._resolve_device_name(device_addr)
+        self._session_gen += 1
+        self._poll_in_flight = False
         self._seen_handles.clear()
         self._initial_poll_done = False
         self._failed_handles.clear()
@@ -316,6 +329,10 @@ class MapBackend(BackendInterface):
 
     def disconnect(self) -> None:
         """Remove the obexd MAP session; silently no-ops if not connected."""
+        # Invalidate any in-flight worker poll: its completion will see a
+        # stale generation and drop its results.
+        self._session_gen += 1
+        self._poll_in_flight = False
         if self._reconnect_source_id is not None:
             GLib.source_remove(self._reconnect_source_id)
             self._reconnect_source_id = None
@@ -345,9 +362,23 @@ class MapBackend(BackendInterface):
     def poll_inbox(self) -> list:
         """Poll MAP inbox + sent folders and emit D-Bus signals for messages.
 
+        Synchronous composition of _poll_fetch (blocking OBEX I/O) and
+        _process_poll_results (store dedup + signal emission). Production
+        polling runs the two halves split across the OBEX worker thread and
+        the main loop (_poll_tick → _on_poll_done); direct callers and tests
+        keep the original synchronous behaviour here.
+        """
+        return self._process_poll_results(self._poll_fetch())
+
+    def _poll_fetch(self) -> list:
+        """Blocking OBEX I/O half of a poll — runs on the OBEX worker thread.
+
         Navigates to telecom/msg, then lists inbox (inbound) and sent (outbound).
         Body is fetched via GetMessage transfer; Subject is used as fallback.
         Conversation key is SenderAddressing (normalised phone number).
+
+        Must not touch the SQLite store or TincanService — both are
+        main-thread-only and belong to _process_poll_results.
         """
         if self._msg_access is None:
             return []
@@ -470,6 +501,10 @@ class MapBackend(BackendInterface):
         except dbus.exceptions.DBusException as exc:
             _log.debug("sent folder unavailable: %s", exc)
 
+        return parsed
+
+    def _process_poll_results(self, parsed: list) -> list:
+        """Main-loop half of a poll: dedup via the store and emit signals."""
         if parsed and self._service is not None:
             if not self._initial_poll_done:
                 # First poll of this daemon session.
@@ -571,18 +606,53 @@ class MapBackend(BackendInterface):
         return device_addr
 
     def _poll_tick(self) -> bool:
-        """GLib timer callback — poll inbox; detect dead session and trigger recovery."""
-        try:
-            self.poll_inbox()
-        except dbus.exceptions.DBusException as exc:
-            if exc.get_dbus_name() in _DEAD_SESSION_ERRORS:
+        """GLib timer callback — run the poll's OBEX I/O on the worker thread.
+
+        The I/O half (folder listing + per-message body transfers) can block
+        for seconds per transfer, so it must never run on the GLib main loop:
+        a stalled transfer would freeze ANCS delivery, call control, and all
+        D-Bus dispatch (tincan-97mlk.3). Results come back on the main loop
+        via _on_poll_done, which owns dead-session detection; on session
+        death, disconnect() removes this timer source by id.
+        """
+        if self._poll_in_flight:
+            # Previous poll still running (slow transfer) — skip this tick
+            # rather than queueing a duplicate poll behind it.
+            return GLib.SOURCE_CONTINUE
+        self._poll_in_flight = True
+        gen = self._session_gen
+        self._ensure_worker().submit(
+            self._poll_fetch,
+            lambda parsed, exc: self._on_poll_done(parsed, exc, gen),
+        )
+        return GLib.SOURCE_CONTINUE
+
+    def _on_poll_done(self, parsed: object, exc: BaseException | None, gen: int) -> None:
+        """Main-loop completion for a worker poll: process results or recover."""
+        if gen != self._session_gen:
+            # Session was torn down or replaced while the job ran — the
+            # results (and _poll_in_flight) belong to the new session now.
+            return
+        self._poll_in_flight = False
+        if exc is not None:
+            if (
+                isinstance(exc, dbus.exceptions.DBusException)
+                and exc.get_dbus_name() in _DEAD_SESSION_ERRORS
+            ):
                 _log.warning("MAP session object gone — recovering: %s", exc)
                 self._handle_session_dead()
-                return GLib.SOURCE_REMOVE
+                return
             _log.warning("poll_inbox error: %s", exc)
-        except Exception as exc:
-            _log.warning("poll_inbox error: %s", exc)
-        return GLib.SOURCE_CONTINUE
+            return
+        try:
+            self._process_poll_results(parsed)  # type: ignore[arg-type]
+        except Exception as process_exc:
+            _log.warning("poll_inbox error: %s", process_exc)
+
+    def _ensure_worker(self) -> object:
+        if self._worker is None:
+            self._worker = SerialWorker(name="map-obex-worker")
+        return self._worker
 
     def schedule_reconnect(self) -> None:
         """Schedule a reconnect attempt without requiring an existing session.
@@ -602,10 +672,11 @@ class MapBackend(BackendInterface):
             )
 
     def _handle_session_dead(self) -> None:
-        """Tear down a dead OBEX session and schedule reconnect attempts."""
-        # Nullify poll ID before disconnect() so it skips the source_remove call —
-        # GLib removes it when we return SOURCE_REMOVE from _poll_tick.
-        self._poll_source_id = None
+        """Tear down a dead OBEX session and schedule reconnect attempts.
+
+        Called from _on_poll_done on the main loop; disconnect() removes the
+        poll timer source by id.
+        """
         self.disconnect()
         if self._device_addr:
             self._reconnect_attempt = 0
@@ -742,6 +813,9 @@ class MapBackend(BackendInterface):
     ) -> str | None:
         """Wait for a Message1.Get transfer and return the raw bMessage string.
 
+        Blocking (time.sleep poll, up to _TRANSFER_TIMEOUT) — in the poll
+        path this runs on the OBEX worker thread, never the GLib main loop.
+
         obexd writes the body to our targetfile and then removes the Transfer
         object almost immediately on completion (often <100ms), so polling
         races the removal — we see the object already gone (UnknownObject)
@@ -790,6 +864,12 @@ class MapBackend(BackendInterface):
 
     def _wait_transfer_send(self, transfer_path: str) -> None:
         """Poll Transfer1.Status for a PushMessage transfer; raise SendFailed on error.
+
+        Blocking (time.sleep poll, up to _TRANSFER_TIMEOUT). Still called on
+        the main loop by the synchronous send path — sends move to the worker
+        with the daemon-owned send lifecycle (pending→sent→failed) planned
+        under tincan-xbtct, which is also where the D-Bus reply semantics
+        change.
 
         obexd removes the transfer object immediately after completion, so an
         UnknownObject/ServiceUnknown DBusException after seeing 'queued'/'active'
