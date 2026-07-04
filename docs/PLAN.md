@@ -1,6 +1,9 @@
 # Tincan — Project Plan
 
-> Status: scoping complete, pre-implementation. Last updated 2026-05-31.
+> Status: **historical planning document** — the implementation has since
+> shipped (see the root [README](../README.md) for current status). Kept for
+> the vision, design principles, risk register, and resolved-open-question
+> record. Last updated 2026-07-04.
 
 ## 1. Vision
 
@@ -39,6 +42,11 @@ only abandoned single-purpose hobby daemons. Tincan fills that gap.
 4. **Honest about limits.** Whatever the platform can't do, we document for
    ourselves (see [LIMITATIONS.md](LIMITATIONS.md)) rather than discovering it in
    front of a user.
+5. **Echo-free call audio is table stakes.** Without echo cancellation the far
+   party hears themselves and will simply refuse to stay on the call — which
+   makes the entire calls/secretary stack moot. AEC on every call is a hard,
+   release-gated requirement (tincan-97mlk.2), not a quality nicety, for both
+   tincan and iris.
 
 ## 3. Architecture
 
@@ -182,10 +190,13 @@ Likely partly done for name-resolution in phase 1; finish full sync / search her
   (iOS rebrands it). Use `GetMessage` for full body. R6 resolved.
 - ✅ **OQ-SEND:** Does `PushMessage` (outbound send) work? **YES.** iOS delivers the
   message and auto-upgrades SMS→iMessage for iMessage contacts.
-- ⏳ **OQ-3:** Does **ANCS** reliably fire for Messages *with sender* on 26.5?
-  Pending hardware run (tincan-r23).
-- ⏳ **OQ-4:** Can the **built-in MediaTek adapter** hold simultaneous BLE (ANCS) +
-  Classic (MAP)? Pending hardware run (tincan-r23).
+- ✅ **OQ-3:** Does **ANCS** reliably fire for Messages *with sender* on 26.x?
+  **YES** — validated in live use. Requires `bluetoothd --experimental` and a
+  BlueZ with the ext-adv length fix
+  (see [ancs-bluez-ext-adv-rootcause.md](ancs-bluez-ext-adv-rootcause.md)).
+- ✅ **OQ-4:** Can the **built-in MediaTek adapter** hold simultaneous BLE (ANCS) +
+  Classic (MAP)? **NO** — the MT7925 fails ANCS advertising and SCO audio; the
+  ASUS USB-BT500 is the reference adapter (see [../COMPATIBILITY.md](../COMPATIBILITY.md)).
 - ✅ **IPC decision:** `tincand` is a **D-Bus session service** (`im.tincan.Daemon`
   on session bus). Decided during M1.1.
 

@@ -1,33 +1,46 @@
 # Phase-0 Spike Findings
 
-Date: <ISO date>
-Reference device: iPhone <model> / iOS <version>
-Reference host: <uname -r>, BlueZ <version>
+Resolved during implementation; recorded here retroactively on 2026-07-04
+(the answers previously lived only inline in PLAN.md §5–6).
+Reference device: iPhone / iOS 26.x
+Reference host: Fedora 44, BlueZ 5.86, PipeWire
 
 ## OQ-1: SMS bodies over MAP?
 
-[ ] Yes / [ ] No / [ ] Partial
+[x] Yes / [ ] No / [ ] Partial
 
-Notes:
+Notes: `GetMessage` returns the full body text. `ListMessages('inbox', {})`
+works directly — no `SetFolder`/`ListFolders` needed — and returns up to ~10
+recent messages per session. Validated by `m01_map.py` against real hardware.
 
 ## OQ-2: iMessage content over MAP?
 
-[ ] Present (TYPE=<value>) / [ ] Absent / [ ] Indeterminate
+[x] Present (TYPE=`sms-gsm`) / [ ] Absent / [ ] Indeterminate
 
-Notes:
+Notes: iMessage threads appear in the MAP inbox listing; iOS rebrands the
+`TYPE` field to `sms-gsm`. Full body available via `GetMessage`. Outbound
+`PushMessage` also works, and iOS auto-upgrades SMS→iMessage for iMessage
+contacts (OQ-SEND).
 
-## OQ-3: ANCS fires for Messages with sender on iOS 26.5?
+## OQ-3: ANCS fires for Messages with sender on iOS 26.x?
 
-[ ] Yes / [ ] No / [ ] Partial (sender missing)
+[x] Yes / [ ] No / [ ] Partial (sender missing)
 
-Notes:
-Approach used: [ ] ancs4linux wrapper  [ ] direct GATT
+Notes: validated in live use, with sender attribution. Requires
+`bluetoothd --experimental` and a BlueZ with the ext-adv length fix —
+BlueZ ≤ 5.86 breaks all LE advertising on kernels ≥ 7.0; see
+`docs/ancs-bluez-ext-adv-rootcause.md` and the patch in `docs/`.
+Approach used: [ ] ancs4linux wrapper  [x] direct GATT (`ANCSBackend`)
 
 ## OQ-4: Built-in MediaTek adapter holds simultaneous BLE + Classic?
 
-[ ] Yes (stable 60+ s) / [ ] No / [ ] Intermittent
+[ ] Yes (stable 60+ s) / [x] No / [ ] Intermittent
 
-Notes:
+Notes: the MT7925 fails ANCS advertising (`RegisterAdvertisement` NoReply)
+and SCO call audio (firmware, "unknown connection handle 0xE00"). The
+ASUS USB-BT500 (RTL8761B) is the reference adapter for MAP+ANCS+HFP/SCO
+simultaneously; the built-in is disabled by default via udev. See
+`COMPATIBILITY.md`.
 
 ## OQ-5: MMS / image-attachment bytes over MAP? (m05_mms_attachment.py)
 
@@ -82,4 +95,9 @@ Decision 2026-06-29: remove the group surface; surface inbound group messages as
 
 ## Amendments to PLAN.md
 
-List any assumptions that need revision.
+- R2 realized in the strong form: the built-in adapter is unusable for
+  ANCS and SCO — a known-good USB dongle is required reference hardware,
+  not just a fallback (`COMPATIBILITY.md`).
+- IPC decision confirmed: D-Bus session service `im.tincan.Daemon`.
+- New hard requirement added as design principle 5 (2026-07-04): echo-free
+  call audio (AEC) is release-gated — without it the calls stack is moot.

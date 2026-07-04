@@ -13,13 +13,21 @@ The name: a tin-can telephone — a humble, honest string between two endpoints.
 
 ## Status
 
-**Scoping complete; pre-implementation.** No code yet. This `docs/` folder
-holds the plan and the research it's built on.
+**Working prototype — implemented and live-tested.** Messaging (MAP send/receive
++ group MMS), ANCS notification mirroring, PBAP contacts, and HFP calls have all
+shipped; see the root [README](../README.md) for the current feature list and
+[COMPATIBILITY.md](../COMPATIBILITY.md) for hardware reality. This `docs/`
+folder holds the original plan, the protocol research it was built on, the
+architecture decisions (`arch/`), and per-feature plans (`plans/`).
 
-- Reference target: **iPhone 15 Pro, iOS 26.5** (treated as one data point, not a
+The phase-0 open questions in PLAN.md §6 were all resolved by the spikes —
+answers recorded in [../spikes/FINDINGS.md](../spikes/FINDINGS.md).
+
+- Reference target: **iPhone, iOS 26.x** (treated as one data point, not a
   spec — see version-resilience principle in the plan).
-- Reference host: **Fedora 44**, BlueZ 5.86, PipeWire 1.6.4, Python 3.14.
-- Chosen v1: **SMS first**. Stack: **Python + Qt (PySide6)**.
+- Reference host: **Fedora 44**, BlueZ 5.86 (+ ext-adv patch), PipeWire, Python 3.14.
+- Reference Bluetooth adapter: **ASUS USB-BT500** — the built-in MediaTek cannot
+  do ANCS advertising or SCO audio (see COMPATIBILITY.md).
 
 ## Documents
 
