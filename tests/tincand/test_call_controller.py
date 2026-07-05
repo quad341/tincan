@@ -19,6 +19,9 @@ Coverage:
   §13 adapter-aware modem selection — NF1 scenarios (tincan-aggkh)
   §14 adapter-aware modem selection — T4 + FR6 additions (tincan-8gpmz)
   §15 _bind_modem integration — real call_audio contract (cross-module arity)
+  §16 _on_audio_setup_tick — SCO node polling (they lag call-active)
+  §17 _schedule_retry steady-state re-arm past fast-backoff exhaustion (tincan-c7b8g)
+  §18 call_link_ready wiring — _bind_modem / _on_modem_removed (tincan-c7b8g)
 """
 from __future__ import annotations
 
@@ -1316,3 +1319,190 @@ class TestAecReporting:
         mock_audio.teardown_sco_routing.assert_called_once_with([("out", "in")])
         assert ctrl._sco_links == []
         ctrl._service.set_capability.assert_any_call("call_audio_aec", False)
+
+
+# ---------------------------------------------------------------------------
+# §17 _schedule_retry steady-state re-arm past fast-backoff exhaustion (tincan-c7b8g)
+#
+# _RETRY_STEPS has 5 fast-backoff entries (1/2/4/8/15s, 30s total). Once
+# _retry_index reaches len(_RETRY_STEPS), _schedule_retry logs the exhaustion
+# transition EXACTLY ONCE, then re-arms GLib.timeout_add at
+# _RETRY_STEADY_STATE_S (30s) forever instead of giving up — a phone gone
+# overnight must still self-heal without a daemon restart.
+# ---------------------------------------------------------------------------
+
+def _make_absent_phone_controller():
+    """CallController whose GetModems() always returns [] (phone absent).
+
+    NOTE: the GLib patch is scoped to construction only (it exits with this
+    function) — __init__'s one _schedule_retry() call lands on it, advancing
+    _retry_index 0→1. Callers driving further _discover_modem()/_retry_tick()
+    ticks must open their OWN `patch("tincand.call_controller.GLib")` block
+    around those calls (mirrors the convention already used for
+    _on_modem_removed elsewhere in this file) — a mock captured here would
+    silently stop receiving calls once this function returns.
+    """
+    service = MagicMock()
+    contact_store = MagicMock()
+    contact_store.get_name.return_value = ""
+
+    mock_bus = MagicMock()
+    mock_manager = MagicMock()
+    mock_manager.GetModems.return_value = []
+    mock_bus.get_object.return_value = MagicMock()
+
+    with (
+        patch("tincand.call_controller.is_call_setup_ready", return_value=True),
+        patch("dbus.SystemBus", return_value=mock_bus),
+        patch("dbus.Interface", return_value=mock_manager),
+        patch("tincand.call_controller.GLib") as mock_glib,
+    ):
+        mock_glib.timeout_add.return_value = 42
+        from tincand.call_controller import CallController
+        ctrl = CallController(service, contact_store, device_addr="D0:6B:78:33:46:20")
+
+    ctrl._service = service
+    return ctrl, mock_manager
+
+
+class TestScheduleRetrySteadyStateRearm:
+    """_schedule_retry re-arms indefinitely at 30s once the fast backoff is exhausted.
+
+    _retry_index is 1 after construction (one _schedule_retry() call already
+    fired in __init__), so len(_RETRY_STEPS) further _discover_modem() calls
+    land exactly on the exhaustion transition (indices 1,2,3,4 exhaust the
+    remaining fast steps; the 5th call finds index==len(_RETRY_STEPS)).
+    """
+
+    def test_log_once_fires_exactly_once_at_exhaustion_transition(self, caplog):
+        from tincand.call_controller import _RETRY_STEPS
+        ctrl, _ = _make_absent_phone_controller()
+        with caplog.at_level(logging.INFO, logger="tincand.call_controller"):
+            with patch("tincand.call_controller.GLib") as mock_glib:
+                mock_glib.timeout_add.return_value = 42
+                for _ in range(len(_RETRY_STEPS) + 2):
+                    ctrl._discover_modem()
+        exhausted_logs = [r for r in caplog.records if "exhausted" in r.message]
+        assert len(exhausted_logs) == 1
+
+    def test_timeout_add_delay_is_30s_after_exhaustion(self):
+        from tincand.call_controller import _RETRY_STEPS, _RETRY_STEADY_STATE_S
+        ctrl, _ = _make_absent_phone_controller()
+        with patch("tincand.call_controller.GLib") as mock_glib:
+            mock_glib.timeout_add.return_value = 42
+            for _ in range(len(_RETRY_STEPS)):
+                ctrl._discover_modem()
+            last_delay_ms = mock_glib.timeout_add.call_args_list[-1][0][0]
+        assert last_delay_ms == int(_RETRY_STEADY_STATE_S * 1000)
+
+    def test_timeout_add_keeps_rearming_indefinitely_past_exhaustion(self):
+        """Retry never permanently stops: many ticks past exhaustion, still
+        re-arms at 30s every time (no dropped/omitted timeout_add call)."""
+        from tincand.call_controller import _RETRY_STEPS, _RETRY_STEADY_STATE_S
+        ctrl, _ = _make_absent_phone_controller()
+        with patch("tincand.call_controller.GLib") as mock_glib:
+            mock_glib.timeout_add.return_value = 42
+            for _ in range(len(_RETRY_STEPS) + 10):
+                ctrl._discover_modem()
+            steady_calls = [
+                c for c in mock_glib.timeout_add.call_args_list
+                if c[0][0] == int(_RETRY_STEADY_STATE_S * 1000)
+            ]
+        assert len(steady_calls) >= 10
+
+    def test_modem_appearing_after_exhaustion_binds_via_discover_tick(self):
+        """A later _discover_modem() tick (simulating the 30s timer firing) binds
+        once GetModems() starts returning a match — the re-arm actually heals."""
+        from tincand.call_controller import _RETRY_STEPS
+        ctrl, mock_manager = _make_absent_phone_controller()
+        with patch("tincand.call_controller.GLib") as mock_glib:
+            mock_glib.timeout_add.return_value = 42
+            for _ in range(len(_RETRY_STEPS) + 2):
+                ctrl._discover_modem()
+        assert ctrl._modem_path is None  # still absent
+
+        modem_path = "/org/ofono/modem/d0_6b_78_33_46_20_hfp_0"
+        mock_manager.GetModems.return_value = [(modem_path, {"Type": "hfp", "Online": True})]
+        mock_manager.GetCalls.return_value = []
+        with (
+            patch("dbus.Interface", return_value=mock_manager),
+            patch("tincand.call_controller.call_audio"),
+        ):
+            ctrl._discover_modem()
+        assert ctrl._modem_path == modem_path
+
+    def test_modem_appearing_after_exhaustion_binds_via_on_modem_added(self):
+        """ModemAdded firing after exhaustion also binds (independent re-arm path)."""
+        from tincand.call_controller import _RETRY_STEPS
+        ctrl, mock_manager = _make_absent_phone_controller()
+        with patch("tincand.call_controller.GLib") as mock_glib:
+            mock_glib.timeout_add.return_value = 42
+            for _ in range(len(_RETRY_STEPS) + 2):
+                ctrl._discover_modem()
+        assert ctrl._modem_path is None
+
+        modem_path = "/org/ofono/modem/d0_6b_78_33_46_20_hfp_0"
+        modem_props = {"Type": "hfp", "Online": True}
+        mock_manager.GetModems.return_value = [(modem_path, modem_props)]
+        mock_manager.GetCalls.return_value = []
+        with (
+            patch("dbus.Interface", return_value=mock_manager),
+            patch("tincand.call_controller.call_audio"),
+        ):
+            ctrl._on_modem_added(modem_path, modem_props)
+        assert ctrl._modem_path == modem_path
+
+
+# ---------------------------------------------------------------------------
+# §18 call_link_ready wiring — _bind_modem / _on_modem_removed (tincan-c7b8g)
+#
+# call_link_ready is True iff CallController currently has a bound
+# VoiceCallManager (dialing is actually possible right now) — distinct from
+# call_setup_ready (SELinux-module presence only, in dbus_service.py).
+# ---------------------------------------------------------------------------
+
+class TestCallLinkReadyWiring:
+    """_bind_modem sets call_link_ready True; _on_modem_removed sets it False."""
+
+    @pytest.fixture
+    def ctrl(self):
+        return _make_controller()
+
+    def test_bind_modem_sets_call_link_ready_true(self, ctrl):
+        with (
+            patch("dbus.Interface", return_value=MagicMock()),
+            patch("tincand.call_controller.call_audio"),
+        ):
+            ctrl._bind_modem(_PREFERRED_PATH)
+        ctrl._service.set_capability.assert_called_once_with("call_link_ready", True)
+
+    def test_on_modem_removed_sets_call_link_ready_false(self, ctrl):
+        with (
+            patch("dbus.Interface", return_value=MagicMock()),
+            patch("tincand.call_controller.call_audio"),
+        ):
+            ctrl._bind_modem(_PREFERRED_PATH)
+        ctrl._service.set_capability.reset_mock()
+
+        with (
+            patch("tincand.call_controller.call_audio"),
+            patch("tincand.call_controller.GLib") as mock_glib,
+        ):
+            mock_glib.timeout_add.return_value = 42
+            ctrl._on_modem_removed(_PREFERRED_PATH)
+        # _teardown_call_audio() also clears call_audio_aec (tincan-97mlk.2) —
+        # assert_any_call, not assert_called_once_with, since set_capability
+        # fires twice on modem removal.
+        ctrl._service.set_capability.assert_any_call("call_link_ready", False)
+
+    def test_on_modem_removed_ignores_unbound_modem_path(self, ctrl):
+        """set_capability is untouched when the removed path isn't the bound modem."""
+        with (
+            patch("dbus.Interface", return_value=MagicMock()),
+            patch("tincand.call_controller.call_audio"),
+        ):
+            ctrl._bind_modem(_PREFERRED_PATH)
+        ctrl._service.set_capability.reset_mock()
+
+        ctrl._on_modem_removed(_FALLBACK_PATH)
+        ctrl._service.set_capability.assert_not_called()
