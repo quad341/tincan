@@ -8,6 +8,7 @@ import pathlib
 import re
 import signal
 import sys
+import threading
 
 from gi.repository import GLib
 
@@ -354,8 +355,119 @@ def _arm_device_watcher(backend: object, call_controller: object) -> None:
     _log.info("_arm_device_watcher: watching oFono for HFP modem appearance")
 
 
+_SHUTDOWN_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
+
+def _block_shutdown_signals() -> None:
+    """Block SIGINT/SIGTERM for the calling thread and everything spawned after.
+
+    Threads inherit the creating thread's signal mask, so calling this once in
+    main() before any thread exists keeps SIGINT/SIGTERM blocked everywhere.
+    The waiter thread started by _start_signal_waiter() is then the only
+    consumer of these signals — a plain signal.signal() handler never exposes
+    who sent the signal, but sigwaitinfo() on a blocked signal does.
+    """
+    signal.pthread_sigmask(signal.SIG_BLOCK, _SHUTDOWN_SIGNALS)
+
+
+def _proc_cmdline(pid: int, max_len: int = 200) -> str:
+    try:
+        raw = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return "<unavailable>"
+    parts = [p.decode(errors="replace") for p in raw.split(b"\0") if p]
+    cmdline = " ".join(parts) if parts else "<unavailable>"
+    if len(cmdline) > max_len:
+        cmdline = cmdline[:max_len] + "…(truncated)"
+    return cmdline
+
+
+def _proc_ppid(pid: int) -> int | None:
+    try:
+        status = pathlib.Path(f"/proc/{pid}/status").read_text(errors="replace")
+    except OSError:
+        return None
+    for line in status.splitlines():
+        if line.startswith("PPid:"):
+            try:
+                return int(line.split(":", 1)[1].strip())
+            except ValueError:
+                return None
+    return None
+
+
+def _describe_signal_sender(pid: int, max_depth: int = 4, max_len: int = 1000) -> str:
+    """Best-effort pid+cmdline parent chain for whatever process sent a signal.
+
+    /proc is read at signal-receipt time and the sender (e.g. a short-lived
+    `kill`/`systemctl` invocation) may already be gone, so every read tolerates
+    a missing pid/file and falls back to '<unavailable>' instead of raising.
+
+    Depth and length are capped: the immediate sender plus a couple of
+    ancestors (e.g. the script that ran `systemctl`/`pkill`) is enough to
+    attribute an external SIGTERM. Walking further up can reach a long-lived
+    supervisor with a very large /proc/<pid>/cmdline (e.g. an orchestrator
+    holding a large prompt as argv), and this is logged from the same thread
+    that must then call loop.quit() — an unbounded WARNING line can grow
+    large enough to fill a piped stdout/stderr and block the logging call
+    itself, which was observed to stall shutdown entirely (tincan-97mlk.6).
+    """
+    chain = []
+    seen: set[int] = set()
+    current: int | None = pid
+    for _ in range(max_depth):
+        if current is None or current <= 0 or current in seen:
+            break
+        seen.add(current)
+        chain.append(f"pid={current} cmdline={_proc_cmdline(current)!r}")
+        current = _proc_ppid(current)
+    description = " <- ".join(chain) if chain else f"pid={pid} <unavailable>"
+    if len(description) > max_len:
+        description = description[:max_len] + "…(truncated)"
+    return description
+
+
+def _signal_waiter(loop: GLib.MainLoop) -> None:
+    """Block for SIGINT/SIGTERM, attribute the sender, then shut down gracefully.
+
+    Runs in a dedicated daemon thread with SIGINT/SIGTERM blocked (see
+    _block_shutdown_signals()). Unlike a signal.signal() handler, sigwaitinfo()
+    on a blocked signal surfaces si_pid/si_uid — that's what lets us attribute
+    external SIGTERMs (tincan-97mlk.6) instead of only knowing one arrived.
+    GLib's loop.quit() is documented thread-safe, so calling it here is fine.
+
+    Attribution is best-effort logging, not the reason we're shutting down —
+    loop.quit() runs in a finally so it fires even if the attribution/logging
+    path itself raises, otherwise the daemon hangs on shutdown instead of
+    exiting (tincan-97mlk.6).
+    """
+    siginfo = signal.sigwaitinfo(_SHUTDOWN_SIGNALS)
+    signame = signal.Signals(siginfo.si_signo).name
+    _log.info("%s received — shutting down", signame)
+    try:
+        _log.warning(
+            "%s sent by pid=%d uid=%d chain=%s",
+            signame,
+            siginfo.si_pid,
+            siginfo.si_uid,
+            _describe_signal_sender(siginfo.si_pid),
+        )
+    finally:
+        loop.quit()
+
+
+def _start_signal_waiter(loop: GLib.MainLoop) -> threading.Thread:
+    thread = threading.Thread(
+        target=_signal_waiter, args=(loop,), name="tincand-signal-waiter", daemon=True
+    )
+    thread.start()
+    return thread
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    # Block before anything can spawn a thread — see _block_shutdown_signals().
+    _block_shutdown_signals()
     args = _parse_args()
 
     # Install the GLib D-Bus mainloop BEFORE the first bus connection is created.
@@ -433,14 +545,10 @@ def main() -> None:
 
     loop = GLib.MainLoop()
 
-    def _on_signal(signum: int, frame: object) -> None:  # noqa: ARG001
-        _log.info("%s received — shutting down", signal.Signals(signum).name)
-        loop.quit()
-
-    signal.signal(signal.SIGINT, _on_signal)
     # SIGTERM (terminate()/systemctl stop/kill) gets the same clean shutdown as
     # SIGINT, so the daemon runs backend.disconnect() instead of dying abruptly.
-    signal.signal(signal.SIGTERM, _on_signal)
+    # The waiter thread also logs who sent it (tincan-97mlk.6).
+    _start_signal_waiter(loop)
 
     backend_name = args.backend or os.environ.get("TINCAN_BACKEND", "")
     _log.info("tincand starting with backend=%s device=%s", backend_name, _device_addr)
