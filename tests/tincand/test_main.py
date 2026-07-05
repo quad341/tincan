@@ -503,3 +503,70 @@ class TestOnModemAddedConnectErrors:
 
         handler = _arm_watcher(backend, call_controller, monkeypatch)
         handler(_HFP_PATH, _HFP_PROPS)  # must not raise
+
+
+class TestResolveDeviceAddressLastKnown:
+    """Branch 5: bluetooth/last_device_address — the anti-chicken-and-egg net.
+
+    Auto-discovery only works while the phone is already connected; with an
+    empty device_address (the GUI's 'Auto-discover' persists "") a disconnect
+    used to strand the daemon with no address forever (2026-07-04/05 outage).
+    """
+
+    def _settings(self, values):
+        mock_ds = MagicMock()
+        mock_ds.return_value.value.side_effect = (
+            lambda key, default="": values.get(key, default)
+        )
+        return mock_ds
+
+    def test_last_known_used_when_config_empty_and_discovery_fails(self, monkeypatch):
+        monkeypatch.delenv("TINCAN_DEVICE", raising=False)
+        mock_ds = self._settings({"bluetooth/last_device_address": "D0:6B:78:33:46:20"})
+        mock_dbus = MagicMock()
+        mock_dbus.SystemBus.side_effect = Exception("phone not connected")
+        with patch.dict(sys.modules, {"dbus": mock_dbus}):
+            with patch("tincand.config.DaemonSettings", mock_ds):
+                from tincand.__main__ import _resolve_device_address
+                addr, discovered = _resolve_device_address(_ns())
+        assert addr == "D0:6B:78:33:46:20"
+        assert discovered is False
+
+    def test_explicit_config_beats_last_known(self, monkeypatch):
+        monkeypatch.delenv("TINCAN_DEVICE", raising=False)
+        mock_ds = self._settings({
+            "bluetooth/device_address": "AA:BB:CC:DD:EE:FF",
+            "bluetooth/last_device_address": "D0:6B:78:33:46:20",
+        })
+        with patch("tincand.config.DaemonSettings", mock_ds):
+            from tincand.__main__ import _resolve_device_address
+            addr, _ = _resolve_device_address(_ns())
+        assert addr == "AA:BB:CC:DD:EE:FF"
+
+    def test_discovery_beats_last_known(self, monkeypatch):
+        monkeypatch.delenv("TINCAN_DEVICE", raising=False)
+        mock_ds = self._settings({"bluetooth/last_device_address": "AA:BB:CC:DD:EE:FF"})
+        mock_manager = MagicMock()
+        mock_manager.GetModems.return_value = [
+            ("/hfp/org/bluez/hci1/dev_D0_6B_78_33_46_20", {"Type": "hfp", "Online": True}),
+        ]
+        mock_dbus = MagicMock()
+        mock_dbus.Interface.return_value = mock_manager
+        with patch.dict(sys.modules, {"dbus": mock_dbus}):
+            with patch("tincand.config.DaemonSettings", mock_ds):
+                from tincand.__main__ import _resolve_device_address
+                addr, discovered = _resolve_device_address(_ns())
+        assert addr == "D0:6B:78:33:46:20"
+        assert discovered is True
+
+    def test_nothing_anywhere_still_returns_empty(self, monkeypatch):
+        monkeypatch.delenv("TINCAN_DEVICE", raising=False)
+        mock_ds = self._settings({})
+        mock_dbus = MagicMock()
+        mock_dbus.SystemBus.side_effect = Exception("no bus")
+        with patch.dict(sys.modules, {"dbus": mock_dbus}):
+            with patch("tincand.config.DaemonSettings", mock_ds):
+                from tincand.__main__ import _resolve_device_address
+                addr, discovered = _resolve_device_address(_ns())
+        assert addr == ""
+        assert discovered is False

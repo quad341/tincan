@@ -102,7 +102,15 @@ def _resolve_device_address(args: argparse.Namespace) -> tuple[str, bool]:
       2. TINCAN_DEVICE env var
       3. DaemonSettings bluetooth/device_address (tincan.ini)
       4. oFono auto-discovery — Online HFP modems → extract MAC
-      5. '' (waiting/retry mode)
+      5. DaemonSettings bluetooth/last_device_address — the last device a
+         session actually connected to (written by TincanService.Connect).
+         Auto-discovery (step 4) only works while the phone is ALREADY
+         connected, so without this fallback an empty device_address is a
+         chicken-and-egg trap after any disconnect: no address → cannot
+         proactively connect the phone → no modem → discovery finds nothing
+         (lived through 2026-07-04/05: the GUI persisted device_address=""
+         and the daemon was dead until a human re-entered the MAC).
+      6. '' (waiting/retry mode)
 
     device_discovered is True only when the address comes from Step 4.
     """
@@ -158,7 +166,16 @@ def _resolve_device_address(args: argparse.Namespace) -> tuple[str, bool]:
     except Exception as exc:  # noqa: BLE001
         _log.debug("tincand: oFono auto-discovery unavailable (%s) — no device address", exc)
 
-    # Step 5: waiting/retry mode
+    # Step 5: last successfully-connected device (see docstring)
+    last_device = DaemonSettings().value("bluetooth/last_device_address", "").strip()
+    if last_device:
+        _log.info(
+            "tincand: device address from last successful session "
+            "(source=last-known): %s", last_device,
+        )
+        return last_device, False
+
+    # Step 6: waiting/retry mode
     _log.info("tincand: no device address resolved — will retry")
     return "", False
 
