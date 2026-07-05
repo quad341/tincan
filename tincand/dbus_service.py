@@ -13,7 +13,6 @@ Implements the interface contract from tincan-56i, with amendments:
 from __future__ import annotations
 
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime

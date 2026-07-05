@@ -1,4 +1,5 @@
-"""Tests: pytest-qt coverage for wizard failure paths, ANCS partial-success, and adapter card states.
+"""Tests: pytest-qt coverage for wizard failure paths, ANCS partial-success,
+and adapter card states.
 Bead: tincan-4ktha
 
 Coverage:
@@ -16,7 +17,8 @@ These tests are intentionally failing until the builder implements the correspon
 features (tincan-guon4, tincan-j1er1, tincan-06knm, tincan-8ummz).
 
 No hardware or live D-Bus required.
-Run with: QT_QPA_PLATFORM=offscreen python -m pytest tests/tincan_gui/test_pairing_wizard_4ktha.py -v
+Run with:
+    QT_QPA_PLATFORM=offscreen python -m pytest tests/tincan_gui/test_pairing_wizard_4ktha.py -v
 """
 
 from __future__ import annotations

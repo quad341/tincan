@@ -4,7 +4,8 @@ Bead: tincan-arvln
 Coverage:
   §1 detect_hfp_capability() — return values by SELinux + module state
      - CALLS_READY when Enforcing + module loaded
-     - CALLS_NEED_SELINUX_MODULE when Enforcing + module absent (semodule -l succeeds, name not found)
+     - CALLS_NEED_SELINUX_MODULE when Enforcing + module absent (semodule -l
+       succeeds, name not found)
      - SELINUX_NOT_ENFORCING when Permissive
      - SELINUX_NOT_ENFORCING when Disabled
      - CALLS_STATUS_UNKNOWN when Enforcing + semodule absent + no .pp marker
@@ -34,6 +35,7 @@ All subprocess calls (getenforce, semodule) are mocked — no root required.
 """
 from __future__ import annotations
 
+import pathlib as _pathlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -42,6 +44,7 @@ import dbus.service
 import pytest
 
 import tincand.hfp_capability as hfp_mod
+from tincand.dbus_service import TincanService
 from tincand.hfp_capability import (
     CALLS_NEED_SELINUX_MODULE,
     CALLS_READY,
@@ -50,8 +53,6 @@ from tincand.hfp_capability import (
     detect_hfp_capability,
     is_call_setup_ready,
 )
-from tincand.dbus_service import TincanService
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -141,7 +142,8 @@ class TestDetectHfpCapability:
 # ---------------------------------------------------------------------------
 
 class TestIsCallSetupReady:
-    """is_call_setup_ready() returns True iff the result is CALLS_READY or SELINUX_NOT_ENFORCING."""
+    """is_call_setup_ready() returns True iff the result is CALLS_READY or
+    SELINUX_NOT_ENFORCING."""
 
     def test_true_for_calls_ready(self, monkeypatch):
         monkeypatch.setattr(hfp_mod, "detect_hfp_capability", lambda: CALLS_READY)
@@ -228,8 +230,6 @@ class TestSetCapabilityCallSetupReady:
 # ---------------------------------------------------------------------------
 # §6 _check_module_loaded() — selinux-store fallback path (tincan-uak1h)
 # ---------------------------------------------------------------------------
-
-import pathlib as _pathlib
 
 
 class TestCheckModuleLoadedSelinuxStore:

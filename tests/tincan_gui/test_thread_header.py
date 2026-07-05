@@ -10,10 +10,7 @@ Coverage:
 """
 from __future__ import annotations
 
-import pytest
-
 from tincan_gui.thread_view import ThreadHeader
-
 
 # ---------------------------------------------------------------------------
 # §1 update_contact name/phone dedup

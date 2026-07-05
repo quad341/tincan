@@ -613,7 +613,9 @@ class TestDateSeparatorLayoutPosition:
             view.load_thread("Alice", "+1555", [_make_msg("only msg", _TODAY)])
 
         seps, bubbles = self._sep_and_bubble_indices(view)
-        assert len(seps) == 1, f"Single-message thread must have exactly 1 separator, got {len(seps)}"
+        assert len(seps) == 1, (
+            f"Single-message thread must have exactly 1 separator, got {len(seps)}"
+        )
         assert seps[0] < bubbles[0], "Separator must precede the message"
 
     def test_bubble_tooltip_contains_day_and_time(self, qtbot):
@@ -662,9 +664,10 @@ class TestBugReportButton:
         self, qtbot, tmp_path, monkeypatch
     ):
         """§6c  Accepting the dialog produces a local report with note+state+trace."""
+        from unittest.mock import MagicMock
+
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QDialog, QTextEdit
-        from unittest.mock import MagicMock
 
         win = _make_window(qtbot)
         reports = []

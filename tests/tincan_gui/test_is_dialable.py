@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from tincan_gui.main import _is_dialable
 
-
 # ---------------------------------------------------------------------------
 # §1 _is_dialable() — pure function
 # ---------------------------------------------------------------------------

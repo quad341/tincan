@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import dbus
 import pytest
 
-from tincand.pairing import PairingOrchestrator, PairingState
+from tincand.pairing import PairingOrchestrator
 
 _ADAPTER_PATH = "/org/bluez/hci0"
 _FAST_TIMEOUT = 0.01

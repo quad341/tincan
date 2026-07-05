@@ -3,9 +3,8 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from PySide6.QtCore import QCoreApplication, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, Qt, QTimer, Signal
 from PySide6.QtGui import QAccessible, QAccessibleEvent, QFont
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAccessibleWidget,
     QFrame,
@@ -16,8 +15,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-from tincan_gui.capability_banner import CapabilityBanner
 
 # ---------------------------------------------------------------------------
 # State A: Disconnected

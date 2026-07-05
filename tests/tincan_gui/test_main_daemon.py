@@ -466,7 +466,8 @@ class TestDBusWiring:
         assert window._banner_b.isVisible()
 
     def test_capability_changed_ancs_false_does_not_show_banner_c(self, qtbot):
-        """CapabilityChanged alone cannot show StateCBanner; ANCSStatusChanged("healing") needed."""
+        """CapabilityChanged alone cannot show StateCBanner; requires
+        ANCSStatusChanged("healing")."""
         window = MainWindow()
         qtbot.addWidget(window)
         window.show()

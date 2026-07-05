@@ -14,14 +14,13 @@ Coverage:
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import dbus
 import dbus.exceptions
 import pytest
 
 from tincand.backends.bluez_map import MapBackend
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -80,7 +79,9 @@ class TestFetchRawBmsgUsesMessage1Get:
         backend._fetch_raw_bmsg(_MSG_PATH)
         assert mock_msg1.Get.called, "Message1.Get() must have been called"
         args = mock_msg1.Get.call_args
-        assert args[0][0] != "", "targetfile must be a real path (tincan-fu6xq: empty string causes UnknownObject)"
+        assert args[0][0] != "", (
+            "targetfile must be a real path (tincan-fu6xq: empty string causes UnknownObject)"
+        )
 
     def test_message1_get_called_with_attachment_false(self, _patched):
         backend, _access, mock_msg1 = _patched

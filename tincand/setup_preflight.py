@@ -52,7 +52,9 @@ def _check_wireplumber_ofono_backend() -> bool:
     operator_home = pathlib.Path(
         os.environ.get("ACTUAL_HOME", "/home/jaword")
     )
-    config_path = operator_home / ".config" / "wireplumber" / "wireplumber.conf.d" / "50-bluez-ofono.conf"
+    config_path = (
+        operator_home / ".config" / "wireplumber" / "wireplumber.conf.d" / "50-bluez-ofono.conf"
+    )
     system_config = pathlib.Path("/usr/share/wireplumber/wireplumber.conf.d/50-bluez-ofono.conf")
     if config_path.exists() or system_config.exists():
         return True
@@ -78,9 +80,9 @@ def _check_selinux_hfp_module() -> "bool | str":
     - 'permissive': SELinux is Permissive/Disabled → module not required
     """
     from tincand.hfp_capability import (  # noqa: PLC0415
+        _MODULE_NAME,
         _check_module_loaded,
         _get_enforce_mode,
-        _MODULE_NAME,
     )
     mode = _get_enforce_mode()
     if mode in ("Permissive", "Disabled", ""):

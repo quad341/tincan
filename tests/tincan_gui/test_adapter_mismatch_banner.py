@@ -86,8 +86,9 @@ class TestAdapterMismatchBanner:
         assert "#7c4f00" in banner._label.styleSheet()
 
     def test_not_dismissible_no_close_button(self, qtbot):
-        from tincan_gui.degradation_banners import AdapterMismatchBanner
         from PySide6.QtWidgets import QPushButton, QToolButton
+
+        from tincan_gui.degradation_banners import AdapterMismatchBanner
         banner = AdapterMismatchBanner()
         qtbot.addWidget(banner)
         close_btns = [

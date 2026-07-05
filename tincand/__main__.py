@@ -9,9 +9,9 @@ import re
 import signal
 import sys
 
-_ADAPTER_PATH_RE = re.compile(r"^/org/bluez/hci\d+$")
-
 from gi.repository import GLib
+
+_ADAPTER_PATH_RE = re.compile(r"^/org/bluez/hci\d+$")
 
 _log = logging.getLogger(__name__)
 

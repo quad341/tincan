@@ -12,6 +12,11 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from tincand.ancs_util import (
+    CONTROL_POINT_UUID,
+    DATA_SOURCE_UUID,
+    NOTIF_SOURCE_UUID,
+)
 from tincand.backends.ancs import ANCSBackend
 
 # ---------------------------------------------------------------------------
@@ -25,13 +30,6 @@ _DATA_SRC_PATH = f"{_DEV_PATH}/service01/char03"
 
 _DEVICE_IFACE = "org.bluez.Device1"
 _GATT_CHAR_IFACE = "org.bluez.GattCharacteristic1"
-
-from tincand.ancs_util import (
-    ANCS_SERVICE_UUID,
-    CONTROL_POINT_UUID,
-    DATA_SOURCE_UUID,
-    NOTIF_SOURCE_UUID,
-)
 
 
 def _make_managed_objects():
@@ -75,7 +73,6 @@ def ctx():
             return mock_ctrl_pt
         return MagicMock(name=f"Interface({iface}@{path})")
 
-    import dbus.service
     with (
         patch("dbus.service.Object.__init__", return_value=None),
         patch("tincand.backends.ancs.dbus.SystemBus", return_value=mock_bus),
@@ -149,7 +146,10 @@ class TestDoubleFire:
         interfaces = {_DEVICE_IFACE: {"Connected": True}}
 
         idle_queue = []
-        with patch("tincand.backends.ancs.GLib.idle_add", side_effect=lambda fn, *a: idle_queue.append((fn, a))):
+        with patch(
+            "tincand.backends.ancs.GLib.idle_add",
+            side_effect=lambda fn, *a: idle_queue.append((fn, a)),
+        ):
             backend._on_interfaces_added(_DEV_PATH, interfaces)  # queues idle_add
             backend._on_device_connected(_DEV_PATH)              # PropertiesChanged: direct call
 
@@ -158,7 +158,9 @@ class TestDoubleFire:
             fn(*args)
 
         calls = [c for c in mock_service.set_capability.call_args_list if c == call("ancs", True)]
-        assert len(calls) == 1, f"Expected 1 subscribe, got {len(calls)}: {mock_service.set_capability.call_args_list}"
+        assert len(calls) == 1, (
+            f"Expected 1 subscribe, got {len(calls)}: {mock_service.set_capability.call_args_list}"
+        )
 
     def test_double_fire_notif_src_path_set_once(self, started):
         """_notif_src_path is set after the first trigger; guard prevents reset."""
@@ -166,7 +168,10 @@ class TestDoubleFire:
         interfaces = {_DEVICE_IFACE: {"Connected": True}}
 
         idle_queue = []
-        with patch("tincand.backends.ancs.GLib.idle_add", side_effect=lambda fn, *a: idle_queue.append((fn, a))):
+        with patch(
+            "tincand.backends.ancs.GLib.idle_add",
+            side_effect=lambda fn, *a: idle_queue.append((fn, a)),
+        ):
             backend._on_device_connected(_DEV_PATH)              # first subscriber
             backend._on_interfaces_added(_DEV_PATH, interfaces)  # queues idle_add
 

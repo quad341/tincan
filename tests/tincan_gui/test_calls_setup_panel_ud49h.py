@@ -15,7 +15,7 @@ Coverage:
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 from PySide6.QtCore import Qt
@@ -186,24 +186,39 @@ class TestStepDRTL8761B:
     """Step D handles three cases: RTL adapter ok, RTL adapter fail, non-RTL N/A."""
 
     def test_rtl_autosuspend_disabled_shows_done(self, panel):
-        _settle(panel, {**_ALL_OK, "adapter_vid_pid": _RTL8761B_VID_PID, "usb_autosuspend_disabled": True})
+        _settle(
+            panel,
+            {**_ALL_OK, "adapter_vid_pid": _RTL8761B_VID_PID, "usb_autosuspend_disabled": True},
+        )
         assert panel._step_d._status_label.text() == "✓ Done"
 
     def test_rtl_autosuspend_enabled_shows_action_required(self, panel):
-        _settle(panel, {**_ALL_OK, "adapter_vid_pid": _RTL8761B_VID_PID, "usb_autosuspend_disabled": False})
+        _settle(
+            panel,
+            {**_ALL_OK, "adapter_vid_pid": _RTL8761B_VID_PID, "usb_autosuspend_disabled": False},
+        )
         assert panel._step_d._status_label.text() == "✗ Action required"
 
     def test_rtl_autosuspend_enabled_makes_detail_visible(self, panel):
-        _settle(panel, {**_ALL_OK, "adapter_vid_pid": _RTL8761B_VID_PID, "usb_autosuspend_disabled": False})
+        _settle(
+            panel,
+            {**_ALL_OK, "adapter_vid_pid": _RTL8761B_VID_PID, "usb_autosuspend_disabled": False},
+        )
         assert panel._step_d._detail.isVisible()
 
     def test_non_rtl_adapter_step_d_status_not_done_or_fail(self, panel):
-        _settle(panel, {**_ALL_OK, "adapter_vid_pid": "0000:0000", "usb_autosuspend_disabled": False})
+        _settle(
+            panel,
+            {**_ALL_OK, "adapter_vid_pid": "0000:0000", "usb_autosuspend_disabled": False},
+        )
         text = panel._step_d._status_label.text()
         assert text not in ("✓ Done", "✗ Action required")
 
     def test_non_rtl_detail_hidden(self, panel):
-        _settle(panel, {**_ALL_OK, "adapter_vid_pid": "dead:beef", "usb_autosuspend_disabled": False})
+        _settle(
+            panel,
+            {**_ALL_OK, "adapter_vid_pid": "dead:beef", "usb_autosuspend_disabled": False},
+        )
         assert not panel._step_d._detail.isVisible()
 
 

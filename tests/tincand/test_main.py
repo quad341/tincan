@@ -339,7 +339,11 @@ def _arm_watcher(backend, call_controller, monkeypatch):
         _arm_device_watcher(backend, call_controller)
 
     return next(
-        (c[0][1] for c in mock_manager.connect_to_signal.call_args_list if c[0][0] == "ModemAdded"),
+        (
+            c[0][1]
+            for c in mock_manager.connect_to_signal.call_args_list
+            if c[0][0] == "ModemAdded"
+        ),
         None,
     )
 
@@ -363,6 +367,7 @@ class TestArmDeviceWatcherSetup:
 
     def test_watcher_registers_modem_added_signal(self, monkeypatch):
         from unittest.mock import ANY
+
         import tincand.__main__ as m
         from tincand.__main__ import _arm_device_watcher
 

@@ -1,12 +1,15 @@
-"""Tests: async message loading — _on_messages_loaded, prefetch, stale-reply guard, spinner (tincan-133i9).
+"""Tests: async message loading — _on_messages_loaded, prefetch, stale-reply
+guard, spinner (tincan-133i9).
 
 Async message-loading paths added in tincan-bmstd had no test coverage.
 
 Coverage:
   §1  cache-key-isolation   — messages_loaded for conv-B seeds conv-B bucket, not conv-A
-  §2  stale-reply-guard     — conv-A reply arriving after switch to conv-B: skips render, seeds conv-A cache
+  §2  stale-reply-guard     — conv-A reply arriving after switch to conv-B:
+                              skips render, seeds conv-A cache
   §3  prefetch-no-contam    — prefetch emits for 5 convs; each bucket gets its own messages only
-  §4  spinner-transitions   — empty-cache select → set_loading(True); async reply → set_loading(False)
+  §4  spinner-transitions   — empty-cache select → set_loading(True); async
+                              reply → set_loading(False)
 """
 from __future__ import annotations
 
@@ -19,7 +22,6 @@ from tincan_gui.conversation_list import ConversationData
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
 from tincan_gui.message_cache import MessageCache
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -67,7 +69,8 @@ class TestCacheKeyIsolation:
     """_on_messages_loaded must use the emitted conv_id as the cache key, not _current_phone."""
 
     def test_messages_land_in_emitted_conv_bucket(self, qtbot, tmp_path):
-        """Emit messages_loaded for conv-B while conv-A is active; only conv-B's bucket is written."""
+        """Emit messages_loaded for conv-B while conv-A is active; only
+        conv-B's bucket is written."""
         win = MainWindow()
         win._msg_cache = MessageCache(cache_dir=tmp_path)
         qtbot.addWidget(win)
@@ -325,7 +328,8 @@ class TestSpinnerTransitions:
         )
 
     def test_cached_select_does_not_activate_spinner(self, qtbot, tmp_path):
-        """If the cache is non-empty, `_on_conversation_selected` must NOT call set_loading(True)."""
+        """If the cache is non-empty, `_on_conversation_selected` must NOT
+        call set_loading(True)."""
         win = MainWindow()
         win._msg_cache = MessageCache(cache_dir=tmp_path)
         qtbot.addWidget(win)

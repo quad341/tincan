@@ -10,8 +10,10 @@ Coverage (all 9 required acceptance cases):
   §6  SuccessPage.set_partial(ancs=False) — ⚠ Notifications unavailable row
   §7  MapConsentPage body — numbered iOS tap sequence
 
-§1–§4 and §6 are also covered by tincan-4ktha (complementary suites for builder sub-beads).
-§5 (_AdapterCard red / no-adapter) and §7 (MapConsentPage numbered sequence) are first coverage here.
+§1–§4 and §6 are also covered by tincan-4ktha (complementary suites for
+builder sub-beads).
+§5 (_AdapterCard red / no-adapter) and §7 (MapConsentPage numbered sequence)
+are first coverage here.
 
 Tests intentionally fail until builder implements the corresponding features
 (tincan-aom60.1–tincan-aom60.5 builder beads).
@@ -28,7 +30,6 @@ from PySide6.QtWidgets import QLabel
 
 from tincan_gui.pairing_wizard import MapConsentPage, PairingWizard, SuccessPage
 from tincand.pairing import FailureReason, PairingState
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -177,7 +178,9 @@ class TestAdapterCardAmber:
         from tincan_gui.pairing_wizard import _AdapterCard
         card = _AdapterCard()
         qtbot.addWidget(card)
-        card.configure("MT7925 (built-in)", le_capable=True, hfp_sco_capable=False, recommended=False)
+        card.configure(
+            "MT7925 (built-in)", le_capable=True, hfp_sco_capable=False, recommended=False
+        )
         return card
 
     def test_shows_warning_icon(self, qtbot):

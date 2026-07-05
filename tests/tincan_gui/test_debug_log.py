@@ -182,7 +182,7 @@ class TestInstall:
         assert count == 1
 
     def test_warning_after_install_appears_in_get_recent_logs(self):
-        from tincan_gui.debug_log import install, get_recent_logs
+        from tincan_gui.debug_log import get_recent_logs, install
         install()
         logging.getLogger("tincan_test").warning("test warning message")
         assert "test warning message" in get_recent_logs()
@@ -254,7 +254,7 @@ class TestGetRecentLogs:
         assert "TINCAN_DEBUG" in result or "not enabled" in result
 
     def test_returns_non_sentinel_after_install(self):
-        from tincan_gui.debug_log import install, get_recent_logs
+        from tincan_gui.debug_log import get_recent_logs, install
         install()
         result = get_recent_logs()
         assert "not enabled" not in result

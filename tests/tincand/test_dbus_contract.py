@@ -72,7 +72,8 @@ _GUI_SUBSCRIPTIONS: list[tuple[str, str, str, str]] = [
     (IFACE_MESSAGES, "MessageReceived",          "_on_message_received",        "QVariantMap"),
     (IFACE_MESSAGES, "MessageSent",             "_on_message_sent",            "QString"),
     (IFACE_MESSAGES, "ConversationUpdated",     "_on_conversation_updated",    "QVariantMap"),
-    (IFACE_MESSAGES, "ContactPhotoReceived",    "_on_contact_photo_received",  "QString,QByteArray"),
+    (IFACE_MESSAGES, "ContactPhotoReceived", "_on_contact_photo_received",
+     "QString,QByteArray"),
     # im.tincan.Calls — HFP call signals (landed via tincan-0e6na)
     (IFACE_CALLS, "IncomingCall",   "_on_call_incoming",  "QString,QString"),
     (IFACE_CALLS, "CallConnected",  "_on_call_connected", ""),

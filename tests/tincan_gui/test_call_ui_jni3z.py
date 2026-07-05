@@ -29,7 +29,6 @@ from tincan_gui.call_panel import IncomingCallDialog
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
 
-
 # ---------------------------------------------------------------------------
 # Module-level fixtures
 # ---------------------------------------------------------------------------
@@ -81,7 +80,8 @@ def window(qtbot):
 # ---------------------------------------------------------------------------
 
 class TestDisableAnswer:
-    """disable_answer(reason) disables Answer and surfaces reason via tooltip + accessible description."""
+    """disable_answer(reason) disables Answer and surfaces reason via
+    tooltip + accessible description."""
 
     @pytest.fixture()
     def dialog(self, qtbot, parent_widget):
@@ -121,7 +121,8 @@ class TestDisableAnswer:
 # ---------------------------------------------------------------------------
 
 class TestApplyCapabilitiesCallSetupReady:
-    """_apply_capabilities(caps) tracks call_setup_ready and shows/hides CallSetupRequiredBanner."""
+    """_apply_capabilities(caps) tracks call_setup_ready and shows/hides
+    CallSetupRequiredBanner."""
 
     def test_false_sets_flag_and_shows_banner(self, qtbot, window):
         """call_setup_ready=False → _call_setup_ready False + banner visible."""

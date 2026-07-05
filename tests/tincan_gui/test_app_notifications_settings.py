@@ -9,7 +9,8 @@ Coverage:
   §5 label_hint used as display name when present; app_id used as fallback
   §6 Allow button clicked → set_app_filter(app_id, 'allow') called
   §7 Per-app list opacity reflects global toggle state
-  §8 Buttons always visible (tincan-6a8t7): row widget min-width <= dialog width even with long app IDs
+  §8 Buttons always visible (tincan-6a8t7): row widget min-width <= dialog
+     width even with long app IDs
 """
 from __future__ import annotations
 
