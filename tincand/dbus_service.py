@@ -135,6 +135,19 @@ class TincanService(dbus.service.Object):
         # (tincand/bluetooth/pairing.py) — deferred to M1.1.
         self._connected = True
         self._device_address = str(device_address)
+        # Remember the address every session actually connects to, as the
+        # resolution fallback (bluetooth/last_device_address). Auto-discovery
+        # only works while the phone is already connected, so this ratchet is
+        # what makes an empty device_address survivable after a disconnect.
+        if self._device_address:
+            try:
+                from tincand.config import DaemonSettings  # noqa: PLC0415
+                s = DaemonSettings()
+                if s.value("bluetooth/last_device_address", "") != self._device_address:
+                    s.setValue("bluetooth/last_device_address", self._device_address)
+                    s.sync()
+            except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+                _log.debug("last_device_address persist failed: %s", exc)
         # tincan-bxs: reset unread_count for all conversations on connect.
         for conv in self._conversations.values():
             conv.unread_count = 0

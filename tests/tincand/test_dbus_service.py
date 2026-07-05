@@ -653,3 +653,33 @@ class TestUpdateContactMerge:
         # Newest message wins
         assert conv.last_message_preview == "second"
         assert conv.unread_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Connect persists last_device_address (the anti-INI-wipe ratchet)
+# ---------------------------------------------------------------------------
+
+class TestConnectPersistsLastDevice:
+    def test_connect_writes_last_device_address(self, service):
+        mock_ds = MagicMock()
+        mock_ds.return_value.value.return_value = ""
+        with patch("tincand.config.DaemonSettings", mock_ds):
+            service.Connect("D0:6B:78:33:46:20")
+        mock_ds.return_value.setValue.assert_called_once_with(
+            "bluetooth/last_device_address", "D0:6B:78:33:46:20"
+        )
+        mock_ds.return_value.sync.assert_called_once()
+
+    def test_connect_skips_write_when_unchanged(self, service):
+        mock_ds = MagicMock()
+        mock_ds.return_value.value.return_value = "D0:6B:78:33:46:20"
+        with patch("tincand.config.DaemonSettings", mock_ds):
+            service.Connect("D0:6B:78:33:46:20")
+        mock_ds.return_value.setValue.assert_not_called()
+
+    def test_connect_survives_persistence_failure(self, service):
+        mock_ds = MagicMock()
+        mock_ds.return_value.value.side_effect = OSError("disk full")
+        with patch("tincand.config.DaemonSettings", mock_ds):
+            service.Connect("D0:6B:78:33:46:20")  # must not raise
+        assert service._connected is True
