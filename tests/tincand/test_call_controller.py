@@ -1386,7 +1386,7 @@ class TestScheduleRetrySteadyStateRearm:
         assert len(exhausted_logs) == 1
 
     def test_timeout_add_delay_is_30s_after_exhaustion(self):
-        from tincand.call_controller import _RETRY_STEPS, _RETRY_STEADY_STATE_S
+        from tincand.call_controller import _RETRY_STEADY_STATE_S, _RETRY_STEPS
         ctrl, _ = _make_absent_phone_controller()
         with patch("tincand.call_controller.GLib") as mock_glib:
             mock_glib.timeout_add.return_value = 42
@@ -1398,7 +1398,7 @@ class TestScheduleRetrySteadyStateRearm:
     def test_timeout_add_keeps_rearming_indefinitely_past_exhaustion(self):
         """Retry never permanently stops: many ticks past exhaustion, still
         re-arms at 30s every time (no dropped/omitted timeout_add call)."""
-        from tincand.call_controller import _RETRY_STEPS, _RETRY_STEADY_STATE_S
+        from tincand.call_controller import _RETRY_STEADY_STATE_S, _RETRY_STEPS
         ctrl, _ = _make_absent_phone_controller()
         with patch("tincand.call_controller.GLib") as mock_glib:
             mock_glib.timeout_add.return_value = 42
