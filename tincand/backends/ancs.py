@@ -491,7 +491,7 @@ class ANCSBackend(BackendInterface):
             try:
                 device_iface.Pair()
             except dbus.exceptions.DBusException as exc:
-                err = getattr(exc, "get_dbus_name", lambda: str(exc))()
+                err = exc.get_dbus_name() if hasattr(exc, "get_dbus_name") else str(exc)
                 if err == "org.bluez.Error.AlreadyExists":
                     # Device has a Classic bond but no LE bond yet — proceed to GATT discovery.
                     # If no LE ACL is live, StartNotify will return OK but Notifying stays False;

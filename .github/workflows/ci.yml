@@ -26,7 +26,6 @@ jobs:
           .venv/bin/pip install -r requirements.txt pytest pytest-qt ruff
 
       - name: Lint (ruff)
-        continue-on-error: true
         run: .venv/bin/ruff check tincand tincan_gui tests
 
       - name: Test (pytest, headless — conftest forces offscreen Qt)

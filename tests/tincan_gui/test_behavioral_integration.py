@@ -19,7 +19,8 @@ Coverage (acceptance criteria from tincan-iplg1, tincan-tqsre):
   §9  long-unbroken-wrap     — 200-char unbroken body wraps instead of clipping
   §10 cache-immediate-select — cache shown instantly on conversation select (tincan-tqsre)
   §11 cache-key-mismatch     — conv_id-written messages found via current_phone read (tincan-tqsre)
-  §12 outbound-body-upgrade  — full cached body shown when daemon MAP echo is truncated (tincan-ubsu5)
+  §12 outbound-body-upgrade  — full cached body shown when daemon MAP echo
+                               is truncated (tincan-ubsu5)
   §13 async-message-load    — render, stale guard, cache key from conv_id (tincan-bmstd)
 """
 from __future__ import annotations

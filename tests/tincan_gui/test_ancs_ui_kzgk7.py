@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPushButton, QSystemTrayIcon
+from PySide6.QtWidgets import QSystemTrayIcon
 
 from tincan_gui.ancs_status_dot import ANCSStatusDot
 from tincan_gui.degradation_banners import ANCSRepairBanner

@@ -31,9 +31,9 @@ Run with: python -m pytest tests/tincand/test_adapter_check.py -v
 """
 from __future__ import annotations
 
-import dbus
-import pytest
 from unittest.mock import MagicMock
+
+import dbus
 
 import tincand.adapter_check as adapter_check_mod
 from tincand.adapter_check import (
@@ -241,4 +241,5 @@ class TestDetectAdapterHfpScoCapability:
         assert detect_adapter_hfp_sco_capability("") is None
 
     def test_non_usb_modalias_returns_none(self):
-        assert detect_adapter_hfp_sco_capability("pci:v00001234d00005678sv00000000sd00000000bc0Csc03i30") is None
+        modalias = "pci:v00001234d00005678sv00000000sd00000000bc0Csc03i30"
+        assert detect_adapter_hfp_sco_capability(modalias) is None

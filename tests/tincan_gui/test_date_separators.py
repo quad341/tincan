@@ -27,14 +27,13 @@ import datetime
 from unittest.mock import patch
 
 import pytest
-from PySide6.QtWidgets import QLabel, QSystemTrayIcon
+from PySide6.QtWidgets import QSystemTrayIcon
 
 from tincan_gui.thread_view import (
     BubbleType,
     MessageData,
     ThreadView,
     _date_label_text,
-    _get_today,
 )
 
 _TODAY = datetime.date(2026, 6, 5)

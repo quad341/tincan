@@ -59,7 +59,9 @@ def _check_module_loaded(module_name: str = _MODULE_NAME) -> bool | None:
                 continue
             for priority_dir in mods_root.iterdir():
                 if (priority_dir / module_name).is_dir():
-                    _log.debug("Found %s in SELinux store: %s", module_name, priority_dir / module_name)
+                    _log.debug(
+                        "Found %s in SELinux store: %s", module_name, priority_dir / module_name
+                    )
                     return True
 
     # Fallback 2: marker file copied by install.sh into the standard packages dir.

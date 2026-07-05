@@ -544,7 +544,7 @@ class ConversationListWidget(QWidget):
         if not self.parent():
             self.show()
 
-    def set_compose_new_enabled(self, enabled: bool, reason: str = "") -> None:
+    def set_compose_new_enabled(self, enabled: bool, tooltip: str = "") -> None:
         """Enable or disable starting a new conversation from the sidebar."""
         self._compose_btn.setEnabled(enabled)
         if enabled:
@@ -552,8 +552,11 @@ class ConversationListWidget(QWidget):
             self._compose_btn.setAccessibleName("New conversation")
             return
 
-        self._compose_btn.setToolTip(reason or "Connect a device to start a new conversation")
-        self._compose_btn.setAccessibleName("New conversation — connect a device first")
+        self._compose_btn.setToolTip(
+            tooltip or "Connect to your iPhone to start a new conversation"
+        )
+        if tooltip:
+            self._compose_btn.setAccessibleName(tooltip)
 
     def _on_filter_changed(self, text: str) -> None:
         query = text.strip().lower()
@@ -690,15 +693,6 @@ class ConversationListWidget(QWidget):
         """Disable/re-enable the refresh button and show ↻/⌛ text."""
         self._refresh_btn.setEnabled(not loading)
         self._refresh_btn.setText("⌛" if loading else "↻")
-
-    def set_compose_new_enabled(self, enabled: bool, tooltip: str = "") -> None:
-        self._compose_btn.setEnabled(enabled)
-        if enabled:
-            self._compose_btn.setToolTip("New conversation")
-        else:
-            self._compose_btn.setToolTip(
-                tooltip or "Connect to your iPhone to start a new conversation"
-            )
 
     def set_conversation_photo(self, conv_id: str, photo: bytes) -> None:
         """Route a contact photo to the matching ConversationItem."""

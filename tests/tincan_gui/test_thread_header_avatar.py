@@ -35,7 +35,6 @@ from tincan_gui.avatar import AvatarWidget
 from tincan_gui.main import MainWindow
 from tincan_gui.thread_view import ThreadHeader
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

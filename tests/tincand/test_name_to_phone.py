@@ -4,7 +4,8 @@ Bead: tincan-jnls  (commit 43a2c6a)
 Coverage:
   §1 _emit_messages _name_to_phone (bluez_map.py)
      - phone-keyed group populates _name_to_phone[display_name.lower()]
-     - subsequent _emit_messages batch with only name-keyed msgs uses _name_to_phone for send_target
+     - subsequent _emit_messages batch with only name-keyed msgs uses
+       _name_to_phone for send_target
      - _name_to_phone cleared in connect()
      - name-keyed group with no phone-keyed counterpart and empty _name_to_phone -> send_target=''
 
@@ -21,9 +22,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
 
+from tincan_gui.conversation_list import ConversationData
 from tincan_gui.dbus_client import TincandClient
 from tincan_gui.main import MainWindow
-from tincan_gui.conversation_list import ConversationData
 from tincand.backends.bluez_map import MapBackend
 
 

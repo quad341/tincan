@@ -20,10 +20,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPushButton, QDialog
+from PySide6.QtWidgets import QDialog, QPushButton
 
 from tincan_gui.calls_setup_panel import CallsSetupPanel
-
 
 _RTL8761B_VID_PID = "0b05:1bf6"
 

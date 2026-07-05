@@ -24,11 +24,9 @@ from unittest.mock import MagicMock, patch
 
 import dbus
 import dbus.service
-import pytest
 
-from tincand.contact_store import ContactStore, normalize_phone
+from tincand.contact_store import normalize_phone
 from tincand.dbus_service import Conversation, TincanService
-
 
 # ---------------------------------------------------------------------------
 # Helpers

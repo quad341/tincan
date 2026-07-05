@@ -45,6 +45,14 @@ from __future__ import annotations
 import struct
 
 import pytest
+
+from tests.tincand.fixtures.ancs_util_fixtures import (
+    GET_ATTRS_TITLE_AND_MESSAGE_LE,
+    GET_ATTRS_TITLE_ONLY_LE,
+    NOTIF_UTIL_INCOMING,
+    NOTIF_UTIL_MODIFIED,
+    NOTIF_UTIL_SOCIAL,
+)
 from tincand.ancs_util import (
     ATTR_APP_ID,
     ATTR_MESSAGE,
@@ -54,14 +62,6 @@ from tincand.ancs_util import (
     build_get_attrs_cmd,
     parse_data_source,
     parse_notification_source,
-)
-
-from tests.tincand.fixtures.ancs_util_fixtures import (
-    GET_ATTRS_TITLE_AND_MESSAGE_LE,
-    GET_ATTRS_TITLE_ONLY_LE,
-    NOTIF_UTIL_INCOMING,
-    NOTIF_UTIL_MODIFIED,
-    NOTIF_UTIL_SOCIAL,
 )
 
 # ---------------------------------------------------------------------------
