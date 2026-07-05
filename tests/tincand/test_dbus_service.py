@@ -13,6 +13,12 @@ Coverage:
   - on_message_received: unknown conv_id → no ConversationUpdated emitted.
   - Conversation.to_dbus() always includes last_message_preview='' and unread_count=0 as defaults.
   - MarkConversationRead: resets unread_count and emits ConversationUpdated (tincan-fdvu).
+  - _bt_connect_device: matches BlueZ managed objects by Address, dispatches
+    Device1.Connect() async (reply_handler/error_handler present), swallows
+    no-match and all bus failures (tincan-c7b8g).
+  - Connect(): drives _bt_connect_device with the given device_address; its
+    "always succeeds unless AlreadyConnected" contract is unchanged even when
+    the BT-connect step fails/no-ops (tincan-c7b8g).
 
 No D-Bus infrastructure needed — TincanService is instantiated with a mocked bus.
 """
@@ -24,7 +30,7 @@ import dbus
 import dbus.service
 import pytest
 
-from tincand.dbus_service import Conversation, TincanService
+from tincand.dbus_service import Conversation, TincanService, _bt_connect_device
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -683,3 +689,153 @@ class TestConnectPersistsLastDevice:
         with patch("tincand.config.DaemonSettings", mock_ds):
             service.Connect("D0:6B:78:33:46:20")  # must not raise
         assert service._connected is True
+
+
+# ---------------------------------------------------------------------------
+# §BtConnectDevice — org.bluez Device1.Connect() dispatch (tincan-c7b8g)
+#
+# _bt_connect_device() brings up the BT ACL link. It matches the device by
+# Address in BlueZ's GetManagedObjects(), then fires Device1.Connect() ASYNC
+# (reply_handler/error_handler) — a synchronous call was found live to block
+# the daemon's single GLib main loop for the whole connection attempt (it is
+# called internally by every backend's own connect(), not just external D-Bus
+# callers). Every failure (no match, bus errors) is swallowed; it never raises.
+# ---------------------------------------------------------------------------
+
+_DEVICE_ADDR = "D0:6B:78:33:46:20"
+_DEVICE_PATH = "/org/bluez/hci0/dev_D0_6B_78_33_46_20"
+
+
+class TestBtConnectDeviceMatchFound:
+    """Matching Address in GetManagedObjects() → async Device1.Connect() dispatch."""
+
+    def test_connect_called_on_matching_device(self):
+        mock_bus = MagicMock()
+        mock_obj_mgr = MagicMock()
+        mock_obj_mgr.GetManagedObjects.return_value = {
+            _DEVICE_PATH: {"org.bluez.Device1": {"Address": _DEVICE_ADDR}},
+        }
+        mock_device = MagicMock()
+        with patch("dbus.Interface", side_effect=[mock_obj_mgr, mock_device]):
+            _bt_connect_device(_DEVICE_ADDR, bus=mock_bus)
+        mock_device.Connect.assert_called_once()
+
+    def test_connect_dispatched_with_reply_and_error_handlers(self):
+        """Proves non-blocking async dispatch, not a bare sync call — a sync
+        Device1.Connect() was found live to stall the daemon's single main
+        loop for the whole connection attempt (tincan-c7b8g)."""
+        mock_bus = MagicMock()
+        mock_obj_mgr = MagicMock()
+        mock_obj_mgr.GetManagedObjects.return_value = {
+            _DEVICE_PATH: {"org.bluez.Device1": {"Address": _DEVICE_ADDR}},
+        }
+        mock_device = MagicMock()
+        with patch("dbus.Interface", side_effect=[mock_obj_mgr, mock_device]):
+            _bt_connect_device(_DEVICE_ADDR, bus=mock_bus)
+        _, kwargs = mock_device.Connect.call_args
+        assert callable(kwargs.get("reply_handler"))
+        assert callable(kwargs.get("error_handler"))
+
+    def test_non_matching_devices_are_skipped(self):
+        """Only the Address-matching device is connected, even with others present."""
+        mock_bus = MagicMock()
+        mock_obj_mgr = MagicMock()
+        mock_obj_mgr.GetManagedObjects.return_value = {
+            "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF": {
+                "org.bluez.Device1": {"Address": "AA:BB:CC:DD:EE:FF"},
+            },
+            _DEVICE_PATH: {"org.bluez.Device1": {"Address": _DEVICE_ADDR}},
+        }
+        mock_device = MagicMock()
+        with patch("dbus.Interface", side_effect=[mock_obj_mgr, mock_device]):
+            _bt_connect_device(_DEVICE_ADDR, bus=mock_bus)
+        mock_device.Connect.assert_called_once()
+
+
+class TestBtConnectDeviceNoMatch:
+    """No Address match in GetManagedObjects() → Connect() not called, no exception."""
+
+    def test_no_connect_called_when_no_matching_device(self):
+        mock_bus = MagicMock()
+        mock_iface = MagicMock()
+        mock_iface.GetManagedObjects.return_value = {
+            "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF": {
+                "org.bluez.Device1": {"Address": "AA:BB:CC:DD:EE:FF"},
+            },
+        }
+        with patch("dbus.Interface", return_value=mock_iface):
+            _bt_connect_device(_DEVICE_ADDR, bus=mock_bus)  # must not raise
+        mock_iface.Connect.assert_not_called()
+
+    def test_no_exception_when_managed_objects_empty(self):
+        mock_bus = MagicMock()
+        mock_iface = MagicMock()
+        mock_iface.GetManagedObjects.return_value = {}
+        with patch("dbus.Interface", return_value=mock_iface):
+            _bt_connect_device(_DEVICE_ADDR, bus=mock_bus)  # must not raise
+
+
+class TestBtConnectDeviceFailuresSwallowed:
+    """Any BlueZ/D-Bus failure is fully swallowed — _bt_connect_device never raises."""
+
+    def test_get_managed_objects_raising_is_swallowed(self):
+        mock_bus = MagicMock()
+        mock_iface = MagicMock()
+        mock_iface.GetManagedObjects.side_effect = Exception("dbus timeout")
+        with patch("dbus.Interface", return_value=mock_iface):
+            _bt_connect_device(_DEVICE_ADDR, bus=mock_bus)  # must not raise
+
+    def test_bus_construction_raising_is_swallowed_when_bus_not_injected(self):
+        """With bus=None (the Connect() call-site default), a SystemBus()
+        failure (e.g. no D-Bus available) is swallowed too."""
+        with patch("dbus.SystemBus", side_effect=Exception("no system bus")):
+            _bt_connect_device(_DEVICE_ADDR)  # must not raise
+
+    def test_device_connect_raising_synchronously_is_swallowed(self):
+        """Even if Connect() itself raises synchronously (e.g. bad proxy), the
+        caller (TincanService.Connect) must never see it."""
+        mock_bus = MagicMock()
+        mock_obj_mgr = MagicMock()
+        mock_obj_mgr.GetManagedObjects.return_value = {
+            _DEVICE_PATH: {"org.bluez.Device1": {"Address": _DEVICE_ADDR}},
+        }
+        mock_device = MagicMock()
+        mock_device.Connect.side_effect = Exception("org.bluez.Error.Failed")
+        with patch("dbus.Interface", side_effect=[mock_obj_mgr, mock_device]):
+            _bt_connect_device(_DEVICE_ADDR, bus=mock_bus)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# §ConnectDrivesBtConnectDevice — Connect() brings up the BT ACL link (tincan-c7b8g)
+# ---------------------------------------------------------------------------
+
+class TestConnectDrivesBtConnectDevice:
+    """Connect() calls _bt_connect_device(device_address) before marking connected;
+    its "always succeeds unless AlreadyConnected" contract is unchanged even when
+    the BT-connect step fails/no-ops (tincan-c7b8g)."""
+
+    def test_connect_calls_bt_connect_device_with_device_address(self, service):
+        with patch("tincand.dbus_service._bt_connect_device") as mock_bt_connect:
+            service.Connect(_DEVICE_ADDR)
+        mock_bt_connect.assert_called_once_with(_DEVICE_ADDR)
+
+    def test_bt_connect_device_not_called_when_already_connected(self, service):
+        """The AlreadyConnected guard fires before the new BT-connect step runs."""
+        import dbus.exceptions
+        service._connected = True
+        with patch("tincand.dbus_service._bt_connect_device") as mock_bt_connect:
+            with pytest.raises(dbus.exceptions.DBusException):
+                service.Connect(_DEVICE_ADDR)
+        mock_bt_connect.assert_not_called()
+
+    def test_connect_succeeds_when_bt_connect_device_bus_unavailable(self, service):
+        """Real (unmocked) _bt_connect_device swallows a SystemBus() failure —
+        Connect() must still complete and mark the daemon connected."""
+        with patch("dbus.SystemBus", side_effect=Exception("no system bus")):
+            service.Connect(_DEVICE_ADDR)  # must not raise
+        assert service._connected is True
+
+    def test_connect_emits_connected_signal_when_bt_connect_device_fails(self, service):
+        with patch("dbus.SystemBus", side_effect=Exception("no system bus")):
+            service.Connect(_DEVICE_ADDR)
+        service.Connected.assert_called_once_with(_DEVICE_ADDR)
