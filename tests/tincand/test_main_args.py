@@ -73,7 +73,8 @@ def _neutralise_main(monkeypatch):
     monkeypatch.setattr(m, "_resolve_adapter_path", lambda args: ("/org/bluez/hci1", ""))
     monkeypatch.setattr(m, "_resolve_device_address", lambda args: ("", False))
     monkeypatch.setattr(m.GLib, "MainLoop", lambda: MagicMock(run=lambda: None))
-    monkeypatch.setattr("signal.signal", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_block_shutdown_signals", lambda: None)
+    monkeypatch.setattr(m, "_start_signal_waiter", lambda loop: None)
 
 
 class TestMainWithAncsWarning:

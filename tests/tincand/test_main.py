@@ -291,7 +291,8 @@ class TestMainDbusMainloopOrdering:
         monkeypatch.setattr("tincand.call_controller.CallController", MagicMock())
         monkeypatch.setattr(m, "_select_backend", lambda *a, **k: MagicMock())
         monkeypatch.setattr(m.GLib, "MainLoop", lambda: MagicMock(run=lambda: None))
-        monkeypatch.setattr("signal.signal", lambda *a, **k: None)
+        monkeypatch.setattr(m, "_block_shutdown_signals", lambda: None)
+        monkeypatch.setattr(m, "_start_signal_waiter", lambda loop: None)
         monkeypatch.setattr(
             sys, "argv", ["tincand", "--backend", "mock", "--device", "AA:BB:CC:DD:EE:FF"],
         )
