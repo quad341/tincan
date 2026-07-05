@@ -26,8 +26,6 @@ import signal
 import types
 from unittest.mock import Mock
 
-import pytest
-
 from tincand import __main__ as main
 
 _TRUNCATION_MARKER = "…(truncated)"
@@ -98,11 +96,11 @@ class TestProcPpid:
         assert main._proc_ppid(_unused_pid()) is None
 
     def test_status_without_ppid_line_returns_none(self, monkeypatch):
-        monkeypatch.setattr(pathlib.Path, "read_text", lambda self: "Name:\tfoo\n")
+        monkeypatch.setattr(pathlib.Path, "read_text", lambda self, **kw: "Name:\tfoo\n")
         assert main._proc_ppid(12345) is None
 
     def test_malformed_ppid_value_returns_none(self, monkeypatch):
-        monkeypatch.setattr(pathlib.Path, "read_text", lambda self: "PPid:\tnotanumber\n")
+        monkeypatch.setattr(pathlib.Path, "read_text", lambda self, **kw: "PPid:\tnotanumber\n")
         assert main._proc_ppid(12345) is None
 
 
@@ -195,18 +193,6 @@ class TestSignalWaiter:
 
         loop.quit.assert_called_once()
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Acceptance criteria for tincan-97mlk.6.1 says quit 'must not depend on "
-            "the WARNING log succeeding'; current _signal_waiter calls loop.quit() "
-            "unconditionally AFTER _log.warning(...) with no try/except, so an "
-            "exception there skips quit() and shutdown hangs -- the exact failure "
-            "class tincan-97mlk.6 exists to prevent. Confirm intent with reviewer "
-            "(tincan-97mlk.6.2); fix by wrapping the warning call or moving "
-            "loop.quit() into a finally, then remove this xfail."
-        ),
-    )
     def test_quit_still_called_if_warning_log_raises(self, monkeypatch):
         siginfo = _fake_siginfo()
         monkeypatch.setattr(main.signal, "sigwaitinfo", lambda sigs: siginfo)

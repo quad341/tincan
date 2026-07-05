@@ -384,7 +384,7 @@ def _proc_cmdline(pid: int, max_len: int = 200) -> str:
 
 def _proc_ppid(pid: int) -> int | None:
     try:
-        status = pathlib.Path(f"/proc/{pid}/status").read_text()
+        status = pathlib.Path(f"/proc/{pid}/status").read_text(errors="replace")
     except OSError:
         return None
     for line in status.splitlines():
@@ -435,18 +435,25 @@ def _signal_waiter(loop: GLib.MainLoop) -> None:
     on a blocked signal surfaces si_pid/si_uid — that's what lets us attribute
     external SIGTERMs (tincan-97mlk.6) instead of only knowing one arrived.
     GLib's loop.quit() is documented thread-safe, so calling it here is fine.
+
+    Attribution is best-effort logging, not the reason we're shutting down —
+    loop.quit() runs in a finally so it fires even if the attribution/logging
+    path itself raises, otherwise the daemon hangs on shutdown instead of
+    exiting (tincan-97mlk.6).
     """
     siginfo = signal.sigwaitinfo(_SHUTDOWN_SIGNALS)
     signame = signal.Signals(siginfo.si_signo).name
     _log.info("%s received — shutting down", signame)
-    _log.warning(
-        "%s sent by pid=%d uid=%d chain=%s",
-        signame,
-        siginfo.si_pid,
-        siginfo.si_uid,
-        _describe_signal_sender(siginfo.si_pid),
-    )
-    loop.quit()
+    try:
+        _log.warning(
+            "%s sent by pid=%d uid=%d chain=%s",
+            signame,
+            siginfo.si_pid,
+            siginfo.si_uid,
+            _describe_signal_sender(siginfo.si_pid),
+        )
+    finally:
+        loop.quit()
 
 
 def _start_signal_waiter(loop: GLib.MainLoop) -> threading.Thread:
