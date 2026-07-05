@@ -31,6 +31,13 @@ Coverage:
      - store has matching module dir → True (semodule -l unavailable)
      - store populated but module dir absent, no .pp marker → None
 
+  §7 call_link_ready — per-connection HFP link state (tincan-c7b8g)
+     - key always present in GetStatus() capabilities, defaults False
+     - accepted by set_capability, emits CapabilityChanged
+     - Disconnect() RESETS it to False — opposite of call_setup_ready, which
+       persists (call_setup_ready is SELinux-module presence; call_link_ready
+       is a live VoiceCallManager bind, which cannot survive a disconnect)
+
 All subprocess calls (getenforce, semodule) are mocked — no root required.
 """
 from __future__ import annotations
@@ -286,3 +293,84 @@ class TestCheckModuleLoadedSelinuxStore:
         self._redirect_selinux_paths(monkeypatch, store, marker_root)
 
         assert hfp_mod._check_module_loaded() is None
+
+
+# ---------------------------------------------------------------------------
+# §7 call_link_ready — per-connection HFP link state (tincan-c7b8g)
+#
+# call_link_ready mirrors call_setup_ready's shape (key always present,
+# defaults False, accepted by set_capability) but is the OPPOSITE on
+# Disconnect(): it RESETS to False (per-connection: does CallController have
+# a live VoiceCallManager bind right now?) rather than persisting like
+# call_setup_ready (system-level SELinux module presence, not BT state —
+# see tincan-r41sx).
+# ---------------------------------------------------------------------------
+
+class TestGetStatusCallLinkReady:
+    """GetStatus() capabilities dict always includes call_link_ready, defaulting False."""
+
+    def test_call_link_ready_key_present_in_capabilities(self, service):
+        caps = service.GetStatus()["capabilities"]
+        assert "call_link_ready" in caps
+
+    def test_call_link_ready_defaults_false(self, service):
+        caps = service.GetStatus()["capabilities"]
+        assert bool(caps["call_link_ready"]) is False
+
+    def test_call_link_ready_true_after_set_capability(self, service):
+        service.set_capability("call_link_ready", True)
+        caps = service.GetStatus()["capabilities"]
+        assert bool(caps["call_link_ready"]) is True
+
+
+class TestDisconnectResetsCallLinkReady:
+    """Disconnect() RESETS call_link_ready to False — opposite of call_setup_ready,
+    which persists (tincan-c7b8g). A live VCM bind cannot survive a disconnect.
+
+    Disconnect() early-returns as a no-op when self._connected is False (the
+    `service` fixture starts disconnected) — every test here must set
+    service._connected = True first or the reset body never runs, and the
+    assertion below would hold vacuously instead of exercising the reset.
+    """
+
+    def test_call_link_ready_true_reset_false_on_disconnect(self, service):
+        service._connected = True
+        service.set_capability("call_link_ready", True)
+        service.Disconnect()
+        assert service._capabilities["call_link_ready"] is False
+
+    def test_call_link_ready_stays_false_on_disconnect(self, service):
+        service._connected = True
+        assert service._capabilities["call_link_ready"] is False
+        service.Disconnect()
+        assert service._capabilities["call_link_ready"] is False
+
+    def test_call_link_ready_resets_while_call_setup_ready_persists(self, service):
+        """Direct contrast in one test: both set True, only call_setup_ready survives."""
+        service._connected = True
+        service.set_capability("call_setup_ready", True)
+        service.set_capability("call_link_ready", True)
+        service.Disconnect()
+        assert service._capabilities["call_setup_ready"] is True
+        assert service._capabilities["call_link_ready"] is False
+
+
+class TestSetCapabilityCallLinkReady:
+    """set_capability accepts call_link_ready and emits CapabilityChanged."""
+
+    def test_set_true_updates_capabilities_dict(self, service):
+        service.set_capability("call_link_ready", True)
+        assert service._capabilities["call_link_ready"] is True
+
+    def test_set_true_emits_capability_changed(self, service):
+        service.set_capability("call_link_ready", True)
+        service.CapabilityChanged.assert_called_once_with("call_link_ready", True)
+
+    def test_set_false_updates_capabilities_dict(self, service):
+        service._capabilities["call_link_ready"] = True
+        service.set_capability("call_link_ready", False)
+        assert service._capabilities["call_link_ready"] is False
+
+    def test_set_false_emits_capability_changed(self, service):
+        service.set_capability("call_link_ready", False)
+        service.CapabilityChanged.assert_called_once_with("call_link_ready", False)
