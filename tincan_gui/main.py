@@ -668,6 +668,7 @@ class MainWindow(QMainWindow):
         # HFP call state (tincan-fx79v.2)
         self._call_caller_name: str = ""
         self._call_setup_ready: bool = True
+        self._call_link_ready: bool = False
         self._incall_dialog: IncomingCallDialog | None = None
         self._incall_panel: InCallPanel | None = None
         self._audio_err_panel: AudioErrorPanel | None = None
@@ -927,25 +928,37 @@ class MainWindow(QMainWindow):
             btn.setAccessibleName(f"Send unavailable — {reason}")
 
     def _sync_call_state(self) -> None:
-        """Gate dial/call buttons on call_setup_ready and conversation context."""
+        """Gate dial/call buttons on call_setup_ready, call_link_ready, conversation context."""
         if not hasattr(self, "_title_bar"):
             return
         dial_btn = self._title_bar.dial_button
         _setup_tooltip = (
             "Call setup incomplete — load the tincan HFP SELinux module to enable calls."
         )
-        if self._call_setup_ready:
-            dial_btn.setEnabled(True)
-            dial_btn.setStyleSheet(
-                "background: #0d9488; color: #ffffff; border-radius: 4px; padding: 2px 10px;"
-            )
-            dial_btn.setToolTip("")
-        else:
+        _link_tooltip = (
+            "Call link not ready — make sure your iPhone is nearby with Bluetooth on."
+        )
+        if not self._call_setup_ready:
             dial_btn.setEnabled(False)
             dial_btn.setStyleSheet(
                 "background: #3f3f46; color: #52525b; border-radius: 4px; padding: 2px 10px;"
             )
             dial_btn.setToolTip(_setup_tooltip)
+            dial_btn.setAccessibleDescription(_setup_tooltip)
+        elif not self._call_link_ready:
+            dial_btn.setEnabled(False)
+            dial_btn.setStyleSheet(
+                "background: #3f3f46; color: #52525b; border-radius: 4px; padding: 2px 10px;"
+            )
+            dial_btn.setToolTip(_link_tooltip)
+            dial_btn.setAccessibleDescription(_link_tooltip)
+        else:
+            dial_btn.setEnabled(True)
+            dial_btn.setStyleSheet(
+                "background: #0d9488; color: #ffffff; border-radius: 4px; padding: 2px 10px;"
+            )
+            dial_btn.setToolTip("")
+            dial_btn.setAccessibleDescription("")
 
         if self._current_is_group or not self._current_phone:
             self._thread_view.set_call_button(visible=False, enabled=False)
@@ -954,6 +967,12 @@ class MainWindow(QMainWindow):
                 visible=True, enabled=False,
                 contact_name=self._current_contact_name,
                 tooltip=_setup_tooltip,
+            )
+        elif not self._call_link_ready:
+            self._thread_view.set_call_button(
+                visible=True, enabled=False,
+                contact_name=self._current_contact_name,
+                tooltip=_link_tooltip,
             )
         elif not self._current_phone_dialable:
             self._thread_view.set_call_button(
@@ -1013,6 +1032,9 @@ class MainWindow(QMainWindow):
         call_setup_ready = bool(caps.get("call_setup_ready", True))
         self._call_setup_ready = call_setup_ready
         self._banner_call_setup.setVisible(not call_setup_ready)
+        # call_link_ready: live SCO/audio link state; default False (conservative — a
+        # false positive here risks a silent dial() RuntimeError, not just a banner).
+        self._call_link_ready = bool(caps.get("call_link_ready", False))
         self._sync_call_state()
 
     def _apply_ancs_status(self, ancs_status: str) -> None:
@@ -1288,6 +1310,7 @@ class MainWindow(QMainWindow):
     def _on_daemon_disconnected(self) -> None:
         self._connected_device = ""
         self._messages_ok = False
+        self._call_link_ready = False
         self._sent_bodies.clear()
         self._self_echo_guard.clear()
         self._sent_cache.clear()
