@@ -501,6 +501,7 @@ class ThreadHeader(QWidget):
                 "background: #3f3f46; color: #52525b; border-radius: 4px; padding: 4px 10px;"
             )
         self._call_btn.setToolTip(tooltip)
+        self._call_btn.setAccessibleDescription(tooltip)
         self._call_btn.setAccessibleName(f"Call {contact_name or 'contact'}")
 
     def name_label_color(self) -> str:

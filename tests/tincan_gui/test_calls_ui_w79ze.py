@@ -97,6 +97,7 @@ class TestDialButtonCallSetupReady:
     def test_dial_button_enabled_when_call_setup_ready(self, qtbot, window):
         """call_setup_ready=True → TitleBar Dial button is enabled."""
         window._call_setup_ready = True
+        window._call_link_ready = True
 
         window._sync_call_state()
 
